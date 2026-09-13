@@ -1,3 +1,41 @@
+import { readFileSync } from 'node:fs';
+
+// Read the generation contract, not a second hand-maintained token allowlist.
+let spacingVariables;
+function getSpacingVariables() {
+  if (!spacingVariables) {
+    const { foundations } = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/desktop-bindings.json', import.meta.url), 'utf8'));
+    spacingVariables = new Set(Object.entries(foundations.css)
+      // Includes component spacing (space-input-lg), not only Tailwind's scale.
+      .filter(([, id]) => id.startsWith('semantic.foundations.space-'))
+      .map(([name]) => `--${name}`));
+  }
+  return spacingVariables;
+}
+
+function classifySpacing(value) {
+  const spacingVariables = getSpacingVariables();
+  const expression = value.slice(value.indexOf('[') + 1, -1);
+  const direct = /^var\(\s*(--[\w-]+)\s*\)$/.exec(expression);
+  if (direct && spacingVariables.has(direct[1])) {
+    return { classification: 'spacing-source-reference',
+      reason: 'References the generated spacing source; component-role suitability still needs review.' };
+  }
+  const references = [...expression.matchAll(/var\(\s*(--[\w-]+)/g)].map(match => match[1]);
+  if (references.some(name => !spacingVariables.has(name))) {
+    return { classification: 'unknown-spacing-reference',
+      reason: 'Contains a variable outside the generated spacing bindings; verify its source, fallbacks and component role. A variable name alone is not approval.' };
+  }
+  if (references.length) {
+    const mixed = /\d/.test(expression.replace(/--[\w-]+/g, ''));
+    return { classification: mixed ? 'mixed-spacing-expression' : 'spacing-expression',
+      reason: mixed ? 'Combines spacing references with literal values (including fallbacks); review each literal and the component role.'
+        : 'Derived spacing expression; verify the calculation and component role. References do not approve the whole expression.' };
+  }
+  return { classification: /^-?(?:\d*\.)?\d+(?:px|rem|em|%|vh|vw)?$/.test(expression) ? 'literal-spacing' : 'unclassified-spacing',
+    reason: 'No verified spacing source reference; use the matching standard spacing class or document the component-specific geometry.' };
+}
+
 /** Report-only layer review. Registrations live in DESIGN §5, not this module.
  * Recognise only explicit production identities; unknown membership never becomes
  * a pill recommendation. This deliberately cannot adjudicate visual evidence. */
@@ -17,7 +55,7 @@ export function classifyDesignLayer({ member, layer, radius, evidence = false })
 
 export function reportDesignLayers(file, source, changed, locate) {
   const findings = [];
-  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:p[xytrbl]?|gap[xy]?)-\[[^\]\n]+\]/g;
+  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:p[xytrblse]?|gap(?:-[xy])?)-\[[^\]\n]+\]/g;
   for (const match of source.matchAll(patterns)) {
     const pos = locate(match.index);
     if (!changed.has(pos.line)) continue;
@@ -36,10 +74,12 @@ export function reportDesignLayers(file, source, changed, locate) {
     if (/^<kbd\s/.test(tag) && /\b(?:border|bg-)/.test(tag)) { member = 'keycap'; evidence = true; }
     const radius = /^rounded-\[([^\]]+)\]$/.exec(match[0])?.[1] ?? match[0].replace(/^rounded-/, '');
     const judgement = isRadius ? classifyDesignLayer({ member, layer, radius, evidence })
-      : { classification: 'unclassified-spacing', reason: 'Spacing needs a verified component role; do not apply button padding based on a DOM tag.' };
+      : classifySpacing(match[0]);
     findings.push({ file, ...pos, rule: isRadius ? 'visible-layer-radius' : 'role-spacing',
       value: match[0], disposition: 'report', ...judgement,
-      suggestion: 'Review the visible frame, contained mark and hit/indicator layers separately against DESIGN §5 and governance §13; register missing evidence/decisions. Do not change user radius overrides.' });
+      suggestion: isRadius
+        ? 'Review the visible frame, contained mark and hit/indicator layers separately against DESIGN §5 and governance §13; register missing evidence/decisions. Do not change user radius overrides.'
+        : 'Use the existing p/px/py/gap/gap-x/gap-y scale from desktop-bindings.json foundations.spacing and the component treatment in DESIGN §4/5. Verify unknown variables, calculations and fallbacks; do not infer button padding from a DOM tag.' });
   }
   if (/components\/settings\/.*(?:Dialog|Wizard)\.tsx$/.test(file) && changed.size) {
     findings.push({ file, line: Math.min(...changed), column: 1, rule: 'form-adoption', disposition: 'report',

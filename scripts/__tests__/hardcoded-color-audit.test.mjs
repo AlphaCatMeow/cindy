@@ -128,6 +128,48 @@ test('malformed diff/config and invalid refs fail closed', () => {
   assert.throws(() => audit({baseRef:'HEAD; printf nope'}));
 });
 
+test('spacing reports distinguish real generated references, unknown variables and mixed values', () => {
+  const file = renderer + 'components/new-chat/PermissionPrompt.tsx';
+  for (const [value, classification] of [
+    ['p-[var(--space-4)]', 'spacing-source-reference'],
+    ['gap-x-[var(--space-2)]', 'spacing-source-reference'],
+    ['gap-y-[var(--space-0_5)]', 'spacing-source-reference'],
+    ['hover:ps-[var(--space-4)]', 'spacing-source-reference'],
+    ['pl-[var(--space-input-lg)]', 'spacing-source-reference'],
+    ['md:!gap-y-[13px]', 'literal-spacing'],
+    ['py-[1px]', 'literal-spacing'],
+    ['pe-[.5rem]', 'literal-spacing'],
+    ['gap-x-[var(--spacing-2)]', 'unknown-spacing-reference'],
+    ['p-[var(--space-999)]', 'unknown-spacing-reference'],
+    ['p-[var(--text-14)]', 'unknown-spacing-reference'],
+    ['p-[var(--size-input-lg)]', 'unknown-spacing-reference'],
+    ['px-[calc(var(--space-4)+1px)]', 'mixed-spacing-expression'],
+    ['p-[var(--space-4,13px)]', 'mixed-spacing-expression'],
+    ['p-[calc(var(--space-4)*2)]', 'mixed-spacing-expression'],
+    ['gap-[calc(var(--space-4)-var(--space-2))]', 'spacing-expression'],
+    ['p-[var(--space-4,var(--missing))]', 'unknown-spacing-reference'],
+    ['p-[env(safe-area-inset-top)]', 'unclassified-spacing'],
+  ]) {
+    const source = `<div className="${value}" />`;
+    const [hit] = inspect(file, source);
+    assert.equal(hit?.classification, classification, value);
+    assert.equal(hit.disposition, 'report');
+    assert.equal(hit.rule, 'role-spacing');
+    assert.equal(hit.line, 1);
+    assert.equal(source.slice(hit.column - 1, hit.column - 1 + hit.value.length), hit.value);
+    assert.match(hit.suggestion, /foundations.spacing/);
+    assert.doesNotMatch(hit.suggestion, /radius overrides/);
+  }
+  for (const value of ['p-4', 'gap-x-2', 'gap-y-2', 'gapx-[13px]', 'gapy-[13px]']) {
+    assert.deepEqual(inspect(file, `<div className="${value}" />`), [], value);
+  }
+  const source = '// gap-x-[13px]\n<div className="gap-x-[13px]" />\n<div className="p-[var(--space-4)]" />';
+  const result = inspectFile(file, source, new Set([3]), exemptions);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].line, 3);
+  assert.equal(result[0].classification, 'spacing-source-reference');
+});
+
 test('worktree includes staged, unstaged and untracked source; commit mode excludes them', t => {
   // Isolated Git fixture only. No task-branch commit/index/worktree is changed.
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-design-audit-'));
@@ -162,6 +204,9 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
     fs.mkdirSync(path.dirname(target), {recursive:true});
     fs.copyFileSync(path.join(root, 'scripts', rel), target);
   }
+  const bindings = 'packages/design-tokens/src/desktop-bindings.json';
+  fs.mkdirSync(path.dirname(path.join(temp, bindings)), {recursive:true});
+  fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
   const cli = (...args) => spawnSync(process.execPath, ['scripts/hardcoded-color-audit.mjs', ...args], {cwd:temp,encoding:'utf8'});
   const failed = cli('--base-ref',commit,'--worktree','--json');
   assert.equal(failed.status,1,failed.stderr);
@@ -181,6 +226,17 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   assert.notEqual(propagated.status,0);
   fs.writeFileSync(path.join(temp,'scripts/hardcoded-color-exemptions.json'),'{bad json');
   assert.throws(()=>audit({root:temp,baseRef:commit,worktree:true}));
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.writeFileSync(path.join(temp,'scripts/hardcoded-color-exemptions.json'),'[]');
+  fs.appendFileSync(path.join(temp,file), '\nconst spacing = "gap-x-[var(--space-4)]";\n');
+  const reported = cli('--base-ref',commit,'--worktree','--report','--json');
+  assert.equal(reported.status,0,reported.stderr);
+  const report = JSON.parse(reported.stdout);
+  assert.equal(report.findings.find(f=>f.rule==='role-spacing')?.classification,'spacing-source-reference');
+  assert.match(report.scriptHashes[bindings],/^[a-f0-9]{64}$/);
+  fs.writeFileSync(path.join(temp,bindings),'{bad json');
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.rmSync(path.join(temp,bindings));
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
 });
 
