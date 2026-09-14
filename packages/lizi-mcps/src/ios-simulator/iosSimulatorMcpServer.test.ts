@@ -122,6 +122,8 @@ describe("createIOSSimulatorMcpServer", () => {
     ]);
     expect(payload.workflow).toContain("embedded viewer workflow");
     expect(payload.workflow).toContain("create_instance or attach_device");
+    expect(payload.workflow).toContain('ghost_manual({ ghost_id: "ios-simulator", path: "ios-simulator" })');
+    expect(payload.workflow).toContain("Host visibility gates");
     expect(
       payload.tools.find(
         (tool: { name: string; description: string }) =>

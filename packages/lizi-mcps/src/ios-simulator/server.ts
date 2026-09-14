@@ -70,7 +70,7 @@ export function createIOSSimulatorMcpServer(
               tools: registry.list(availability?.tools),
               ...(availability ? { availability } : {}),
               workflow:
-                "Use this embedded viewer workflow: check_environment, then list_simulator_devices and either create_instance or attach_device, then start_instance. Build, install, and launch the app through this server. Route mutations with instanceId, generation, and leaseId.",
+                'Before a multi-tool simulator workflow, read the plugin Manual as needed with ghost_manual({ ghost_id: "ios-simulator", path: "ios-simulator" }). Installation, enablement, account and workdir access remain subject to Host visibility gates. Use this embedded viewer workflow: check_environment, then list_simulator_devices and either create_instance or attach_device, then start_instance. Build, install, and launch the app through this server. Route mutations with instanceId, generation, and leaseId.',
             }),
           },
         ],
