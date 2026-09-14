@@ -113,3 +113,12 @@ Codex 对 `cde72543e` 的复审指出两点，均已复现并修复（commit `18
 回归测试补 `{}` 叶目标、隔离仓有效来源分类与两次调用之间损坏绑定抛错断言；隔离 fixture 的绑定与 DTCG 拷贝提前到首个 `audit({root})` 之前。脚本再次变化，按流程在 `18873ea31` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍逐组一致，baseline 与 `hardcoded-color-audit.mjs`（`9f516ab…`）、`design-layer-report.mjs`（`1939615…`）哈希更新，样本数值未变。
 
 派发时 Windows unit tests 聚合在 `cde72543e` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、`hardcoded-color-audit.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复五轮：显式识别 var() fallback
+
+Codex 对 `2f7721421` 的复审指出：已登记变量带不含数字的合法 fallback（如 `p-[var(--space-4,initial)]`）时，`/\d/` 判定不到，被归为纯 `spacing-expression`，审阅者会误以为整个表达式都来自已验证间距源。已复现（`initial`、`auto`、嵌套 `var` 三种都误分类）。修复（commit `bf95bf72a`）：mixed 判定显式识别 `var()` 的 fallback（变量名后带逗号），一律归 `mixed-spacing-expression`；无 fallback 的纯 calc 派生表达式保持 `spacing-expression`，带数字字面量的行为不变。回归测试补 `initial`、`auto`、嵌套 var 三类断言。
+
+脚本再次变化，按流程在 `bf95bf72a` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍逐组一致（分类重标都在 report 处置内，不影响计数），baseline 与 `design-layer-report.mjs`（`1546625…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `2f7721421` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
