@@ -1,11 +1,12 @@
 {
-  "baseline": "52cee87640c13155743b65cf804d119f2363d94a",
+  "baseline": "373d435a5bd5afdf5c32f523e56dc59746827199",
   "scriptHashes": {
-    "scripts/hardcoded-color-audit.mjs": "e8e30493956b407ec50ad5cdbcb632340542dda9e9a6365385a98c6ef7d7d041",
+    "scripts/hardcoded-color-audit.mjs": "836237507b06e58638b9dd46003d4d400b8db1b33dfa0f3c911299469f64fbc4",
     "scripts/shared/hardcoded-color-match.mjs": "ed31fec9c67f130fd58103b0fb6687fc1dc6dc7ea4e6a33991129281f3b9ae07",
-    "scripts/shared/design-layer-report.mjs": "3a4ba44f9efe9ffe791aa9d9ee4de0291f13bae13ae83b895ea25d2c887b085a",
+    "scripts/shared/design-layer-report.mjs": "c41d76bd21c29bb4a686a1c739cc497ba01ce8789bb09e1f82ca51714dcf4a90",
     "scripts/hardcoded-color-exemptions.json": "5eb5e48bce427612505aebe35ce7c3e7babc8ba5190aeddfac4757691c381e5b",
-    "packages/design-tokens/src/desktop-bindings.json": "e94786bc211bdae1b6763a9507650d417b21a17b86da10b0844b593ac7b0d5a8"
+    "packages/design-tokens/src/desktop-bindings.json": "e94786bc211bdae1b6763a9507650d417b21a17b86da10b0844b593ac7b0d5a8",
+    "packages/design-tokens/src/semantic/foundations.json": "61651580afaff343003683fee9e827e416504e3656b04fa263fef35608f70a70"
   },
   "samples": [
     {

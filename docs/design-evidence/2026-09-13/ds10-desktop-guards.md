@@ -92,3 +92,12 @@ Codex 对 `f0bbebfb1` 的复审指出两点，均已处理：
 2. `ds10-replay.json` 的脚本 hash 仍绑定修复前实现（`ab6f…`/`6138…`），不满足本文「脚本或绑定有变化则重新生成结果并解释差异」的流程；上节「不覆写也不重跑」的处理确实没有兑现该流程。已在 `52cee8764` 树上重跑全部 23 组：counts、candidateHash、expectedBlock 与原记录逐组一致（两轮修复均不改变有效输入的分类输出），仅 `hardcoded-color-audit.mjs`（`e8e3049…`）与 `design-layer-report.mjs`（`3a4ba44f…`）两个脚本 hash 更新，baseline 改为 `52cee8764`，样本数值未变，回放证据现绑定最终实现。
 
 派发时 Windows unit tests 在 `f0bbebfb1` 上缺席为分片未完成的瞬态，复查时该 head 全部检查（含 Windows unit tests）已 SUCCESS。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更；`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip）。
+
+
+## 2026-09-14 审查修复三轮：绑定目标存在性与回放再生成
+
+Codex 对 `00a0e750b` 的复审指出：前缀正确但目标不存在的条目（如 `space-typo` → `semantic.foundations.space-typo`）仍能通过非空校验，docs-only 审计退出 0，且 `p-[var(--space-typo)]` 会被标成 `spacing-source-reference`。两个表现均已复现。修复（commit `373d435a5`）：逐条核对 `space-*` 绑定目标在 `packages/design-tokens/src/semantic/foundations.json` 的 `semantic.foundations` 下真实存在（`foundations.spacing` 只覆盖数字刻度、不含 `space-input-lg`，故以 DTCG 源为准），不存在即退出 2 并指名缺失项；DTCG 源缺失或损坏同样退出 2。该文件同时纳入审计 scriptHashes 输入（现 6 项），回归测试补伪造目标与 DTCG 缺失断言。
+
+脚本再次变化，按流程在 `373d435a5` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍与原记录逐组一致，baseline 与脚本哈希更新（`hardcoded-color-audit.mjs` `83623750…`、`design-layer-report.mjs` `c41d76bd…`、新增 `semantic/foundations.json` `61651580…`），样本数值未变。
+
+派发时 Windows unit tests 聚合在 `00a0e750b` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、`hardcoded-color-audit.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
