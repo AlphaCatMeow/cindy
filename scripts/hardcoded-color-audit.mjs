@@ -185,7 +185,8 @@ export function audit({ root = ROOT, baseRef = 'origin/main', headRef = 'HEAD', 
   }
   const scripts = ['scripts/hardcoded-color-audit.mjs', 'scripts/shared/hardcoded-color-match.mjs',
     'scripts/shared/design-layer-report.mjs', 'scripts/hardcoded-color-exemptions.json',
-    'packages/design-tokens/src/desktop-bindings.json'];
+    'packages/design-tokens/src/desktop-bindings.json',
+    'packages/design-tokens/src/semantic/foundations.json'];
   const scriptHashes = Object.fromEntries(scripts.map(f => [f, hash(fs.readFileSync(path.join(f === 'scripts/hardcoded-color-exemptions.json' ? root : ROOT, f)))]));
   const colors = findings.filter(f => f.rule === 'bare-color');
   return { schemaVersion: 1, base, head, candidate: worktree ? 'worktree (staged + unstaged + untracked)' : 'commit',

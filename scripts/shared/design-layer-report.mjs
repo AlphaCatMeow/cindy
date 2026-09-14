@@ -10,13 +10,23 @@ export function getSpacingVariables() {
     if (!foundations?.css || typeof foundations.css !== 'object' || Array.isArray(foundations.css)) {
       throw new Error('Invalid desktop-bindings.json; expected foundations.css as a non-array mapping');
     }
-    spacingVariables = new Set(Object.entries(foundations.css)
+    const bindings = Object.entries(foundations.css)
       // Includes component spacing (space-input-lg), not only Tailwind's scale.
-      .filter(([, id]) => id.startsWith('semantic.foundations.space-'))
-      .map(([name]) => `--${name}`));
-    if (!spacingVariables.size) {
+      .filter(([, id]) => id.startsWith('semantic.foundations.space-'));
+    if (!bindings.length) {
       throw new Error('Invalid desktop-bindings.json; foundations.css has no semantic.foundations.space-* entries');
     }
+    // The prefix alone must not invent sources: every binding target has to
+    // exist as a token in the DTCG generation source the binding is built from.
+    const dtcg = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/semantic/foundations.json', import.meta.url), 'utf8'))?.semantic?.foundations;
+    if (!dtcg || typeof dtcg !== 'object' || Array.isArray(dtcg)) {
+      throw new Error('Invalid semantic/foundations.json; expected semantic.foundations DTCG tokens');
+    }
+    const unbound = bindings.filter(([, id]) => !dtcg[id.slice('semantic.foundations.'.length)]);
+    if (unbound.length) {
+      throw new Error(`Invalid desktop-bindings.json; spacing bindings without a DTCG token: ${unbound.map(([name]) => `--${name}`).join(', ')}`);
+    }
+    spacingVariables = new Set(bindings.map(([name]) => `--${name}`));
   }
   return spacingVariables;
 }

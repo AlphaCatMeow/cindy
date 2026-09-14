@@ -205,8 +205,11 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
     fs.copyFileSync(path.join(root, 'scripts', rel), target);
   }
   const bindings = 'packages/design-tokens/src/desktop-bindings.json';
+  const dtcg = 'packages/design-tokens/src/semantic/foundations.json';
   fs.mkdirSync(path.dirname(path.join(temp, bindings)), {recursive:true});
   fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
+  fs.mkdirSync(path.dirname(path.join(temp, dtcg)), {recursive:true});
+  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
   const cli = (...args) => spawnSync(process.execPath, ['scripts/hardcoded-color-audit.mjs', ...args], {cwd:temp,encoding:'utf8'});
   const failed = cli('--base-ref',commit,'--worktree','--json');
   assert.equal(failed.status,1,failed.stderr);
@@ -239,13 +242,23 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.writeFileSync(path.join(temp,bindings),'{"foundations":{"css":{"text":"semantic.foundations.text-14"}}}');
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  // A prefix-correct but non-existent target must not invent a real source:
+  // the binding has to resolve against the DTCG generation source.
+  const poisoned = JSON.parse(fs.readFileSync(path.join(root, bindings), 'utf8'));
+  poisoned.foundations.css['space-typo'] = 'semantic.foundations.space-typo';
+  fs.writeFileSync(path.join(temp,bindings), JSON.stringify(poisoned));
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
+  fs.rmSync(path.join(temp,dtcg));
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
   fs.appendFileSync(path.join(temp,file), '\nconst spacing = "gap-x-[var(--space-4)]";\n');
   const reported = cli('--base-ref',commit,'--worktree','--report','--json');
   assert.equal(reported.status,0,reported.stderr);
   const report = JSON.parse(reported.stdout);
   assert.equal(report.findings.find(f=>f.rule==='role-spacing')?.classification,'spacing-source-reference');
   assert.match(report.scriptHashes[bindings],/^[a-f0-9]{64}$/);
+  assert.match(report.scriptHashes[dtcg],/^[a-f0-9]{64}$/);
   fs.writeFileSync(path.join(temp,bindings),'{bad json');
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.rmSync(path.join(temp,bindings));
