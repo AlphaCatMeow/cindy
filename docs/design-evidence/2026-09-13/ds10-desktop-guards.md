@@ -122,3 +122,15 @@ Codex 对 `2f7721421` 的复审指出：已登记变量带不含数字的合法 
 脚本再次变化，按流程在 `bf95bf72a` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍逐组一致（分类重标都在 report 处置内，不影响计数），baseline 与 `design-layer-report.mjs`（`1546625…`）哈希更新，样本数值未变。
 
 派发时 Windows unit tests 聚合在 `2f7721421` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复六轮：任意 margin 与多值裸值
+
+Codex 对 `bfe99b387` 的复审指出两点，均已复现并修复（commit `12987f2c9`）：
+
+1. Desktop renderer 新增 `mt-[3px]`、`mx-[7px]` 等任意 margin 时报告完全不匹配（`m/mx/my/mt/mr/mb/ml/ms/me` 整类漏报，仓内存量 69 处）。pattern 由 `p[xytrblse]?` 扩为 `[pm][xytrblse]?`，margin 进入同一分类链：已登记来源、未知变量、混合/裸值同口径报告，尺度类 `m-4`/`mt-2` 仍不报；`max-h-[…]`/`min-w-[…]`/`item-[…]` 等不受影响。
+2. 多值任意值（`p-[14px_16px]`、`px-[8px_12px]`、`p-[-14px_-16px]`）原先被单值正则归入 unclassified-spacing。literal 判定改为支持下划线分隔的裸值列表并逐项校验数字与单位；`p-[calc(100%-4px)]` 等无 var 表达式保持 unclassified-spacing。
+
+脚本再次变化，按流程在 `12987f2c9` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变；report 计数无漂移——历史样本的新增行里没有任意 margin 用法，本轮覆盖扩展未改变任何历史结果。baseline 与 `design-layer-report.mjs`（`e5d05bc…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `bfe99b387` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
