@@ -233,6 +233,12 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   // candidates, so the audit itself has to validate the contract it hashes.
   fs.writeFileSync(path.join(temp,bindings),'{bad json');
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  // Arrays pass typeof checks yet carry no entries, and a mapping without
+  // space-* foundations silently degrades every spacing report to unknown.
+  fs.writeFileSync(path.join(temp,bindings),'{"foundations":{"css":[]}}');
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.writeFileSync(path.join(temp,bindings),'{"foundations":{"css":{"text":"semantic.foundations.text-14"}}}');
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
   fs.appendFileSync(path.join(temp,file), '\nconst spacing = "gap-x-[var(--space-4)]";\n');
   const reported = cli('--base-ref',commit,'--worktree','--report','--json');

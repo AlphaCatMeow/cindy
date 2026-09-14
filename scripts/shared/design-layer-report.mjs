@@ -7,13 +7,16 @@ let spacingVariables;
 export function getSpacingVariables() {
   if (!spacingVariables) {
     const { foundations } = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/desktop-bindings.json', import.meta.url), 'utf8'));
-    if (!foundations?.css || typeof foundations.css !== 'object') {
-      throw new Error('Invalid desktop-bindings.json; expected foundations.css spacing bindings');
+    if (!foundations?.css || typeof foundations.css !== 'object' || Array.isArray(foundations.css)) {
+      throw new Error('Invalid desktop-bindings.json; expected foundations.css as a non-array mapping');
     }
     spacingVariables = new Set(Object.entries(foundations.css)
       // Includes component spacing (space-input-lg), not only Tailwind's scale.
       .filter(([, id]) => id.startsWith('semantic.foundations.space-'))
       .map(([name]) => `--${name}`));
+    if (!spacingVariables.size) {
+      throw new Error('Invalid desktop-bindings.json; foundations.css has no semantic.foundations.space-* entries');
+    }
   }
   return spacingVariables;
 }
