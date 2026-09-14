@@ -63,7 +63,10 @@ function classifySpacing(value, spacingVariables = getSpacingVariables()) {
       reason: mixed ? 'Combines spacing references with literal values (including fallbacks); review each literal and the component role.'
         : 'Derived spacing expression; verify the calculation and component role. References do not approve the whole expression.' };
   }
-  return { classification: /^-?(?:\d*\.)?\d+(?:px|rem|em|%|vh|vw)?$/.test(expression) ? 'literal-spacing' : 'unclassified-spacing',
+  // Tailwind writes spaces in arbitrary values as underscores: a bare value
+  // may be a list (p-[14px_16px]). Every item must be a literal on its own.
+  const literal = /^-?(?:\d*\.)?\d+(?:px|rem|em|%|vh|vw)?$/;
+  return { classification: expression.split('_').every(part => literal.test(part)) ? 'literal-spacing' : 'unclassified-spacing',
     reason: 'No verified spacing source reference; use the matching standard spacing class or document the component-specific geometry.' };
 }
 
@@ -86,7 +89,7 @@ export function classifyDesignLayer({ member, layer, radius, evidence = false })
 
 export function reportDesignLayers(file, source, changed, locate, spacingVariables) {
   const findings = [];
-  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:p[xytrblse]?|gap(?:-[xy])?)-\[[^\]\n]+\]/g;
+  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:[pm][xytrblse]?|gap(?:-[xy])?)-\[[^\]\n]+\]/g;
   for (const match of source.matchAll(patterns)) {
     const pos = locate(match.index);
     if (!changed.has(pos.line)) continue;
@@ -110,7 +113,7 @@ export function reportDesignLayers(file, source, changed, locate, spacingVariabl
       value: match[0], disposition: 'report', ...judgement,
       suggestion: isRadius
         ? 'Review the visible frame, contained mark and hit/indicator layers separately against DESIGN §5 and governance §13; register missing evidence/decisions. Do not change user radius overrides.'
-        : 'Use the existing p/px/py/gap/gap-x/gap-y scale from desktop-bindings.json foundations.spacing and the component treatment in DESIGN §4/5. Verify unknown variables, calculations and fallbacks; do not infer button padding from a DOM tag.' });
+        : 'Use the existing p/px/py, m/mx/my and gap/gap-x/gap-y scales from desktop-bindings.json foundations.spacing and the component treatment in DESIGN §4/5. Verify unknown variables, calculations and fallbacks; do not infer button spacing from a DOM tag.' });
   }
   if (/components\/settings\/.*(?:Dialog|Wizard)\.tsx$/.test(file) && changed.size) {
     findings.push({ file, line: Math.min(...changed), column: 1, rule: 'form-adoption', disposition: 'report',

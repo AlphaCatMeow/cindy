@@ -152,6 +152,15 @@ test('spacing reports distinguish real generated references, unknown variables a
     ['gap-[calc(var(--space-4)-var(--space-2))]', 'spacing-expression'],
     ['p-[var(--space-4,var(--missing))]', 'unknown-spacing-reference'],
     ['p-[env(safe-area-inset-top)]', 'unclassified-spacing'],
+    ['p-[calc(100%-4px)]', 'unclassified-spacing'],
+    ['mt-[var(--space-4)]', 'spacing-source-reference'],
+    ['ms-[var(--space-4,initial)]', 'mixed-spacing-expression'],
+    ['mt-[3px]', 'literal-spacing'],
+    ['mx-[7px]', 'literal-spacing'],
+    ['me-[13px]', 'literal-spacing'],
+    ['p-[14px_16px]', 'literal-spacing'],
+    ['px-[8px_12px]', 'literal-spacing'],
+    ['p-[-14px_-16px]', 'literal-spacing'],
   ]) {
     const source = `<div className="${value}" />`;
     const [hit] = inspect(file, source);
@@ -163,7 +172,7 @@ test('spacing reports distinguish real generated references, unknown variables a
     assert.match(hit.suggestion, /foundations.spacing/);
     assert.doesNotMatch(hit.suggestion, /radius overrides/);
   }
-  for (const value of ['p-4', 'gap-x-2', 'gap-y-2', 'gapx-[13px]', 'gapy-[13px]']) {
+  for (const value of ['p-4', 'm-4', 'mt-2', 'gap-x-2', 'gap-y-2', 'gapx-[13px]', 'gapy-[13px]']) {
     assert.deepEqual(inspect(file, `<div className="${value}" />`), [], value);
   }
   const source = '// gap-x-[13px]\n<div className="gap-x-[13px]" />\n<div className="p-[var(--space-4)]" />';
