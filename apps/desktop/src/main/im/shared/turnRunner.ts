@@ -33,6 +33,7 @@ import { createLocalImSource, type ImContextSnapshot } from '../../../shared/imM
 
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { isImAccountScopeClosedError } from '../accountBoundary';
 import { bindRuntimeRecoveryNotice } from './runtimeRecoveryNotice';
 
 /**
@@ -1049,7 +1050,6 @@ export function createTurnRunner(
   > {
     userId = item.turn.userId;
     const rowId = item.rowId;
-    await beginChunkedReply(item.turn);
     // 过程区耗时基准取真实派发时刻 — TurnState 创建时可能还要在 sendQueue 里
     // 等上一轮跑完, 排队等待不该计入"第 N 步 · 耗时"显示
     item.turn.presenter.activity.startedAt = Date.now();
@@ -1066,6 +1066,7 @@ export function createTurnRunner(
         await item.turn.revalidateNotificationReply?.();
         await resolveNotificationTarget(rowId, item.turn.scopeKey);
       }
+      await beginChunkedReply(item.turn);
       // deferred 切换会关闭旧 session。apply 成功后重新读取 maker 里的 live
       // session 并原地换绑 IM listener,确保当前这条消息发给目标引擎且队列不丢。
       if (deps.acquirePendingAgentSwitch) {
@@ -1286,6 +1287,11 @@ export function createTurnRunner(
       return { kind: 'accepted', acceptedAt: acceptedAt || Date.now() };
     } catch (err) {
       if (turnChangeSetStarted) clearPendingTurnChangeSets(rowId);
+      if (isImAccountScopeClosedError(err)) {
+        const index = state.queue.indexOf(item.turn);
+        if (index >= 0) state.queue.splice(index, 1);
+        throw err;
+      }
       const turnPolicyFailureReason = classifyTurnPermissionPolicySendFailure(err, item, state);
       if (turnPolicyFailureReason) {
         await handleSendPreDispatchFailure(state, userId, {

@@ -99,6 +99,7 @@ vi.mock('../fbotTitle', () => ({
   generateAndPersistFbotTitle: mocks.generateAndPersistFbotTitle,
 }));
 
+import { ImAccountScopeClosedError } from '../../accountBoundary';
 import { createTurnRunner, type ImTurnRunner } from '../turnRunner';
 import type { ImCardBuilders } from '../cardBuilders';
 import type { ImSessionRepo, ImSessionRow } from '../sessionRepo';
@@ -712,6 +713,28 @@ describe('notification replies reuse the originating session without takeover', 
     await vi.waitFor(() => expect(revalidateNotificationReply).toHaveBeenCalledTimes(1));
     expect(h.send).toHaveBeenCalledTimes(1);
     expect(fakeRepo.createSession).not.toHaveBeenCalled();
+  });
+
+  it('discards queued account-closure errors without sending through the replacement account', async () => {
+    origin();
+    await reply('om_notification_a');
+    await runner.runAgentTurn({
+      notificationSessionId: 'original-session',
+      revalidateNotificationReply: async () => { throw new ImAccountScopeClosedError(); },
+      botContextId: 'T1', userId: 'U1', userMessageId: 'reply-stale',
+      text: 'continue', attachments: [], scopeKey: 'om_notification_b',
+    });
+    mocks.slackIm.sendText.mockClear();
+    const h = harnesses.get('original-session')!;
+    h.emit({ type: 'done' } as AgentEvent);
+    await vi.waitFor(() => expect(mocks.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('dispatchQueuedSend threw (queued path): [IM_NOT_READY]'),
+    ));
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(mocks.slackIm.sendText).not.toHaveBeenCalledWith(
+      'U1', expect.anything(), expect.objectContaining({ threadTs: 'om_notification_b' }),
+    );
+    expect(mocks.slackIm.removeMessageReaction.mock.calls.some(([id]) => id === 'reply-stale')).toBe(false);
   });
 
   it('stopping a queued topic never aborts the active turn from another topic', async () => {

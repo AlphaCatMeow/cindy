@@ -127,6 +127,25 @@ describe('Feishu notification origins', () => {
     }
   });
 
+  it('keeps an unlinked topic on its normal route when an unrelated send times out', async () => {
+    vi.useFakeTimers();
+    let finish!: (value: { messageId: string; chatId: string }) => void;
+    sendNotification.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    mocks.origin = null;
+    const send = sendFeishuSessionNotification(im, 'other', 'other');
+    try {
+      const reply = resolveFeishuNotificationReply(im, event);
+      const assertion = expect(reply).resolves.toBeNull();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+      expect(mocks.where).toHaveBeenCalledTimes(2);
+    } finally {
+      finish({ messageId: 'om_other', chatId: 'oc_chat' });
+      await send;
+      vi.useRealTimers();
+    }
+  });
+
   it('rechecks a fast reply as soon as its send finishes, even while another is pending', async () => {
     let finishOther!: (value: { messageId: string; chatId: string }) => void;
     let finishTarget!: (value: { messageId: string; chatId: string }) => void;

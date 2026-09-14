@@ -95,14 +95,17 @@ export async function resolveFeishuNotificationReply(im: FeishuIM, event: IMMess
       operation, operation.then(() => ({ operation }), () => ({ operation })),
     ]));
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Notification receipt is still pending')), 10_000);
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 10_000);
     });
     try {
       while (!origin && remaining.size) {
-        const { operation } = await Promise.race([...remaining.values(), timeout]);
-        remaining.delete(operation);
+        const settled = await Promise.race([...remaining.values(), timeout]);
         origin = await readOrigin();
+        // A pending send cannot prove this root belongs to a notification.
+        // After the bounded wait, preserve the unlinked topic's normal route.
+        if (settled === null) break;
+        remaining.delete(settled.operation);
       }
     } finally {
       if (timer) clearTimeout(timer);
