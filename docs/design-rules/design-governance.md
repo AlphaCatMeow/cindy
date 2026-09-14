@@ -345,7 +345,7 @@ DS-4/4b 尚有公开附件交接与完整设置页/部分状态证据缺口，DS
 | DS-7 | 复用守卫，成熟写法先报告/反例/历史回放后阻断；增量发现 Mobile 入口；未成熟范围继续报告 | CI 门禁 | 已合并 [#4215](https://github.com/makecindy/cindy/pull/4215)：成熟颜色增量接 verify，Mobile 入口纳入同一台账；[历史证据](../design-evidence/2026-09-10/ds7-guards.md) 的版本边界见 §8。DS-7 当次双审豁免不延续至后续批次 |
 | DS-8 | Desktop 颜色、排版、间距、圆角/尺寸与动效的 DTCG → 生成 → 生产链；旧主题兼容，结束影子阶段 | 零视觉接管 | 已合并 [#4268](https://github.com/makecindy/cindy/pull/4268)，merge `2e74488d21`；人工及平台证据缺口继续登记 |
 | DS-9 | 统一桌面聊天、代码与附件；核跨入口继承；按正式决定整理桌面授权呈现 | 有意可见 | [#4300](https://github.com/makecindy/cindy/pull/4300) 已于 09-12 合并，最终 head `023bde86ac` / merge `f1955f9354`；09-11 用户视觉验收通过，后续媒体 FocusScope 修复有测试与 CI 证据，实机复验另记；[实现与验收记录](../design-evidence/2026-09-11/ds9-desktop-core.md) |
-| DS-10 | 完善报告准确性、维护交接与 Desktop G1—G4 验收 | CI 门禁 | 本地验证完成，待提交；基线 `07eac89584`；复用已有接线与阻断，不新增 required；[本地结果与未验收项](../design-evidence/2026-09-13/ds10-desktop-guards.md)分别记录，不额外拆批 |
+| DS-10 | 完善报告准确性、维护交接与 Desktop G1—G4 验收 | CI 门禁 | [#4427](https://github.com/makecindy/cindy/pull/4427) 审查中（2026-09-15 核对），head `97c9ecb300`；复用已有接线与阻断，不新增 required；[本地结果与未验收项](../design-evidence/2026-09-13/ds10-desktop-guards.md)分别记录，不额外拆批 |
 | DS-11 | 收尾复核确认的字体、焦点、表单、通知、日期入口与规范冲突；Cindy 两模式逐项前后对照，Mobile 仅既有 Sheet 减弱动效接线 | 有意可见 / 交互修复 | 本地修订与相关检查完成；[方案、结果与证据边界](../design-evidence/2026-09-15/ds11-review-fixes.md)；接续 DS-10，用户最终视觉验收待逐项审核 |
 | Mobile 后续（未编号） | 接同一数值源，保留平台适配；独立裁决授权呈现，验证 iOS/Android | 按实际变化分类 | 新重构方案就绪后另行启动；沿用 fingerprint 冷更规则与既有兼容检查 |
 

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | old-01 | MarketCard、安装位置弹窗和资源用量文字改用字号变量；卡片由固定高度改为最小高度。 | 默认字号保留原角色；UI 18 档卡片标题由 16→20px、正文由13→17px。默认/大号两组对照，固定行框同步改为等比行高。 |
 | old-02 | 不同字号名称仍保留独立语义，不按同值删除公开接口。 | 这条复核后属于可选维护收敛，未发现必须修改的可见缺陷；本次不做机械去重。对照标准控件外观未改。 |
-| old-03 | 文档补齐确认标题18/500、表单标题18/600等已有裁决。 | 不同场景各自保持层级。没有把所有标题强行加粗；对照图是普通确认，另保留原审查证据。 |
+| old-03 | 文档补齐确认标题18/500、表单标题18/600等已有裁决。 | 不同场景各自保持层级。普通确认与 MCP 表单标题均有亮暗前后对照，没有把所有标题强行加粗。 |
 | old-04 | 不全库取整；资源用量区域的固定 px 行高改为原比例。 | 历史比例仍是原几何的精确换算。示例卡片前后保持；大字体的资源文字不再被旧固定行框约束。 |
 | old-05 | 明确 Input 32/36/40px 与 Button 32/36px 的合法配对。 | 保留已接受的尺寸；size 标签差异不再被写成实现错误。 |
 | old-06 | 将普通按钮描述改为固定32/36px、横向24px、垂直居中。 | 删除“上下各10px”的矛盾要求。实际控件几何未改；前后图证明未借修文档改变皮肤。 |
@@ -35,7 +35,7 @@
 
 ## 实际截图与可复核方法
 
-交付 HTML：`documents/2026-09-15-cindy-design-review.html`（本地交付，不入 Git）；原报告备份为同目录 `.before-ds11.html`。报告提供 24 项、Cindy Light / Dark 切换、逐图放大与本地审核标记。大图 WebP 压缩；原始 PNG 与 SHA-256 清单保留。修改前为 DS-10 候选，修改后为本批源码。资源用量组件源码未变，其补拍的修改前图用基线 CSS 在同一真实组件上复原，报告已明确标注。
+交付 HTML：`documents/2026-09-15-cindy-design-review.html`（本地交付，不入 Git）；原报告备份为同目录 `.before-ds11.html`。报告提供 24 项、78 张独立图片、112 处展示，包含实际入口、Cindy Light / Dark 切换、逐图放大与本地审核标记；约 1.09 MB，自包含。大图 WebP 压缩；原始 PNG 与 SHA-256 清单保留。修改前为 DS-10 候选，修改后为本批源码。资源用量组件源码未变，其补拍的修改前图用基线 CSS 在同一真实组件上复原，报告已明确标注。
 
 采证目录：`/var/folders/yh/nrp07sr92331p22044y8zl440000gn/T/cindy-ds11-1qetn0p8`，包含 `before/`、`after/`、`screenshots-manifest.json`、脚本、日志。此目录是当前机器的临时证据，不能当作公开持久链接。附件按治理 §6 由报告/本地 artifact 交付；GitHub 图片上传需要网页附件，尚未有可写回的公开评论 URL。
 
@@ -43,14 +43,16 @@
 
 ## 自动与运行检查
 
-- `pnpm test:unit:related`：通过，包含 runner、Desktop、Mobile 与 design-tokens 相关单测。期间遇到过台账过期和新增 Token 数量预期需同步，均修复后完整重跑通过。
-- Desktop、Mobile、`@cindy/design-tokens` typecheck：通过。
+- `pnpm test:unit:related`：原候选通过；主干合并后执行 `VITE_CINDY_AUTH_REGION=global pnpm test:unit:related`，自动回退全量，runner 与 29 个工作区全部通过。Global 仅作用于测试进程，避免本机 CN 配置影响默认路径断言；未改产品区域配置。旧 Markdown 源码断言已按内容 strong 700 合同修订，新增 Token 分类账同步为 542 项，均纳入此次完整重跑。
+- 原候选 Desktop、Mobile、`@cindy/design-tokens` typecheck 及主干合并后受影响包 typecheck：通过。
 - `pnpm --filter @cindy/design-tokens check:generated` 与 `pnpm check:design-inventory`：通过，50 个 surface；生成器没有读取或重刷视觉预期。
 - i18n key / glossary：通过；现存翻译与 proposed 术语告警保留。
 - 焦点：安装初始 Cancel、Tab 不逃逸、Esc 关闭后返回入口；忙碌时禁止关闭/重复操作；市场标题成为原生详情动作。
 - 通知：hover / focus 独立暂停剩余计时，两种离开顺序有测试；800px 长 URL / 来源 / 操作未越过视口。
 - Select：辅助状态、错误文案关联及错误 focus 环；日期输入与图表共享选日，清空回30天、拒绝未来日期。
 - Markdown 嵌套 strong：700 / 700；大字号下 MarketCard / 资源文字随设置放大。
+- 合并主干后的生产组件运行复查：Select 必填/错误状态、安装取消初始焦点与 Esc 返回入口、800px 长通知范围通过。
+- HTML 在 390×844 手机与 1280×900 桌面检查：24 项有证据，112 处图片全部解码，展开全部详情没有横向溢出，亮暗切换、跳转、原始尺寸放大、本地审核标记通过。
 - Mobile JS 生命周期测试通过；没有原生依赖、配置或模块改动。本地 fingerprint 结果存在，但未声称已做 base/main 对比；合并结果以 CI guard 为准。
 
 ## 帮助文字配对
