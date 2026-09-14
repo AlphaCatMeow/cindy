@@ -1,9 +1,9 @@
 {
-  "baseline": "4f0cbbc262963b537efcd400d890a835759f370c",
+  "baseline": "f2b5b81ecb848586292e2ca4a498b1a5f003473b",
   "scriptHashes": {
     "scripts/hardcoded-color-audit.mjs": "9f516abc27e9b100d728f94ed7ae367bc2a2e04b23f0c7ffe2cc825ba4de299c",
     "scripts/shared/hardcoded-color-match.mjs": "ed31fec9c67f130fd58103b0fb6687fc1dc6dc7ea4e6a33991129281f3b9ae07",
-    "scripts/shared/design-layer-report.mjs": "307fbc28addce50b83c68f038cc3b9e619901e125f577dcec13d9b0d238480f8",
+    "scripts/shared/design-layer-report.mjs": "a6afb6277fd9bd5a1ac4c268b9cc0ad730d7d95be35e81dfb34d47458b069ea5",
     "scripts/hardcoded-color-exemptions.json": "5eb5e48bce427612505aebe35ce7c3e7babc8ba5190aeddfac4757691c381e5b",
     "packages/design-tokens/src/desktop-bindings.json": "e94786bc211bdae1b6763a9507650d417b21a17b86da10b0844b593ac7b0d5a8",
     "packages/design-tokens/src/semantic/foundations.json": "61651580afaff343003683fee9e827e416504e3656b04fa263fef35608f70a70"

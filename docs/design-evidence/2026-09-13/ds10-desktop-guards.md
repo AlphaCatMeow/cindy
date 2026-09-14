@@ -152,3 +152,12 @@ Codex 对 `1a682449d` 的复审指出：已登记 token 与非数字来源组合
 脚本再次变化，按流程在 `4f0cbbc2` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变，report 计数无漂移，baseline 与 `design-layer-report.mjs`（`307fbc2…`）哈希更新，样本数值未变。
 
 派发时 Windows unit tests 聚合在 `1a682449d` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复九轮：裸值单位按 CSS 维度语法识别
+
+Codex 对 `bee07c0c8` 的复审指出：`p-[1lh]`、`mt-[2dvh]`、`gap-[1cqw]`、`p-[12PX]` 被单位白名单（px|rem|em|%|vh|vw）归入 unclassified-spacing；而排版门禁 `typographyDiscipline.test.ts` 已认可 `dvh`/`lh`/`cqw`/`pt` 与大写单位，其原则正是「数字开头的现代单位不得依赖单位枚举」。已复现。修复（commit `f2b5b81e`）：literal 判定改为数字加任意字母单位或 `%`（大小写不敏感），单值与下划线多值同口径；`env()`/`calc()`/字号关键字等非数字开头表达式保持 unclassified-spacing。13 组分类矩阵逐项核对（六类新单位 + 裸数字、省零小数、百分比、多值与三例不回归）。
+
+脚本再次变化，按流程在 `f2b5b81e` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变，report 计数无漂移，baseline 与 `design-layer-report.mjs`（`a6afb62…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `bee07c0c8` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
