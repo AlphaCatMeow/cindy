@@ -150,6 +150,8 @@ test('spacing reports distinguish real generated references, unknown variables a
     ['p-[var(--space-4,var(--space-2))]', 'mixed-spacing-expression'],
     ['p-[calc(var(--space-4)*2)]', 'mixed-spacing-expression'],
     ['gap-[calc(var(--space-4)-var(--space-2))]', 'spacing-expression'],
+    ['p-[calc(var(--space-4)_+_env(safe-area-inset-top))]', 'mixed-spacing-expression'],
+    ['p-[calc(min(var(--space-2),var(--space-4)))]', 'mixed-spacing-expression'],
     ['p-[var(--space-4,var(--missing))]', 'unknown-spacing-reference'],
     ['p-[env(safe-area-inset-top)]', 'unclassified-spacing'],
     ['p-[calc(100%-4px)]', 'unclassified-spacing'],

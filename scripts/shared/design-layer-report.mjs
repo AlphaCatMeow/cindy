@@ -55,12 +55,16 @@ function classifySpacing(value, spacingVariables = getSpacingVariables()) {
       reason: 'Contains a variable outside the generated spacing bindings; verify its source, fallbacks and component role. A variable name alone is not approval.' };
   }
   if (references.length) {
-    // A var() fallback is a second value even when it carries no digit
-    // (initial, auto, a nested var): recognise it explicitly, never by
-    // whether a digit happens to appear in the rest of the expression.
-    const mixed = /var\(\s*--[\w-]+\s*,/.test(expression) || /\d/.test(expression.replace(/--[\w-]+/g, ''));
-    return { classification: mixed ? 'mixed-spacing-expression' : 'spacing-expression',
-      reason: mixed ? 'Combines spacing references with literal values (including fallbacks); review each literal and the component role.'
+    // Pure means registered var() references joined only by calc operators.
+    // Anything left after stripping them — literals, fallbacks, env()/min()
+    // operands — is a non-token operand; detect that residue explicitly
+    // instead of relying on where a digit happens to appear.
+    const residue = expression
+      .replace(/var\(\s*--[\w-]+\s*\)/g, '')
+      .replace(/calc/g, '')
+      .replace(/[-+*/()_,.\s]/g, '');
+    return { classification: residue.length > 0 ? 'mixed-spacing-expression' : 'spacing-expression',
+      reason: residue.length > 0 ? 'Combines spacing references with literals, fallbacks or other non-token operands (env(), min() …); review each operand and the component role.'
         : 'Derived spacing expression; verify the calculation and component role. References do not approve the whole expression.' };
   }
   // Tailwind writes spaces in arbitrary values as underscores: a bare value
