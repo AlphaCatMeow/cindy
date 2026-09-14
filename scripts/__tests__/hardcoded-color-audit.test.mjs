@@ -189,6 +189,14 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   fs.appendFileSync(path.join(temp,file), "const c = 'var(--x, #abc123)';\n");
   fs.writeFileSync(path.join(temp,renderer+'new.tsx'), "const style = { color: 'rgb(4,5,6)' };\n");
   fs.writeFileSync(path.join(temp,renderer+'plain.tsx'), "const label = 'RGB(1, 2, 3)';\n");
+  // The isolated repo carries its own contract inputs: audit({root}) must
+  // read and hash bindings and the DTCG source from root, not this checkout.
+  const bindings = 'packages/design-tokens/src/desktop-bindings.json';
+  const dtcg = 'packages/design-tokens/src/semantic/foundations.json';
+  fs.mkdirSync(path.dirname(path.join(temp, bindings)), {recursive:true});
+  fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
+  fs.mkdirSync(path.dirname(path.join(temp, dtcg)), {recursive:true});
+  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
   const result = audit({root:temp,baseRef:commit,worktree:true});
   assert.equal(result.counts.unexpected,3);
   assert.deepEqual(result.findings.filter(f=>f.file===file).map(f=>f.line),[2,3]);
@@ -197,6 +205,23 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   assert.deepEqual(result.findings.filter(f=>f.file===renderer+'plain.tsx'),[]);
   assert.equal(audit({root:temp,baseRef:commit}).counts.unexpected,0);
   assert.equal(audit({root:temp,baseRef:commit,worktree:true}).candidateHash,result.candidateHash);
+  // The isolated root's own bindings drive classification and fail-closed
+  // validation — a custom valid source registers, and corruption introduced
+  // between two audit calls must not be served from any stale copy.
+  const localBindings = JSON.parse(fs.readFileSync(path.join(root, bindings), 'utf8'));
+  localBindings.foundations.css['space-local'] = 'semantic.foundations.space-local';
+  fs.writeFileSync(path.join(temp,bindings), JSON.stringify(localBindings));
+  const localDtcg = JSON.parse(fs.readFileSync(path.join(root, dtcg), 'utf8'));
+  localDtcg.semantic.foundations['space-local'] = { $type: 'dimension', $value: '{reference.foundations.space-4}' };
+  fs.writeFileSync(path.join(temp,dtcg), JSON.stringify(localDtcg));
+  fs.writeFileSync(path.join(temp,renderer+'LocalSpacing.tsx'), 'export const L = <div className="p-[var(--space-local)]" />;\n');
+  const local = audit({root:temp,baseRef:commit,worktree:true});
+  assert.equal(local.findings.find(f=>f.rule==='role-spacing')?.classification,'spacing-source-reference');
+  fs.writeFileSync(path.join(temp,bindings),'{bad json');
+  assert.throws(()=>audit({root:temp,baseRef:commit,worktree:true}));
+  fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
+  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
+  fs.rmSync(path.join(temp,renderer+'LocalSpacing.tsx'));
   // Execute the real CLI against this isolated candidate, then the actual CI
   // aggregation shell. A process failure must not turn into a green summary.
   for (const rel of ['hardcoded-color-audit.mjs', 'shared/hardcoded-color-match.mjs', 'shared/design-layer-report.mjs']) {
@@ -204,12 +229,6 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
     fs.mkdirSync(path.dirname(target), {recursive:true});
     fs.copyFileSync(path.join(root, 'scripts', rel), target);
   }
-  const bindings = 'packages/design-tokens/src/desktop-bindings.json';
-  const dtcg = 'packages/design-tokens/src/semantic/foundations.json';
-  fs.mkdirSync(path.dirname(path.join(temp, bindings)), {recursive:true});
-  fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
-  fs.mkdirSync(path.dirname(path.join(temp, dtcg)), {recursive:true});
-  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
   const cli = (...args) => spawnSync(process.execPath, ['scripts/hardcoded-color-audit.mjs', ...args], {cwd:temp,encoding:'utf8'});
   const failed = cli('--base-ref',commit,'--worktree','--json');
   assert.equal(failed.status,1,failed.stderr);
@@ -250,6 +269,13 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
   fs.rmSync(path.join(temp,dtcg));
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
+  // A target that exists as a key but is not a leaf dimension token — an
+  // empty object or a group — never reaches generation output either.
+  const leafless = JSON.parse(fs.readFileSync(path.join(root, dtcg), 'utf8'));
+  leafless.semantic.foundations['space-4'] = {};
+  fs.writeFileSync(path.join(temp,dtcg), JSON.stringify(leafless));
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.copyFileSync(path.join(root, dtcg), path.join(temp, dtcg));
   fs.appendFileSync(path.join(temp,file), '\nconst spacing = "gap-x-[var(--space-4)]";\n');

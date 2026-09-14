@@ -1,38 +1,48 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Read the generation contract, not a second hand-maintained token allowlist.
-// Exported so the audit can validate the binding on every invocation, not
-// only when a spacing candidate reaches the lazy read below.
-let spacingVariables;
-export function getSpacingVariables() {
-  if (!spacingVariables) {
-    const { foundations } = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/desktop-bindings.json', import.meta.url), 'utf8'));
-    if (!foundations?.css || typeof foundations.css !== 'object' || Array.isArray(foundations.css)) {
-      throw new Error('Invalid desktop-bindings.json; expected foundations.css as a non-array mapping');
-    }
-    const bindings = Object.entries(foundations.css)
-      // Includes component spacing (space-input-lg), not only Tailwind's scale.
-      .filter(([, id]) => id.startsWith('semantic.foundations.space-'));
-    if (!bindings.length) {
-      throw new Error('Invalid desktop-bindings.json; foundations.css has no semantic.foundations.space-* entries');
-    }
-    // The prefix alone must not invent sources: every binding target has to
-    // exist as a token in the DTCG generation source the binding is built from.
-    const dtcg = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/semantic/foundations.json', import.meta.url), 'utf8'))?.semantic?.foundations;
-    if (!dtcg || typeof dtcg !== 'object' || Array.isArray(dtcg)) {
-      throw new Error('Invalid semantic/foundations.json; expected semantic.foundations DTCG tokens');
-    }
-    const unbound = bindings.filter(([, id]) => !dtcg[id.slice('semantic.foundations.'.length)]);
-    if (unbound.length) {
-      throw new Error(`Invalid desktop-bindings.json; spacing bindings without a DTCG token: ${unbound.map(([name]) => `--${name}`).join(', ')}`);
-    }
-    spacingVariables = new Set(bindings.map(([name]) => `--${name}`));
+// readSpacingVariables(root) is fresh per call so audit({root}) always honours
+// that checkout's bindings — including corruption introduced between calls;
+// the cached default below only serves direct callers of this module.
+const MODULE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export function readSpacingVariables(root) {
+  const readJson = file => JSON.parse(readFileSync(path.join(root, 'packages/design-tokens/src', file), 'utf8'));
+  const { foundations } = readJson('desktop-bindings.json');
+  if (!foundations?.css || typeof foundations.css !== 'object' || Array.isArray(foundations.css)) {
+    throw new Error('Invalid desktop-bindings.json; expected foundations.css as a non-array mapping');
   }
-  return spacingVariables;
+  const bindings = Object.entries(foundations.css)
+    // Includes component spacing (space-input-lg), not only Tailwind's scale.
+    .filter(([, id]) => id.startsWith('semantic.foundations.space-'));
+  if (!bindings.length) {
+    throw new Error('Invalid desktop-bindings.json; foundations.css has no semantic.foundations.space-* entries');
+  }
+  // The prefix alone must not invent sources: every binding target has to
+  // be a real dimension token in the DTCG generation source. A bare key, an
+  // empty object or a group is not a token — the generator's flatten() only
+  // emits leaves that carry $value (production.ts).
+  const dtcg = readJson('semantic/foundations.json')?.semantic?.foundations;
+  if (!dtcg || typeof dtcg !== 'object' || Array.isArray(dtcg)) {
+    throw new Error('Invalid semantic/foundations.json; expected semantic.foundations DTCG tokens');
+  }
+  const unbound = bindings.filter(([, id]) => {
+    const token = dtcg[id.slice('semantic.foundations.'.length)];
+    return !token || typeof token !== 'object' || !('$value' in token) || token.$type !== 'dimension';
+  });
+  if (unbound.length) {
+    throw new Error(`Invalid desktop-bindings.json; spacing bindings without a dimension DTCG token: ${unbound.map(([name]) => `--${name}`).join(', ')}`);
+  }
+  return new Set(bindings.map(([name]) => `--${name}`));
+}
+let moduleSpacing;
+function getSpacingVariables() {
+  moduleSpacing ??= readSpacingVariables(MODULE_ROOT);
+  return moduleSpacing;
 }
 
-function classifySpacing(value) {
-  const spacingVariables = getSpacingVariables();
+function classifySpacing(value, spacingVariables = getSpacingVariables()) {
   const expression = value.slice(value.indexOf('[') + 1, -1);
   const direct = /^var\(\s*(--[\w-]+)\s*\)$/.exec(expression);
   if (direct && spacingVariables.has(direct[1])) {
@@ -71,7 +81,7 @@ export function classifyDesignLayer({ member, layer, radius, evidence = false })
     : { classification: 'registered-value-violation', reason: `${member}: this visible layer requires ${expected} at all four corners (DESIGN §5).` };
 }
 
-export function reportDesignLayers(file, source, changed, locate) {
+export function reportDesignLayers(file, source, changed, locate, spacingVariables) {
   const findings = [];
   const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:p[xytrblse]?|gap(?:-[xy])?)-\[[^\]\n]+\]/g;
   for (const match of source.matchAll(patterns)) {
@@ -92,7 +102,7 @@ export function reportDesignLayers(file, source, changed, locate) {
     if (/^<kbd\s/.test(tag) && /\b(?:border|bg-)/.test(tag)) { member = 'keycap'; evidence = true; }
     const radius = /^rounded-\[([^\]]+)\]$/.exec(match[0])?.[1] ?? match[0].replace(/^rounded-/, '');
     const judgement = isRadius ? classifyDesignLayer({ member, layer, radius, evidence })
-      : classifySpacing(match[0]);
+      : classifySpacing(match[0], spacingVariables);
     findings.push({ file, ...pos, rule: isRadius ? 'visible-layer-radius' : 'role-spacing',
       value: match[0], disposition: 'report', ...judgement,
       suggestion: isRadius
