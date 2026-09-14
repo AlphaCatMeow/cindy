@@ -143,3 +143,12 @@ Codex 对 `18254a625` 的复审指出：`space-x-[…]`、`space-y-[…]` 也是
 脚本再次变化，按流程在 `a4bad4e6a` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变，report 计数无漂移（历史样本新增行无 space-x/y 任意值），baseline 与 `design-layer-report.mjs`（`c2f13f2…`）哈希更新，样本数值未变。
 
 派发时 Windows unit tests 聚合在 `18254a625` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复八轮：非 token 操作数残差检测
+
+Codex 对 `1a682449d` 的复审指出：已登记 token 与非数字来源组合（`p-[calc(var(--space-4)_+_env(safe-area-inset-top))]`）时数字检测判不到，被归为纯 `spacing-expression`，而 `env()` 操作数既非已验证引用也非字面量。已复现（`min()` 操作数同类漏判）。修复（commit `4f0cbbc2`）：mixed 判定改为残差检测——剥离已登记 `var()` 调用、`calc` 关键字与纯操作符后，剩余任何内容（字面量、fallback、`env()`/`min()` 操作数）归 `mixed-spacing-expression`；仅由已登记引用与 calc 操作符构成的表达式保持 `spacing-expression`。原数字检测与 fallback 逗号检测的行为被残差检测完全覆盖（11 组分类矩阵逐项核对）。回归测试补 env/min 操作数断言。
+
+脚本再次变化，按流程在 `4f0cbbc2` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变，report 计数无漂移，baseline 与 `design-layer-report.mjs`（`307fbc2…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `1a682449d` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
