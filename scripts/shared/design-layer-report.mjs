@@ -68,8 +68,10 @@ function classifySpacing(value, spacingVariables = getSpacingVariables()) {
         : 'Derived spacing expression; verify the calculation and component role. References do not approve the whole expression.' };
   }
   // Tailwind writes spaces in arbitrary values as underscores: a bare value
-  // may be a list (p-[14px_16px]). Every item must be a literal on its own.
-  const literal = /^-?(?:\d*\.)?\d+(?:px|rem|em|%|vh|vw)?$/;
+  // may be a list (p-[14px_16px]). Every item must be a literal on its own —
+  // a number with any CSS dimension unit (1lh, 2dvh, 12PX, 17pt …), never a
+  // unit enumeration, mirroring the typography gate's own discipline.
+  const literal = /^-?(?:\d*\.)?\d+[a-z%]*$/i;
   return { classification: expression.split('_').every(part => literal.test(part)) ? 'literal-spacing' : 'unclassified-spacing',
     reason: 'No verified spacing source reference; use the matching standard spacing class or document the component-specific geometry.' };
 }

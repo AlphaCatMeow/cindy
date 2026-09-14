@@ -165,6 +165,12 @@ test('spacing reports distinguish real generated references, unknown variables a
     ['p-[14px_16px]', 'literal-spacing'],
     ['px-[8px_12px]', 'literal-spacing'],
     ['p-[-14px_-16px]', 'literal-spacing'],
+    ['p-[1lh]', 'literal-spacing'],
+    ['mt-[2dvh]', 'literal-spacing'],
+    ['gap-[1cqw]', 'literal-spacing'],
+    ['p-[12PX]', 'literal-spacing'],
+    ['p-[17pt]', 'literal-spacing'],
+    ['p-[1lh_2dvh]', 'literal-spacing'],
   ]) {
     const source = `<div className="${value}" />`;
     const [hit] = inspect(file, source);
