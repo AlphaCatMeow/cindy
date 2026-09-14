@@ -82,3 +82,13 @@ G2 的真实独立贡献者待安排，不能以 Agent 模拟替代；公开图�
 PR 审查指出上节契约有缺口：diff 无间距候选（docs-only 或纯颜色）时 `classifySpacing` 的惰性读取不执行，损坏的 `desktop-bindings.json` 只进入 scriptHashes、`--report` 退出 0。已用 `{bad json` + docs-only 候选在隔离 fixture 以真实 CLI 复现 exit 0。
 
 修复：`getSpacingVariables` 导出并增加 `foundations.css` 结构校验，`audit()` 对每次调用先行解析校验；阻断与 `--report` 两种模式对损坏、结构缺失绑定均退出 2，健康输入报告不变。回归测试在无间距候选的既有 fixture 上补损坏绑定断言，带候选的损坏/缺失断言保留。`ds10-replay.json` 仍绑定提交候选的脚本 hash，本轮不覆写也不重跑冒充；改动只前置校验，不改变有效绑定下的分类输出。本节只改 `hardcoded-color-audit.mjs`、`design-layer-report.mjs`、对应测试与本文，无产品 UI、Token 源、依赖或 CI 接线变更；`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），scripts 不在带 typecheck 的 package 内。
+
+
+## 2026-09-14 审查修复二轮：数组绑定与回放重生成
+
+Codex 对 `f0bbebfb1` 的复审指出两点，均已处理：
+
+1. `foundations.css` 为数组时 `typeof === 'object'` 放行，`{"foundations":{"css":[]}}` 真实 CLI 退出 0；无 `space-*` 条目的映射也会让全部间距报告退化为 unknown。已复现并修复：校验要求非数组 mapping 且过滤后至少一个 spacing 条目（commit `52cee8764`），数组与空映射两类输入在阻断与 `--report` 模式均退出 2，健康输入报告不变，回归测试补数组与无 spacing 条目断言。
+2. `ds10-replay.json` 的脚本 hash 仍绑定修复前实现（`ab6f…`/`6138…`），不满足本文「脚本或绑定有变化则重新生成结果并解释差异」的流程；上节「不覆写也不重跑」的处理确实没有兑现该流程。已在 `52cee8764` 树上重跑全部 23 组：counts、candidateHash、expectedBlock 与原记录逐组一致（两轮修复均不改变有效输入的分类输出），仅 `hardcoded-color-audit.mjs`（`e8e3049…`）与 `design-layer-report.mjs`（`3a4ba44f…`）两个脚本 hash 更新，baseline 改为 `52cee8764`，样本数值未变，回放证据现绑定最终实现。
+
+派发时 Windows unit tests 在 `f0bbebfb1` 上缺席为分片未完成的瞬态，复查时该 head 全部检查（含 Windows unit tests）已 SUCCESS。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更；`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip）。
