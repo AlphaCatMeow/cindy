@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findBareColors, maskColorComments } from './shared/hardcoded-color-match.mjs';
-import { reportDesignLayers } from './shared/design-layer-report.mjs';
+import { reportDesignLayers, getSpacingVariables } from './shared/design-layer-report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -154,6 +154,10 @@ export function audit({ root = ROOT, baseRef = 'origin/main', headRef = 'HEAD', 
   const resolve = ref => git(root, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).trim();
   const base = resolve(baseRef), head = resolve(headRef);
   const exemptions = readExemptions(root);
+  // Validate the spacing binding on every run: a docs- or colour-only diff
+  // never reaches the lazy read inside classifySpacing, and hashing alone
+  // would accept a corrupt contract as a clean exit.
+  getSpacingVariables();
   const range = worktree ? [base] : [base, head];
   const diffArgs = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames'];
   const tracked = git(root, [...diffArgs, '--name-only', '-z', ...range, '--']).split('\0').filter(Boolean);

@@ -228,6 +228,12 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   assert.throws(()=>audit({root:temp,baseRef:commit,worktree:true}));
   assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
   fs.writeFileSync(path.join(temp,'scripts/hardcoded-color-exemptions.json'),'[]');
+  // Corrupt bindings must fail closed even with no spacing candidate in the
+  // diff: classifySpacing's lazy read never runs for colour-/docs-only
+  // candidates, so the audit itself has to validate the contract it hashes.
+  fs.writeFileSync(path.join(temp,bindings),'{bad json');
+  assert.equal(cli('--base-ref',commit,'--worktree','--report').status,2);
+  fs.copyFileSync(path.join(root, bindings), path.join(temp, bindings));
   fs.appendFileSync(path.join(temp,file), '\nconst spacing = "gap-x-[var(--space-4)]";\n');
   const reported = cli('--base-ref',commit,'--worktree','--report','--json');
   assert.equal(reported.status,0,reported.stderr);

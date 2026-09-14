@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs';
 
 // Read the generation contract, not a second hand-maintained token allowlist.
+// Exported so the audit can validate the binding on every invocation, not
+// only when a spacing candidate reaches the lazy read below.
 let spacingVariables;
-function getSpacingVariables() {
+export function getSpacingVariables() {
   if (!spacingVariables) {
     const { foundations } = JSON.parse(readFileSync(new URL('../../packages/design-tokens/src/desktop-bindings.json', import.meta.url), 'utf8'));
+    if (!foundations?.css || typeof foundations.css !== 'object') {
+      throw new Error('Invalid desktop-bindings.json; expected foundations.css spacing bindings');
+    }
     spacingVariables = new Set(Object.entries(foundations.css)
       // Includes component spacing (space-input-lg), not only Tailwind's scale.
       .filter(([, id]) => id.startsWith('semantic.foundations.space-'))

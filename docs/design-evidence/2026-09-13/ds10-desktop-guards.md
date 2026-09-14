@@ -75,3 +75,10 @@ G2 的真实独立贡献者待安排，不能以 Agent 模拟替代；公开图�
 在该主干上运行 `pnpm install --frozen-lockfile` 后，`VITE_CINDY_AUTH_REGION=global pnpm test:unit:related` 通过：runner 540 pass / 1 存量 skip，Desktop related 18.3s。Desktop、Mobile、design-tokens typecheck，生成/50 surface 台账新鲜度、endpoint/i18n/brand/glossary、migration、scheduler、Mobile scope、9 项文档合同检查均通过；Device Link 类型与 9 项真实 loopback 集成也通过。已有未跟踪 ui-showcase 被 related 自动选入，仍不提交。
 
 23 组固定历史回放的脚本/绑定 hash 与本候选一致，沿用原结果；原运行矩阵和截图仍绑定 07eac89584，不冒充新主干全量实机复验。新增主干的 open-path 生命周期/模型适配与 iOS 动画不属于本批；本批相对提交基线没有产品 UI、Token 源/生成物、依赖或 CI 配置改动。最终证据及单人自查回执在原附件目录的 submit-2026-09-14 中。提交走当前维护者 fork 与 DCO，不伪造双审共识或自动跟踪注册；最终远端检查以实际 PR 为准。
+
+
+## 2026-09-14 审查修复：绑定校验提前到每次审计
+
+PR 审查指出上节契约有缺口：diff 无间距候选（docs-only 或纯颜色）时 `classifySpacing` 的惰性读取不执行，损坏的 `desktop-bindings.json` 只进入 scriptHashes、`--report` 退出 0。已用 `{bad json` + docs-only 候选在隔离 fixture 以真实 CLI 复现 exit 0。
+
+修复：`getSpacingVariables` 导出并增加 `foundations.css` 结构校验，`audit()` 对每次调用先行解析校验；阻断与 `--report` 两种模式对损坏、结构缺失绑定均退出 2，健康输入报告不变。回归测试在无间距候选的既有 fixture 上补损坏绑定断言，带候选的损坏/缺失断言保留。`ds10-replay.json` 仍绑定提交候选的脚本 hash，本轮不覆写也不重跑冒充；改动只前置校验，不改变有效绑定下的分类输出。本节只改 `hardcoded-color-audit.mjs`、`design-layer-report.mjs`、对应测试与本文，无产品 UI、Token 源、依赖或 CI 接线变更；`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），scripts 不在带 typecheck 的 package 内。
