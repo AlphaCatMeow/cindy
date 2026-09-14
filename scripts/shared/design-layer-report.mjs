@@ -89,7 +89,7 @@ export function classifyDesignLayer({ member, layer, radius, evidence = false })
 
 export function reportDesignLayers(file, source, changed, locate, spacingVariables) {
   const findings = [];
-  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:[pm][xytrblse]?|gap(?:-[xy])?)-\[[^\]\n]+\]/g;
+  const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:[pm][xytrblse]?|gap(?:-[xy])?|space-[xy])-\[[^\]\n]+\]/g;
   for (const match of source.matchAll(patterns)) {
     const pos = locate(match.index);
     if (!changed.has(pos.line)) continue;
@@ -113,7 +113,7 @@ export function reportDesignLayers(file, source, changed, locate, spacingVariabl
       value: match[0], disposition: 'report', ...judgement,
       suggestion: isRadius
         ? 'Review the visible frame, contained mark and hit/indicator layers separately against DESIGN §5 and governance §13; register missing evidence/decisions. Do not change user radius overrides.'
-        : 'Use the existing p/px/py, m/mx/my and gap/gap-x/gap-y scales from desktop-bindings.json foundations.spacing and the component treatment in DESIGN §4/5. Verify unknown variables, calculations and fallbacks; do not infer button spacing from a DOM tag.' });
+        : 'Use the existing p/px/py, m/mx/my, gap/gap-x/gap-y and space-x/space-y scales from desktop-bindings.json foundations.spacing and the component treatment in DESIGN §4/5. Verify unknown variables, calculations and fallbacks; do not infer button spacing from a DOM tag.' });
   }
   if (/components\/settings\/.*(?:Dialog|Wizard)\.tsx$/.test(file) && changed.size) {
     findings.push({ file, line: Math.min(...changed), column: 1, rule: 'form-adoption', disposition: 'report',
