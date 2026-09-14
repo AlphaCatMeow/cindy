@@ -14,6 +14,14 @@ const exemptions = readExemptions(root);
 const renderer = 'apps/desktop/src/renderer/';
 const inspect = (file, source) => inspectFile(file, source, new Set(source.split('\n').map((_, i) => i + 1)), exemptions);
 
+test('Tailwind palette candidates report light/dark variants without expanding blocking scope', () => {
+  const hits = inspect(`${renderer}components/Example.tsx`, '<div className="bg-red-50 dark:bg-red-950/30 text-red-600 border-[var(--error-border)]" />');
+  const palette = hits.filter(hit => hit.rule === 'named-palette-candidate');
+  assert.deepEqual(palette.map(hit => hit.value), ['bg-red-50', 'bg-red-950/30', 'text-red-600']);
+  assert.ok(palette.every(hit => hit.disposition === 'report'));
+  assert.deepEqual(inspect(`${renderer}components/Example.tsx`, '// text-red-500\n<div className="text-[var(--error-fg)]" />'), []);
+});
+
 test('semantic colours, PR prose, URL and comments are not literals; numeric hex still is', () => {
   for (const source of ['hsl(var(--destructive))', 'hsla(var(--x) / .5)', 'rgb(var(--x))',
     'color-mix(in srgb, var(--a), var(--b))', 'PR #4135', '/* #4135 */',

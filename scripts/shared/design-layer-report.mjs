@@ -95,6 +95,18 @@ export function classifyDesignLayer({ member, layer, radius, evidence = false })
 
 export function reportDesignLayers(file, source, changed, locate, spacingVariables) {
   const findings = [];
+  // Candidate reporting only: a palette utility is not proof of its rendered
+  // role. Leave dynamic classes, CSS named values and exemptions to review.
+  const paletteUtility = /(?<![\w-])(?:bg|text|border|ring|fill|stroke|outline|decoration|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)(?:\/(?:\d+|\[[^\]\n]+\]))?(?![\w-])/g;
+  for (const match of source.matchAll(paletteUtility)) {
+    const pos = locate(match.index);
+    if (!changed.has(pos.line)) continue;
+    findings.push({ file, ...pos, rule: 'named-palette-candidate', value: match[0], disposition: 'report',
+      classification: 'palette-utility',
+      reason: 'Literal Tailwind palette utility; candidate only, verify rendered role and registered exceptions.',
+      suggestion: 'Use the matching semantic theme role on a production surface; preserve sanctioned content and legacy overrides. This report does not add blocking scope.',
+    });
+  }
   const patterns = /\brounded(?:-(?:\[[^\]\n]+\]|[\w-]+))?|\bborder(?:-radius|Radius)\s*:\s*[^;,}\n]+|\b(?:[pm][xytrblse]?|gap(?:-[xy])?|space-[xy])-\[[^\]\n]+\]/g;
   for (const match of source.matchAll(patterns)) {
     const pos = locate(match.index);

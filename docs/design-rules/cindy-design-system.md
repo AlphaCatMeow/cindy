@@ -12,6 +12,8 @@ DS-7 已合并 [#4215](https://github.com/makecindy/cindy/pull/4215)。入口：
 
 DS-10 的报告分类、历史回放、真实运行和未验收项见 [结果索引](../design-evidence/2026-09-13/ds10-desktop-guards.md)。维护操作复用下面入口，独立贡献者试用与工程检查分别记录。
 
+DS-11 按2026-09-15用户复核意见修订，Cindy亮暗逐项对照与未验收项见 [DS-11 结果索引](../design-evidence/2026-09-15/ds11-review-fixes.md)。原生目检与用户最终视觉批准另记。
+
 ## 文档索引
 
 | 文档 | 内容 | 角色 |
