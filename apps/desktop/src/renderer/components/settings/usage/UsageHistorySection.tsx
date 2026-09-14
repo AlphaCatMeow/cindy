@@ -206,8 +206,10 @@ export function UsageHistorySection(): React.JSX.Element {
             className="w-[180px] max-w-full"
             value={selectedDay ?? ''}
             max={history?.todayKey}
+            disabled={!history?.todayKey}
             onChange={(day) => {
-              if (/^\d{4}-\d{2}-\d{2}$/.test(day) && (!history?.todayKey || day <= history.todayKey)) {
+              if (!history?.todayKey) return;
+              if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day <= history.todayKey) {
                 handleDayClick(day);
               } else if (!day) {
                 setRange('30d');

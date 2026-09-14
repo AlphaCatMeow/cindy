@@ -82,6 +82,25 @@ function history(): UsageHistoryPayload {
 }
 
 describe('Usage history selection behavior', () => {
+  it('waits for the history date anchor before accepting a day, then rejects future dates', () => {
+    state.history = null;
+    const view = render(<UsageHistorySection />);
+    const date = view.getByLabelText('usageHistory.range.date') as HTMLInputElement;
+    expect(date.disabled).toBe(true);
+    fireEvent.change(date, { target: { value: '2099-12-31' } });
+    expect(state.taskRange).toBe('30d');
+
+    state.history = history();
+    view.rerender(<UsageHistorySection />);
+    expect(date.disabled).toBe(false);
+    expect(date.max).toBe(state.history.todayKey);
+    expect(date.value).toBe('');
+    fireEvent.change(date, { target: { value: '2099-12-31' } });
+    expect(state.taskRange).toBe('30d');
+    fireEvent.change(date, { target: { value: '2026-08-21' } });
+    expect(state.taskRange).toBe('day:2026-08-21');
+  });
+
   it('registers every historical model even when absent from the 30-day chart window', () => {
     state.history = history();
     state.history.models.push(
