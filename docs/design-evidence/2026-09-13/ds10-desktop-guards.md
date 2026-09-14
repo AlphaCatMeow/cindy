@@ -101,3 +101,15 @@ Codex 对 `00a0e750b` 的复审指出：前缀正确但目标不存在的条目�
 脚本再次变化，按流程在 `373d435a5` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍与原记录逐组一致，baseline 与脚本哈希更新（`hardcoded-color-audit.mjs` `83623750…`、`design-layer-report.mjs` `c41d76bd…`、新增 `semantic/foundations.json` `61651580…`），样本数值未变。
 
 派发时 Windows unit tests 聚合在 `00a0e750b` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、`hardcoded-color-audit.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复四轮：叶 Token 校验与 root 跟随
+
+Codex 对 `cde72543e` 的复审指出两点，均已复现并修复（commit `18873ea31`）：
+
+1. 绑定目标在 DTCG 源里键存在但为 `{}` 或分组对象时仍放行；而生产生成器的 `flatten()` 只把携带 `$value` 的对象当作 Token（`production.ts`），此类目标不会进入生成输出，`p-[var(--space-4)]` 仍会被标成真实来源。校验改为要求目标是含 `$value` 且 `$type` 为 `dimension` 的叶 Token（真实文件 36 个 space Token 均为显式 dimension 叶，无误伤）。
+2. `audit({root})` 审计隔离仓时，绑定读取与哈希未跟随 `root`：隔离仓的有效 `--space-local` 被标成 unknown-spacing-reference，损坏绑定被忽略。绑定读取改为 `readSpacingVariables(root)` 每次审计调用新鲜执行并把集合下穿分类链（避免进程级缓存吞掉调用间损坏），绑定/DTCG/豁免哈希改从 `root` 读取，运行脚本哈希仍绑定实际执行的脚本。
+
+回归测试补 `{}` 叶目标、隔离仓有效来源分类与两次调用之间损坏绑定抛错断言；隔离 fixture 的绑定与 DTCG 拷贝提前到首个 `audit({root})` 之前。脚本再次变化，按流程在 `18873ea31` 树上重跑全部 23 组回放：counts、candidateHash、expectedBlock 仍逐组一致，baseline 与 `hardcoded-color-audit.mjs`（`9f516ab…`）、`design-layer-report.mjs`（`1939615…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `cde72543e` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、`hardcoded-color-audit.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
