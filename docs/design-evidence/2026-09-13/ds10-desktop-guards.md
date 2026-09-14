@@ -134,3 +134,12 @@ Codex 对 `bfe99b387` 的复审指出两点，均已复现并修复（commit `12
 脚本再次变化，按流程在 `12987f2c9` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变；report 计数无漂移——历史样本的新增行里没有任意 margin 用法，本轮覆盖扩展未改变任何历史结果。baseline 与 `design-layer-report.mjs`（`e5d05bc…`）哈希更新，样本数值未变。
 
 派发时 Windows unit tests 聚合在 `bfe99b387` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
+
+
+## 2026-09-14 审查修复七轮：space-x/y 任意值
+
+Codex 对 `18254a625` 的复审指出：`space-x-[…]`、`space-y-[…]` 也是间距消费者，但模式不匹配，新增不产生 role-spacing 报告；仓内 `AtMentionPanel.tsx:490`、`QuotaHoverCard.tsx:310` 有真实用法。已复现（两类任意值均零 findings，引用用法属实）。修复（commit `a4bad4e6a`）：pattern 增加 `space-[xy]` 进同一分类链，来源引用/混合/裸值同口径报告，suggestion 文案同步；尺度类 `space-x-2` 与 `space-y-reverse` 仍不报。另排查 `scroll-m*`/`scroll-p*`/`indent-*` 等其余间距消费者：renderer 内无任意值用法，无同类漏网。
+
+脚本再次变化，按流程在 `a4bad4e6a` 树上重跑全部 23 组回放：candidateHash、颜色计数、unexpected=expectedBlock=0 全部不变，report 计数无漂移（历史样本新增行无 space-x/y 任意值），baseline 与 `design-layer-report.mjs`（`c2f13f2…`）哈希更新，样本数值未变。
+
+派发时 Windows unit tests 聚合在 `18254a625` 上仍未上报（分片进行中）；本轮 push 新 head 后以新 head 检查为准。`pnpm test:unit:related` 通过（runner 540 pass / 1 存量 skip），候选审计 unexpected=0。本轮只改 `design-layer-report.mjs`、审计测试、`ds10-replay.json` 与本文，无产品 UI、Token 源、依赖或 CI 接线变更。
