@@ -55,7 +55,10 @@ function classifySpacing(value, spacingVariables = getSpacingVariables()) {
       reason: 'Contains a variable outside the generated spacing bindings; verify its source, fallbacks and component role. A variable name alone is not approval.' };
   }
   if (references.length) {
-    const mixed = /\d/.test(expression.replace(/--[\w-]+/g, ''));
+    // A var() fallback is a second value even when it carries no digit
+    // (initial, auto, a nested var): recognise it explicitly, never by
+    // whether a digit happens to appear in the rest of the expression.
+    const mixed = /var\(\s*--[\w-]+\s*,/.test(expression) || /\d/.test(expression.replace(/--[\w-]+/g, ''));
     return { classification: mixed ? 'mixed-spacing-expression' : 'spacing-expression',
       reason: mixed ? 'Combines spacing references with literal values (including fallbacks); review each literal and the component role.'
         : 'Derived spacing expression; verify the calculation and component role. References do not approve the whole expression.' };
