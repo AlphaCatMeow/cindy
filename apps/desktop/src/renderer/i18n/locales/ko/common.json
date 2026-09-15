@@ -10910,6 +10910,7 @@
       "titleLabel": "제목",
       "bodyLabel": "본문(Markdown)",
       "privacyHint": "Issue 제목과 본문은 공개되며 검색되거나 캐시될 수 있습니다. 자동 가림은 일부 일반적인 형식만 처리하며 문맥상 민감한 정보를 모두 감지할 수는 없습니다.",
+      "relatedLogsHint": "이 제출에는 위에 표시된 관련 클라이언트 로그가 포함됩니다. 공개 전에 출처 및 필드 필터링, 가림, 길이 제한이 적용됩니다.",
       "privacyConfirm": "위 공개 내용을 검토했으며 비공개로 유지해야 할 개인, 대화 또는 업무 정보가 포함되지 않았음을 확인했습니다",
       "submissionMethodLabel": "제출 계정",
       "identityGithubUser": "내 GitHub 계정 @{{login}}",
