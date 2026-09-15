@@ -5849,6 +5849,11 @@
     "ssoOrgHint": "Don't know your enterprise sign-in identifier? Ask your admin",
     "ssoOrgDetected": "Choose a single sign-on connection for \"{{org}}\"",
     "realmConsent": {
+      "personalTitle": "Enterprise sign-in available",
+      "personalBodyCn": "Enterprise found in Mainland China.\nUse SSO or continue with your account.",
+      "personalBodyGlobal": "Enterprise found in the Global region.\nUse SSO or continue with your account.",
+      "enterpriseLogin": "Enterprise SSO",
+      "continuePersonal": "Continue personal",
       "title": "Connect to your enterprise region",
       "bodyCn": "Your enterprise is in Mainland China.\nContinue to connect Cindy to this region.",
       "bodyGlobal": "Your enterprise is in the Global region.\nContinue to connect Cindy to this region.",

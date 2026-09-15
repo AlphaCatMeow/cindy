@@ -5843,6 +5843,11 @@
     "ssoOrgHint": "不知道企業登入標識？請聯絡企業管理員",
     "ssoOrgDetected": "選擇企業「{{org}}」的單點登入方式",
     "realmConsent": {
+      "personalTitle": "發現企業登入",
+      "personalBodyCn": "信箱對應企業位於中國大陸區。\n可使用企業 SSO，或繼續個人登入。",
+      "personalBodyGlobal": "信箱對應企業位於國際區。\n可使用企業 SSO，或繼續個人登入。",
+      "enterpriseLogin": "企業 SSO",
+      "continuePersonal": "繼續個人登入",
       "title": "連線企業所在區域",
       "bodyCn": "你的企業位於中國大陸區。\n繼續後，Cindy 會連線該區域。",
       "bodyGlobal": "你的企業位於國際區。\n繼續後，Cindy 會連線該區域。",
