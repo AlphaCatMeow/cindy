@@ -5843,6 +5843,11 @@
     "ssoOrgHint": "不知道企业登录标识？请联系企业管理员",
     "ssoOrgDetected": "选择企业「{{org}}」的单点登录方式",
     "realmConsent": {
+      "personalTitle": "发现企业登录",
+      "personalBodyCn": "邮箱对应企业位于中国大陆区。\n可使用企业 SSO，或继续个人登录。",
+      "personalBodyGlobal": "邮箱对应企业位于国际区。\n可使用企业 SSO，或继续个人登录。",
+      "enterpriseLogin": "企业 SSO",
+      "continuePersonal": "继续个人登录",
       "title": "连接企业所在区域",
       "bodyCn": "你的企业位于中国大陆区。\n继续后，Cindy 会连接该区域。",
       "bodyGlobal": "你的企业位于国际区。\n继续后，Cindy 会连接该区域。",
