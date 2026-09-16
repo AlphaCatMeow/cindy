@@ -3826,6 +3826,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCindyMakeSourceStatus: (): Promise<import('../shared/cindyMakeDoctor').MakeSourceStatus> =>
     ipcRenderer.invoke('app:get-cindy-make-source-status'),
 
+  getCindyMakeState: (): Promise<import('../shared/cindyMakeDoctor').CindyMakeGlobalState> =>
+    ipcRenderer.invoke('app:get-cindy-make-state'),
+
+  onCindyMakeState: (
+    listener: (state: import('../shared/cindyMakeDoctor').CindyMakeGlobalState) => void,
+  ): (() => void) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      state: import('../shared/cindyMakeDoctor').CindyMakeGlobalState,
+    ) => listener(state);
+    ipcRenderer.on('maker:cindy-make:state-changed', wrapped);
+    return () => ipcRenderer.removeListener('maker:cindy-make:state-changed', wrapped);
+  },
+
   openCindyMakeSourceDir: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('app:open-cindy-make-source-dir'),
 
@@ -4774,6 +4788,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:hook-control:add-binding'),
     rebindTeam: (teamId: string): Promise<{ hook: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:rebind-team', { teamId }),
+    setSlackCommunications: (teamId: string, enabled: boolean): Promise<{ hook: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:set-slack-communications', { teamId, enabled }),
     revokeTeam: (teamId: string): Promise<{ hook: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:revoke-team', { teamId }),
     cancelPendingBind: (): Promise<{ hook: unknown }> =>
