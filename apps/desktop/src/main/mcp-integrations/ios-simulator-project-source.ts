@@ -41,7 +41,7 @@ export async function acquireIOSSimulatorProjectUse(
     if (!available) {
       throw new IOSSimulatorInstanceError('INVALID_ARGUMENT', 'The selected project directory is unavailable.');
     }
-    const lease = await acquireWorktreeRuntimeLease(`ios-simulator:${sessionId}`, projectRoot);
+    const lease = await acquireWorktreeRuntimeLease(`ios-simulator:${sessionId}`, projectRoot, { crossProfile: true });
     if (!lease) return null;
     const resourceId = worktreeResourceId(lease.physicalPath);
     const unsubscribe = subscribeWorktreeRecycleEvents((event) => {

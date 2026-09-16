@@ -3,10 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const state = vi.hoisted(() => ({ root: '' }));
+const state = vi.hoisted(() => ({ root: '', userData: '' }));
 const notify = vi.hoisted(() => vi.fn());
 const readIdentity = vi.hoisted(() => vi.fn());
-vi.mock('electron', () => ({ app: { getPath: () => state.root } }));
+vi.mock('electron', () => ({ app: { getPath: (name: string) => name === 'appData' ? path.join(state.root, 'app-data') : (state.userData || state.root) } }));
 vi.mock('../worktree/recycleEvents', () => ({ notifyWorktreeRecycleOpportunity: notify }));
 vi.mock('../desktopProcessIdentity', async (importOriginal) => ({
   ...await importOriginal<typeof import('../desktopProcessIdentity')>(),
@@ -21,6 +21,7 @@ describe('worktree runtime evidence and physical locks', () => {
   const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
   beforeEach(async () => {
     state.root = await fs.mkdtemp(path.join(os.tmpdir(), 'cindy-worktree-runtime-'));
+    state.userData = '';
     worktree = path.join(state.root, 'repo', '.cindy-worktrees', 'one');
     await fs.mkdir(path.join(worktree, 'src'), { recursive: true });
     await fs.mkdir(path.join(state.root, '.dev-instances'));
@@ -75,6 +76,57 @@ describe('worktree runtime evidence and physical locks', () => {
     });
     await expect(acquireWorktreeRuntimeLease('one', worktree)).rejects.toThrow('lease write interrupted');
     expect(await fs.readdir(path.dirname(oldLease.file))).toEqual([path.basename(oldLease.file)]);
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(worktree)]));
+    await releaseWorktreeRuntimeLease(oldLease);
+  });
+
+  it('retries a failed shared lease release from another isolated profile', async () => {
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    const unlink = fs.unlink.bind(fs);
+    let blocked = true;
+    vi.spyOn(fs, 'unlink').mockImplementation(async (file) => {
+      if (file === lease.sharedFile && blocked) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return unlink(file);
+    });
+    await expect(releaseWorktreeRuntimeLease(lease)).rejects.toMatchObject({ code: 'EBUSY' });
+    await expect(fs.stat(lease.file)).rejects.toMatchObject({ code: 'ENOENT' });
+    state.userData = path.join(state.root, 'profile-b');
+    await fs.mkdir(path.join(state.userData, '.dev-instances'), { recursive: true });
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(worktree)]));
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(1);
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(worktree)]));
+    blocked = false;
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(0);
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    await expect(fs.stat(`${lease.sharedFile}.release`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['crashed-owner', 'partial-write'] as const)('keeps shared lease evidence protective after %s', async (reason) => {
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    state.userData = path.join(state.root, 'profile-b');
+    await fs.mkdir(path.join(state.userData, '.dev-instances'), { recursive: true });
+    if (reason === 'partial-write') await fs.writeFile(lease.sharedFile!, '{');
+    else vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('owner is gone'), { code: 'ESRCH' });
+    });
+    expect(await readWorktreeRuntimePaths()).toEqual(reason === 'partial-write' ? null : new Set([await physicalWorktreeKey(worktree)]));
+    await releaseWorktreeRuntimeLease(lease);
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+  });
+
+  it('cleans a failed shared publication without removing an older profile lease', async () => {
+    const oldLease = (await acquireWorktreeRuntimeLease('borrower', worktree))!;
+    const sharedRoot = path.join(state.root, 'app-data', 'Cindy', 'shared-worktree-runtime-leases');
+    const write = fs.writeFile.bind(fs);
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (...args) => {
+      await write(...args);
+      if (typeof args[0] === 'string' && path.dirname(args[0]) === sharedRoot) {
+        throw Object.assign(new Error('shared publication interrupted'), { code: 'EIO' });
+      }
+    });
+    await expect(acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true })).rejects.toThrow('shared publication interrupted');
+    expect(await fs.readdir(path.dirname(oldLease.file))).toEqual([path.basename(oldLease.file)]);
+    expect(await fs.readdir(sharedRoot)).toEqual([]);
     expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(worktree)]));
     await releaseWorktreeRuntimeLease(oldLease);
   });

@@ -1026,6 +1026,10 @@ fingerprint 和相对 container 路径；该 fingerprint 不代表 Git revision 
 
 构建和 Metro 检查借用现有 worktree runtime lease 保护所选托管目录。本进程的回收事件
 会取消正在使用该目录的操作，实际读取结束后才释放租约；跨进程回收也必须等待租约释放。
+模拟器借用会同时发布 profile 内租约和 `appData/Cindy/shared-worktree-runtime-leases`
+中的共享副本，回收器合并读取两处，避免隔离 profile 之间看不到对方的借用；释放失败
+沿用 `.release` 回执重试，进程退出本身不能证明 Xcode 或 Metro 已停止读取。
+跨 profile 借用要求回收方也运行包含共享租约读取支持的版本；profile 内副本保留原读取协议。
 任务 A 结束时排空自己的操作，不因其构建了 B 就把 B 加入 A 的目录删除范围。
 这仍是工程选择与目录边界校验，不是对 Xcode build scripts 的文件系统沙箱。
 
