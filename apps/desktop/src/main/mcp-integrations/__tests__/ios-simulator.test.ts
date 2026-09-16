@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import {
+import fsp, {
   mkdir,
   mkdtemp,
   readFile,
@@ -73,7 +73,7 @@ vi.mock('../../appSessionState.js', async (importOriginal) => {
 
 import type { IOSSimulatorPublicRouteStatus } from '../../../shared/iosSimulatorIpc';
 import { newRecycleRecord, writeRecycleRecord } from '../../worktree/recycleJournal';
-import { physicalWorktreeKey, withWorktreeResourceLock } from '../../worktree/resourceLock';
+import { physicalWorktreeKey, withWorktreeResourceLock, worktreeResourceId } from '../../worktree/resourceLock';
 import { readWorktreeRuntimePaths } from '../../worktree/runtimeLeases';
 import {
   cancelIOSSimulatorSessionOperations,
@@ -493,6 +493,68 @@ describe('iOS Simulator host', () => {
       expect(a!.clonedSourcePackagesDirPath).toBe(c!.clonedSourcePackagesDirPath);
       expect(await readWorktreeRuntimePaths()).toEqual(new Set());
     } finally { unblock(); await h.close(); }
+  });
+
+  it.each([
+    ['build_app', 'task-cancel'], ['build_app', 'host-dispose'],
+    ['launch_app', 'task-cancel'], ['launch_app', 'host-dispose'],
+  ] as const)('cancels %s while its project lock is held during %s', async (tool, reason) => {
+    const h = await projectSelectionHarness(tool === 'launch_app');
+    let unlock: () => void = () => undefined;
+    let holding: Promise<void> | undefined;
+    let operation: ReturnType<typeof h.host.callTool> | undefined;
+    let cancelling: Promise<void> | undefined;
+    const openSpy = vi.spyOn(fsp, 'open');
+    try {
+      let artifactId: string | undefined;
+      if (tool === 'launch_app') {
+        expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: true });
+        artifactId = (await h.inspectArtifact.mock.results[0]!.value).artifactId;
+        expect(await h.host.callTool('install_app', { ...h.route, artifactId }, h.context)).toMatchObject({ ok: true });
+      }
+      h.build.mockClear();
+      h.inspect.mockClear();
+      let acquired: () => void = () => undefined;
+      const ready = new Promise<void>((resolve) => { acquired = resolve; });
+      const gate = new Promise<void>((resolve) => { unlock = resolve; });
+      holding = withWorktreeResourceLock(h.projectRoot, async () => { acquired(); await gate; });
+      await ready;
+      const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+      const lockPath = path.join(os.tmpdir(), `cindy-worktree-${uid}-${worktreeResourceId(await physicalWorktreeKey(h.projectRoot))}.lock`);
+      const ownerRecord = await readFile(lockPath, 'utf8');
+      openSpy.mockClear();
+
+      let finished = false;
+      operation = h.host.callTool(tool, { ...h.route, projectDir: h.projectRoot, artifactId, args: [] }, h.context);
+      void operation.then(() => { finished = true; });
+      // Wait for actual contention, before project inspection or lease creation.
+      await vi.waitFor(() => expect(openSpy).toHaveBeenCalledWith(lockPath, 'wx'));
+      let cancellationFinished = false;
+      cancelling = (reason === 'host-dispose' ? h.host.dispose() : h.host.cancelSessionOperations('session-a'))
+        .then(() => { cancellationFinished = true; });
+      await vi.waitFor(() => {
+        expect(finished).toBe(true);
+        expect(cancellationFinished).toBe(true);
+      }, { timeout: 2_000 });
+      expect(await operation).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
+      expect(await readFile(lockPath, 'utf8')).toBe(ownerRecord);
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+
+      unlock();
+      await holding;
+      await withWorktreeResourceLock(h.projectRoot, async () => undefined);
+      expect(h.inspect).not.toHaveBeenCalled();
+      expect(h.build).not.toHaveBeenCalled();
+      expect(h.validateLaunch).not.toHaveBeenCalled();
+      expect(h.launchExact).not.toHaveBeenCalled();
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    } finally {
+      unlock();
+      await holding;
+      await Promise.allSettled([operation, cancelling]);
+      openSpy.mockRestore();
+      await h.close();
+    }
   });
 
   it.each(['source-recycle', 'task-cancel'] as const)('keeps B protected until the external build drains after %s', async (reason) => {

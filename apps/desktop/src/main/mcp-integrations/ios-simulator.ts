@@ -6662,7 +6662,7 @@ export function createIOSSimulatorHost(options: IOSSimulatorHostOptions = {}): I
                 const sourceController = new AbortController();
                 const sourceSignal = AbortSignal.any([signal, sourceController.signal]);
                 const releaseProjectUse = await acquireIOSSimulatorProjectUse(
-                  instance.sessionId, stored.artifact.worktreeRoot, sourceController,
+                  instance.sessionId, stored.artifact.worktreeRoot, sourceController, sourceSignal,
                 );
                 try {
                   if (sourceSignal.aborted) {

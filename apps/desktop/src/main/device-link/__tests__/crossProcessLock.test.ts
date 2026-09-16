@@ -81,6 +81,52 @@ async function writeStaleReclaimGate(lock: string): Promise<void> {
   await fsp.utimes(gate, old, old);
 }
 
+describe('advisory lock cancellation', () => {
+  it('does not publish a lock or enter the task when already cancelled', async () => {
+    const lock = path.join(dir, 'cancelled-lock');
+    const controller = new AbortController();
+    controller.abort();
+    const task = vi.fn(async () => undefined);
+
+    await expect(withAdvisoryCrossProcessLock(lock, { label: 'cancelled' }, task, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(task).not.toHaveBeenCalled();
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it.each(['acquired', 'busy'] as const)('cancels at the %s boundary without leaking or removing another owner', async (state) => {
+    const lock = path.join(dir, 'cancelled-lock');
+    const ownerRecord = JSON.stringify({ pid: process.pid, nonce: 'existing-owner' });
+    if (state === 'busy') await fsp.writeFile(lock, ownerRecord);
+    const controller = new AbortController();
+    const task = vi.fn(async () => undefined);
+    const originalOpen = fsp.open;
+    const openSpy = vi.spyOn(fsp, 'open').mockImplementation(async (...args) => {
+      try {
+        return await originalOpen(...args);
+      } finally {
+        // Cancel during acquisition, including the last attempt at the deadline.
+        if (args[0] === lock) controller.abort();
+      }
+    });
+    try {
+      await expect(withAdvisoryCrossProcessLock(lock, { label: 'cancelled', waitMs: 0 }, task, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(task).not.toHaveBeenCalled();
+      if (state === 'busy') {
+        expect(await fsp.readFile(lock, 'utf8')).toBe(ownerRecord);
+        await fsp.rm(lock);
+      } else {
+        await expect(fsp.stat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    } finally {
+      openSpy.mockRestore();
+    }
+    await expect(withAdvisoryCrossProcessLock(lock, { label: 'next' }, async (status) => status))
+      .resolves.toEqual({ held: true });
+  });
+});
+
 describe('接管陈旧锁', () => {
   it('删得掉 → 接管成功,task 拿到 held=true', async () => {
     const lock = path.join(dir, 'lock');

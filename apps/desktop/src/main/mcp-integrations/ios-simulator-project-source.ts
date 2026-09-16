@@ -30,12 +30,14 @@ export async function acquireIOSSimulatorProjectUse(
   sessionId: string,
   projectRoot: string,
   controller: AbortController,
+  signal: AbortSignal = controller.signal,
 ): Promise<(() => Promise<void>) | null> {
   const managedRoot = managedWorktreeRoot(projectRoot);
   if (!managedRoot) return null;
   return withWorktreeResourceLock(managedRoot, async () => {
     // Recheck after taking the deletion lock: selection may have raced reclamation.
     const available = await stat(projectRoot).then((value) => value.isDirectory(), () => false);
+    signal.throwIfAborted();
     if (!available) {
       throw new IOSSimulatorInstanceError('INVALID_ARGUMENT', 'The selected project directory is unavailable.');
     }
@@ -68,5 +70,10 @@ export async function acquireIOSSimulatorProjectUse(
       await release();
       throw error;
     }
+  }, signal).catch((error) => {
+    if (signal.aborted) {
+      throw new IOSSimulatorInstanceError('MUTATION_CANCELLED', 'The app operation was cancelled while acquiring its project worktree.', true);
+    }
+    throw error;
   });
 }
