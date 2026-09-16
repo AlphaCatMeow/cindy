@@ -66,3 +66,12 @@ export function mergeSettlingItems<T extends { clientId: string }>(
   const extra = derived.filter((item) => !known.has(item.clientId));
   return extra.length === 0 ? settled : [...settled, ...extra];
 }
+
+/** Enqueue and drain can both finish before React observes the queued frame. */
+export function settleEnqueueResult<T extends { clientId: string }>(
+  current: readonly T[], queued: T, accepted: boolean, pendingQueue: readonly T[],
+): readonly T[] {
+  if (!accepted) return current.filter((item) => item.clientId !== queued.clientId);
+  if (pendingQueue.some((item) => item.clientId === queued.clientId)) return current;
+  return mergeSettlingItems(current, [queued]);
+}
