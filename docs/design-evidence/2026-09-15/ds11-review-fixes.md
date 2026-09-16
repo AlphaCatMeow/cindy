@@ -150,3 +150,11 @@ Token 生成、50 个 surface 台账与颜色增量检查通过（unexpected=0�
 - 此次是范围缩减；此前双审与运行证据绑定其原提交，不冒充撤出后的独立复审。撤出后的自审确认 hook 与 main 基线逐字节一致，整个 PR 的 Mobile 文件差异为空。
 - 撤出后的隔离验证树 `039db0ff6699` 执行根级 `VITE_CINDY_AUTH_REGION=global pnpm test:unit:related` 退出 0：runner 542 通过 / 1 跳过，Desktop 84.1 秒、design-tokens 19.8 秒；Mobile 与 main 无差异，本次 related 未选择它，不声称重新跑过已撤出的测试。Desktop、Mobile、design-tokens 类型检查均通过。最终提交相对该验证树仅补本段验证文字。
 - HTML 手机 / 桌面复验通过：24 个审核项、128 处图片，N7 卡片及导航已移除；94 张保留图片内容不变，键盘同位切换、分割线、差异高亮、缩放及本地审核标记保留。
+
+## 2026-09-16：同步 main 并解决生成台账冲突
+
+- 将 main `40f087c99c` 合入 N7 已撤出的 DS-11。唯一文本冲突是 `design-inventory.md` 生成区的快照日期，按合并源码重生成；50 个 surface 校验通过，人工区原样保留。
+- 47 个未与主干重叠的 DS 文件保持原内容（含删除的全局 Tab hook）；五种语言同时保留主干所有新增内容和 DS 日期词条。相对最新 main，`apps/mobile` 差异仍为空，N7 没有重新引入。
+- 在独立验证目录，将同一个合并树 `cacd7554b404` 放在最新 main 基线上执行根级 `VITE_CINDY_AUTH_REGION=global pnpm test:unit:related`，退出 0：runner 543 通过 / 2 跳过，Desktop 84.2 秒、design-tokens 19.9 秒。Desktop、design-tokens 类型检查及 Token 生成物检查通过。最终提交相对被测树只追加本段记录和治理表的正式 PR 状态。
+- 首次检查被目录自动选择的 Node 24 与 SQLite 的 Node 22 ABI 不匹配阻断；固定 Node 22.22.3 后，原断言、原超时和同一根级命令通过，没有修改产品或测试来规避失败。
+- 用户明确免本地双审；本轮由主会话核对合并保真与执行检查。不把此前独立审查或 main 401 的历史截图冒充本轮重新双审或整页视觉复验；用户已有皮肤审核记录保留。
