@@ -3022,6 +3022,11 @@ interface ElectronAPI {
     filePath?: string;
   }) => Promise<{ success: boolean; error?: string }>;
 
+  /** Copy an in-memory PNG export to the local native clipboard. */
+  copyPngToClipboard: (
+    params: import('../shared/pngClipboard').CopyPngToClipboardParams,
+  ) => Promise<void>;
+
   /**
    * Copy an image or video (resolved from `xdt-image://` / `xdt-video://`
    * URL, or absolute path) into the system clipboard as a FILE REFERENCE.

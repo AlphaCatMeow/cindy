@@ -503,6 +503,8 @@ import { isMainShellWindowUrl } from './cindy-brain/scheduleSlot.js';
 import { sanitizeGhostNoticeText } from './cindy-brain/notifySlot.js';
 import { isIpcError } from '../shared/ipc-errors';
 import { readFileBytesForPreview } from './fileReadBytes.js';
+import { copyPngToClipboard } from './pngClipboard.js';
+import { COPY_PNG_TO_CLIPBOARD_CHANNEL } from '../shared/pngClipboard.js';
 import { initHeartbeatService } from './heartbeatService';
 import { registerRemoteDesktopIpc } from './remote-desktop';
 import { initAnalyticsSettingsService, noteAuthColdStartState } from './analyticsSettingsService';
@@ -7458,6 +7460,15 @@ const registerIpcHandlers = () => {
       );
     }
   });
+
+  // Local export bytes stay in memory; never route this to a remote host.
+  ipcMain.handle(COPY_PNG_TO_CLIPBOARD_CHANNEL, (event, params) =>
+    copyPngToClipboard(event, params, {
+      assertTrustedSender: assertTrustedAppRendererEvent,
+      decode: (bytes) => nativeImage.createFromBuffer(bytes),
+      write: (data) => clipboard.write(data),
+    }),
+  );
 
   // ── Native clipboard helpers (media:copy-to-clipboard) ──
   //
