@@ -779,6 +779,8 @@ Known but deliberately-deferred cleanups are tracked in the decision log's backl
 
 ### 14.2 Focus Management
 
+- Preserve ordinary Tab / Shift+Tab traversal at the app root. Only the focused component may consume Tab for a specific interaction (such as editor completion or a modal focus loop); never globally cancel it. Verify keyboard paths with the real App mounted, since component-only fixtures omit root listeners.
+
 - When a dismissible form opens, focus its primary input. Ordinary ConfirmDialog retains Cancel by default; explicit `autoFocusConfirm` opts into the primary action, and typed confirmation takes precedence (§4, DS-6). Selection-only dialogs such as InstallTargetPicker start on Cancel to avoid focusing an immediate installation action. Contain Tab, support Esc when idle, and restore the opener on close; actual saving/installation blocks dismissal until settlement.
 - On close, focus returns to the triggering element (Radix default — don't break it).
 

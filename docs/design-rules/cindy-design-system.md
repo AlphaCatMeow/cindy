@@ -8,7 +8,7 @@ DS-6 已随 [#4135](https://github.com/makecindy/cindy/pull/4135) 合入（head 
 
 DS-7 已合并 [#4215](https://github.com/makecindy/cindy/pull/4215)。入口：[规则范围与回退](./design-governance.md#8-治理接线纪律)、[固定历史回放、注入和接线证据](../design-evidence/2026-09-10/ds7-guards.md)。新增颜色可用 `pnpm check:design-colors --base-ref <基线> --worktree` 检查；只报告用 `pnpm report:design-colors`。main 已启用该接线；历史采证版本与最终合并事实见治理 §8。
 
-> 2026-09-11：DS-8 已合并 [#4268](https://github.com/makecindy/cindy/pull/4268)，Desktop 静态数值已接 DTCG→Terrazzo。DS-9 已合并 [#4300](https://github.com/makecindy/cindy/pull/4300)，DS-10 已完成报告与维护的本地提交候选，最终验收缺项仍单列；Mobile 留待独立阶段。工程、人工与平台验收分别记录。
+> 2026-09-11：DS-8 已合并 [#4268](https://github.com/makecindy/cindy/pull/4268)，Desktop 静态数值已接 DTCG→Terrazzo。DS-9 已合并 [#4300](https://github.com/makecindy/cindy/pull/4300)，DS-10 已随 [#4427](https://github.com/makecindy/cindy/pull/4427) 合入（`2afecd89e5`），最终验收缺项仍单列；Mobile 留待独立阶段。工程、人工与平台验收分别记录。
 
 DS-10 的报告分类、历史回放、真实运行和未验收项见 [结果索引](../design-evidence/2026-09-13/ds10-desktop-guards.md)。维护操作复用下面入口，独立贡献者试用与工程检查分别记录。
 
