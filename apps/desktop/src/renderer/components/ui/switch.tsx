@@ -52,11 +52,27 @@ const Switch = React.forwardRef<
   ) => {
     const thumbRef = React.useRef<HTMLSpanElement>(null);
     const gesture = React.useRef<Gesture | null>(null);
-    const suppressPointerClick = React.useRef(false);
+    const suppressPointerClick = React.useRef<(() => void) | null>(null);
     const [hovered, setHovered] = React.useState(false);
     const [pressed, setPressed] = React.useState(false);
     const [dragX, setDragX] = React.useState<number | null>(null);
 
+    const clearClickSuppression = () => {
+      suppressPointerClick.current?.();
+      suppressPointerClick.current = null;
+    };
+    const suppressGestureClick = (button: HTMLButtonElement) => {
+      clearClickSuppression();
+      const document = button.ownerDocument;
+      // A cancelled gesture may produce no click. A new interaction, including
+      // one on an associated label, must always be allowed to activate Radix.
+      document.addEventListener('pointerdown', clearClickSuppression, {
+        capture: true,
+        once: true,
+      });
+      suppressPointerClick.current = () =>
+        document.removeEventListener('pointerdown', clearClickSuppression, true);
+    };
     const releaseCapture = () => {
       const active = gesture.current;
       gesture.current = null;
@@ -65,7 +81,7 @@ const Switch = React.forwardRef<
       }
     };
     const cancel = () => {
-      if (gesture.current) suppressPointerClick.current = true;
+      if (gesture.current) suppressGestureClick(gesture.current.button);
       releaseCapture();
       setPressed(false);
       setDragX(null);
@@ -76,7 +92,13 @@ const Switch = React.forwardRef<
         setHovered(false);
       }
     }, [disabled]);
-    React.useEffect(() => () => releaseCapture(), []);
+    React.useEffect(
+      () => () => {
+        releaseCapture();
+        clearClickSuppression();
+      },
+      [],
+    );
 
     const thumbWidth =
       !disabled && pressed ? PRESS_WIDTH : !disabled && hovered ? HOVER_WIDTH : THUMB_SIZE;
@@ -103,7 +125,7 @@ const Switch = React.forwardRef<
           // Drag release invokes the ordinary Radix click once. Suppress only the
           // subsequent native pointer click, never keyboard or label activation.
           if (suppressPointerClick.current && event.detail > 0) {
-            suppressPointerClick.current = false;
+            clearClickSuppression();
             event.preventDefault();
             event.stopPropagation();
             return;
@@ -143,7 +165,7 @@ const Switch = React.forwardRef<
               (thumb.getBoundingClientRect().left - bounds.left) / scale - button.clientLeft,
             ),
           );
-          suppressPointerClick.current = false;
+          clearClickSuppression();
           gesture.current = {
             id: event.pointerId,
             button,
@@ -176,7 +198,7 @@ const Switch = React.forwardRef<
           setDragX(null);
           if (event.pointerType !== 'mouse') setHovered(false);
           if (active.dragging) {
-            suppressPointerClick.current = true;
+            suppressGestureClick(active.button);
             const next = active.x > active.maxX / 2;
             if (
               !event.defaultPrevented &&

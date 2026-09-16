@@ -69,3 +69,7 @@ Switch 补丁可无冲突应用；本分支仅收录 Switch 代码、主题与�
 - client-ci 静态预检：设计台账、端点、i18n / 品牌 / 术语、Mobile 类型与 scope、migration、scheduler，以及 device-link 编译与集成测试均通过。
 - 新分支未重启宿主；上方实机证据对应相同 Switch 实现，不能当作新 main/preload 构建的证明。
 - 可交互确认稿：https://cindy-design-lab.workers.xd.team/#/switch ，这是设计稿，非实机截图。
+
+提交前按用户要求由主 Agent 自查，取消本地双审。自查复现并修复了取消拖动后残留点击抑制
+导致下一次关联标签点击失效的问题；新增回归测试，Switch 输入测试共 12 项通过。
+该修复只清理交互标记，不改变上方已目检的配色、尺寸和动效；修复后的标签路径通过组件测试验证。

@@ -207,6 +207,27 @@ describe('Switch input compatibility', () => {
     expect((track as HTMLButtonElement).hasPointerCapture(1)).toBe(false);
   });
 
+  it('does not swallow a later label activation after pointer cancellation', () => {
+    const changed = vi.fn();
+    render(
+      <>
+        <label htmlFor="cancelled-switch">Notifications</label>
+        <Switch id="cancelled-switch" onCheckedChange={changed} />
+      </>,
+    );
+    const track = prepare(screen.getByRole('switch'));
+    fireEvent.pointerDown(track, { clientX: 106 });
+    fireEvent.pointerMove(track, { clientX: 130 });
+    fireEvent.pointerCancel(track);
+    // Browsers do not dispatch click after pointercancel. The next label
+    // activation is a separate interaction, with no pointerdown on the Switch.
+    const label = screen.getByText('Notifications');
+    fireEvent.pointerDown(label);
+    fireEvent.pointerUp(label);
+    fireEvent.click(label, { detail: 1 });
+    expect(changed.mock.calls).toEqual([[true]]);
+  });
+
   it('respects consumer event cancellation for pointer gestures and clicks', () => {
     const changed = vi.fn();
     const { rerender } = render(
