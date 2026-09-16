@@ -437,6 +437,10 @@ describe('iOS Simulator host', () => {
   it('installs the external artifact on task A and validates Cindy Mobile launch against B', async () => {
     const h = await projectSelectionHarness(true);
     try {
+      h.validateLaunch.mockImplementationOnce(async () => {
+        expect((await stat(path.join(h.projectRoot, '.worktree-keep'))).isFile()).toBe(true);
+        return null;
+      });
       const result = await h.host.callTool('build_app', { ...h.route, projectDir: path.relative(h.taskRoot, h.projectRoot) }, h.context);
       expect(result).toMatchObject({ ok: true });
       const artifactId = (await h.inspectArtifact.mock.results[0]!.value).artifactId;
@@ -444,6 +448,7 @@ describe('iOS Simulator host', () => {
       expect(installed, JSON.stringify(installed)).toMatchObject({ ok: true });
       const launched = await h.host.callTool('launch_app', { ...h.route, artifactId, args: [] }, h.context);
       expect(launched, JSON.stringify(launched)).toMatchObject({ ok: true });
+      await expect(stat(path.join(h.projectRoot, '.worktree-keep'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(h.validateLaunch).toHaveBeenCalledWith(h.projectRoot, READY_REPORT.devices[0]!.udid, expect.any(AbortSignal));
       expect(h.installExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), expect.any(AbortSignal));
       expect(h.launchExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), [], expect.any(AbortSignal));
@@ -652,10 +657,12 @@ describe('iOS Simulator host', () => {
       await vi.waitFor(() => expect(h.build.mock.calls[0]![0].signal!.aborted).toBe(true));
       expect(cancelFinished).toBe(false);
       expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(h.projectRoot)]));
+      expect((await stat(path.join(h.projectRoot, '.worktree-keep'))).isFile()).toBe(true);
       unblock();
       expect(await result).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
       await cancelling;
       expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      await expect(stat(path.join(h.projectRoot, '.worktree-keep'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect((await stat(h.projectRoot)).isDirectory()).toBe(true);
       if (reason === 'source-recycle') {
         expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });

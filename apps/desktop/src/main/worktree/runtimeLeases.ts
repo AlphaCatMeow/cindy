@@ -36,11 +36,17 @@ function leaseFile(sessionId: string, directory: string): string {
 const leaseNamePattern = /^\d+-[a-f0-9]{64}\.json$/;
 const releaseRequestPattern = /^\d+-[a-f0-9]{64}\.json\.release$/;
 
+interface RuntimeKeepSentinel {
+  content: string;
+  identity: string;
+}
+
 /** A startup owns its own file, even when the business task id is reused. */
 export interface WorktreeRuntimeLease {
   readonly file: string;
   readonly physicalPath: string;
   readonly sharedFile?: string;
+  readonly keepSentinel?: RuntimeKeepSentinel;
 }
 
 export async function acquireWorktreeRuntimeLease(
@@ -53,13 +59,26 @@ export async function acquireWorktreeRuntimeLease(
   return withWorktreeResourceLock(root, async () => {
     const lease = await publishRuntimeLease(sessionId, await physicalWorktreeKey(root), runtimeRoot());
     if (!options.crossProfile) return lease;
+    let shared: WorktreeRuntimeLease | undefined;
+    let keepSentinel: RuntimeKeepSentinel | undefined;
     try {
       // Publish both under the deletion lock. Keep the original profile copy
       // readable by existing clients sharing this userData.
-      const shared = await publishRuntimeLease(sessionId, lease.physicalPath, sharedRuntimeRoot());
-      return { ...lease, sharedFile: shared.file };
+      shared = await publishRuntimeLease(sessionId, lease.physicalPath, sharedRuntimeRoot());
+      // Older owner profiles only read their own leases, but already honor this
+      // sentinel before both recycling and pool reset. Publish under their lock.
+      keepSentinel = await acquireRuntimeKeepSentinel(shared);
+      if (keepSentinel) {
+        // Ownership lives with a real borrower, not merely in a recognizable
+        // marker body that a user could have copied or edited. Existing v1
+        // readers ignore the additional field; a partial write fails closed.
+        await fs.writeFile(shared.file, JSON.stringify({
+          version: 1, pid: process.pid, path: lease.physicalPath, keepSentinel,
+        }));
+      }
+      return { ...lease, sharedFile: shared.file, keepSentinel };
     } catch (error) {
-      await releaseWorktreeRuntimeLease(lease).catch(() => undefined);
+      await releaseWorktreeRuntimeLease({ ...lease, sharedFile: shared?.file, keepSentinel }).catch(() => undefined);
       throw error;
     }
   });
@@ -83,15 +102,91 @@ async function publishRuntimeLease(sessionId: string, physicalPath: string, dire
   return lease;
 }
 
+async function acquireRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<RuntimeKeepSentinel | undefined> {
+  const file = path.join(lease.physicalPath, '.worktree-keep');
+  const newContent = JSON.stringify({ kind: 'cindy-runtime-keep', version: 1, nonce: randomUUID() });
+  let created = false;
+  try {
+    await fs.writeFile(file, newContent, { flag: 'wx', mode: 0o600 });
+    created = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  // stat must also succeed: a dangling user symlink is invisible to old pool
+  // guards. Never overwrite an existing marker, including files/directories.
+  await fs.stat(file);
+  const identity = await fs.lstat(file);
+  if (!identity.isFile() || identity.isSymbolicLink()) return undefined;
+  let content: string;
+  try { content = await fs.readFile(file, 'utf8'); } catch { return undefined; }
+  const marker = { content, identity: `${identity.dev}:${identity.ino}:${identity.birthtimeMs}` };
+  if (created) return content === newContent ? marker : undefined;
+  const directory = path.dirname(lease.file);
+  for (const name of await fs.readdir(directory)) {
+    if (!leaseNamePattern.test(name) || name === path.basename(lease.file)) continue;
+    try {
+      const other = JSON.parse(await fs.readFile(path.join(directory, name), 'utf8'));
+      if (other.version !== 1 || typeof other.path !== 'string') throw new Error('unreadable worktree lease');
+      if (other.path === lease.physicalPath && other.keepSentinel?.content === content
+        && other.keepSentinel?.identity === marker.identity) return marker;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return undefined;
+}
+
+/** Called under the same physical lock as acquisition and old owner recyclers. */
+async function releaseRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<void> {
+  const marker = lease.keepSentinel;
+  if (!marker) return;
+  const file = path.join(lease.physicalPath, '.worktree-keep');
+  try {
+    const identity = await fs.lstat(file);
+    if (!identity.isFile() || identity.isSymbolicLink()
+      || `${identity.dev}:${identity.ino}:${identity.birthtimeMs}` !== marker.identity
+      || await fs.readFile(file, 'utf8') !== marker.content) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  // Every cross-profile borrower publishes here before creating/joining the
+  // sentinel. Crashed borrowers remain references until explicit I/O teardown.
+  const directory = path.dirname(lease.file);
+  for (const name of await fs.readdir(directory)) {
+    if (!leaseNamePattern.test(name) || name === path.basename(lease.file)) continue;
+    try {
+      const other = JSON.parse(await fs.readFile(path.join(directory, name), 'utf8'));
+      if (other.version !== 1 || typeof other.path !== 'string') throw new Error('unreadable worktree lease');
+      if (other.path === lease.physicalPath) return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  await fs.unlink(file).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  });
+}
+
 export async function releaseWorktreeRuntimeLease(lease: WorktreeRuntimeLease): Promise<void> {
-  const files = [lease.file, ...(lease.sharedFile ? [lease.sharedFile] : [])];
-  const results = await Promise.allSettled(files.map((file) => releaseRuntimeLeaseFile({ file, physicalPath: lease.physicalPath })));
+  const files: WorktreeRuntimeLease[] = [{ file: lease.file, physicalPath: lease.physicalPath }];
+  if (lease.sharedFile) files.push({ file: lease.sharedFile, physicalPath: lease.physicalPath, keepSentinel: lease.keepSentinel });
+  const results = await Promise.allSettled(files.map(releaseRuntimeLeaseFile));
   const failure = results.find((result) => result.status === 'rejected');
   if (failure?.status === 'rejected') throw failure.reason;
 }
 
+async function removeRuntimeLeaseFile(lease: WorktreeRuntimeLease): Promise<void> {
+  if (lease.keepSentinel) {
+    await withWorktreeResourceLock(lease.physicalPath, async () => {
+      await releaseRuntimeKeepSentinel(lease);
+      await fs.unlink(lease.file);
+    });
+  } else await fs.unlink(lease.file);
+}
+
 async function releaseRuntimeLeaseFile(lease: WorktreeRuntimeLease): Promise<void> {
-  try { await fs.unlink(lease.file); } catch (error) {
+  try { await removeRuntimeLeaseFile(lease); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       await fs.unlink(`${lease.file}.release`).catch(() => undefined);
       return;
@@ -100,7 +195,7 @@ async function releaseRuntimeLeaseFile(lease: WorktreeRuntimeLease): Promise<voi
     // a later maintenance pass can prove that this terminal cleanup succeeded.
     try {
       await fs.mkdir(path.dirname(lease.file), { recursive: true });
-      await fs.writeFile(`${lease.file}.release`, JSON.stringify({ version: 1, file: lease.file, path: lease.physicalPath }), { flag: 'wx', mode: 0o600 });
+      await fs.writeFile(`${lease.file}.release`, JSON.stringify({ version: 1, file: lease.file, path: lease.physicalPath, keepSentinel: lease.keepSentinel }), { flag: 'wx', mode: 0o600 });
     } catch { /* preserving the lease is the safe fallback */ }
     // Wake the event-driven maintenance loop; it will retry the durable intent
     // while the still-present lease continues to protect the worktree.
@@ -130,13 +225,17 @@ async function retryPendingRuntimeLeaseReleasesIn(directory: string): Promise<nu
   for (const name of names.filter((value) => releaseRequestPattern.test(value))) {
     const requestFile = path.join(directory, name);
     try {
-      const request = JSON.parse(await fs.readFile(requestFile, 'utf8')) as { version?: number; file?: string; path?: string };
+      const request = JSON.parse(await fs.readFile(requestFile, 'utf8')) as { version?: number; file?: string; path?: string; keepSentinel?: RuntimeKeepSentinel };
       if (request.version !== 1 || typeof request.file !== 'string' || typeof request.path !== 'string'
-        || path.dirname(request.file) !== directory || !leaseNamePattern.test(path.basename(request.file))) {
+        || path.dirname(request.file) !== directory || !leaseNamePattern.test(path.basename(request.file))
+        || (request.keepSentinel !== undefined && (!request.keepSentinel
+          || typeof request.keepSentinel.content !== 'string' || typeof request.keepSentinel.identity !== 'string'))) {
         pending++;
         continue;
       }
-      try { await fs.unlink(request.file); } catch (error) {
+      try {
+        await removeRuntimeLeaseFile({ file: request.file, physicalPath: request.path, keepSentinel: request.keepSentinel });
+      } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { pending++; continue; }
       }
       await fs.unlink(requestFile).catch((error) => {

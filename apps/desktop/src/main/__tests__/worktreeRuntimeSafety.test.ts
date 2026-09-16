@@ -15,6 +15,7 @@ vi.mock('../desktopProcessIdentity', async (importOriginal) => ({
 
 import { acquireWorktreeRuntimeLease, releaseWorktreeRuntimeLease, readWorktreeRuntimePaths, retryPendingWorktreeRuntimeLeaseReleases } from '../worktree/runtimeLeases';
 import { physicalWorktreeKey, withWorktreeResourceLock } from '../worktree/resourceLock';
+import { hasKeepSentinel } from '../worktree/safety';
 
 describe('worktree runtime evidence and physical locks', () => {
   let worktree: string;
@@ -129,6 +130,143 @@ describe('worktree runtime evidence and physical locks', () => {
     expect(await fs.readdir(sharedRoot)).toEqual([]);
     expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(worktree)]));
     await releaseWorktreeRuntimeLease(oldLease);
+  });
+
+  it.each(['file', 'directory'] as const)('preserves an existing user keep %s', async (kind) => {
+    const file = path.join(worktree, '.worktree-keep');
+    if (kind === 'file') await fs.writeFile(file, 'user requested retention');
+    else await fs.mkdir(file);
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    expect(lease.keepSentinel).toBeUndefined();
+    await releaseWorktreeRuntimeLease(lease);
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    if (kind === 'file') expect(await fs.readFile(file, 'utf8')).toBe('user requested retention');
+    else expect(await fs.readdir(file)).toEqual([]);
+  });
+
+  it('keeps legacy protection until the last borrower in either profile finishes', async () => {
+    const first = (await acquireWorktreeRuntimeLease('first', worktree, { crossProfile: true }))!;
+    state.userData = path.join(state.root, 'second-profile');
+    const second = (await acquireWorktreeRuntimeLease('second', worktree, { crossProfile: true }))!;
+    expect(first.keepSentinel).toBeDefined();
+    expect(second.keepSentinel).toEqual(first.keepSentinel);
+    await releaseWorktreeRuntimeLease(first);
+    await releaseWorktreeRuntimeLease(first);
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    await releaseWorktreeRuntimeLease(second);
+    expect(hasKeepSentinel(worktree)).toBe(false);
+  });
+
+  it('does not adopt a user marker just because its contents resemble our format', async () => {
+    const file = path.join(worktree, '.worktree-keep');
+    const content = JSON.stringify({ kind: 'cindy-runtime-keep', version: 1, nonce: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    await fs.writeFile(file, content);
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    expect(lease.keepSentinel).toBeUndefined();
+    await releaseWorktreeRuntimeLease(lease);
+    expect(await fs.readFile(file, 'utf8')).toBe(content);
+  });
+
+  it('does not let a later borrower adopt a marker edited during an earlier borrow', async () => {
+    const first = (await acquireWorktreeRuntimeLease('first', worktree, { crossProfile: true }))!;
+    const file = path.join(worktree, '.worktree-keep');
+    const content = JSON.stringify({ kind: 'cindy-runtime-keep', version: 1, nonce: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    await fs.writeFile(file, content);
+    const second = (await acquireWorktreeRuntimeLease('second', worktree, { crossProfile: true }))!;
+    expect(second.keepSentinel).toBeUndefined();
+    await releaseWorktreeRuntimeLease(first);
+    await releaseWorktreeRuntimeLease(second);
+    expect(await fs.readFile(file, 'utf8')).toBe(content);
+  });
+
+  it.each(['edited', 'replaced'] as const)('preserves a runtime marker %s by the user', async (change) => {
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    const file = path.join(worktree, '.worktree-keep');
+    if (change === 'edited') await fs.writeFile(file, 'keep my checkout');
+    else {
+      // Keep the old inode alive so a replacement containing identical bytes
+      // cannot be confused with the marker this acquisition actually owns.
+      await fs.rename(file, `${file}.previous`);
+      await fs.writeFile(file, lease.keepSentinel!.content);
+    }
+    await releaseWorktreeRuntimeLease(lease);
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    expect(await fs.readFile(file, 'utf8')).toBe(change === 'edited' ? 'keep my checkout' : lease.keepSentinel!.content);
+  });
+
+  it('does not remove legacy protection when another borrower crashes', async () => {
+    const crashed = (await acquireWorktreeRuntimeLease('crashed', worktree, { crossProfile: true }))!;
+    const active = (await acquireWorktreeRuntimeLease('active', worktree, { crossProfile: true }))!;
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('owner is gone'), { code: 'ESRCH' });
+    });
+    await releaseWorktreeRuntimeLease(active);
+    await retryPendingWorktreeRuntimeLeaseReleases();
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    expect(await fs.stat(crashed.sharedFile!)).toBeDefined();
+    // Only confirmed source I/O teardown authorizes the remaining release.
+    await releaseWorktreeRuntimeLease(crashed);
+    expect(hasKeepSentinel(worktree)).toBe(false);
+  });
+
+  it('fails acquisition before source I/O when legacy protection cannot be published', async () => {
+    const write = fs.writeFile.bind(fs);
+    const sentinel = path.join(await physicalWorktreeKey(worktree), '.worktree-keep');
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (...args) => {
+      if (args[0] === sentinel) throw Object.assign(new Error('read only'), { code: 'EACCES' });
+      return write(...args);
+    });
+    await expect(acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true })).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    expect(hasKeepSentinel(worktree)).toBe(false);
+  });
+
+  it('retries failed sentinel cleanup through the shared durable release intent', async () => {
+    const lease = (await acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true }))!;
+    const unlink = fs.unlink.bind(fs);
+    const sentinel = path.join(lease.physicalPath, '.worktree-keep');
+    let blocked = true;
+    vi.spyOn(fs, 'unlink').mockImplementation(async (file) => {
+      if (file === sentinel && blocked) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return unlink(file);
+    });
+    await expect(releaseWorktreeRuntimeLease(lease)).rejects.toMatchObject({ code: 'EBUSY' });
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    expect(await fs.stat(lease.sharedFile!)).toBeDefined();
+    state.userData = path.join(state.root, 'maintenance-profile');
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(1);
+    blocked = false;
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(0);
+    expect(hasKeepSentinel(worktree)).toBe(false);
+    await expect(fs.stat(lease.sharedFile!)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(`${lease.sharedFile}.release`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cleans its own marker when publishing marker ownership fails', async () => {
+    const write = fs.writeFile.bind(fs);
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (...args) => {
+      if (typeof args[1] === 'string' && args[1].includes('"keepSentinel"')) {
+        await write(args[0], '{');
+        throw Object.assign(new Error('ownership publication interrupted'), { code: 'EIO' });
+      }
+      return write(...args);
+    });
+    await expect(acquireWorktreeRuntimeLease('borrower', worktree, { crossProfile: true })).rejects.toMatchObject({ code: 'EIO' });
+    expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    expect(hasKeepSentinel(worktree)).toBe(false);
+  });
+
+  it('keeps legacy protection while another shared borrower record is unreadable', async () => {
+    const first = (await acquireWorktreeRuntimeLease('first', worktree, { crossProfile: true }))!;
+    const second = (await acquireWorktreeRuntimeLease('second', worktree, { crossProfile: true }))!;
+    await fs.writeFile(second.sharedFile!, '{');
+    await expect(releaseWorktreeRuntimeLease(first)).rejects.toThrow();
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(1);
+    await releaseWorktreeRuntimeLease(second);
+    expect(hasKeepSentinel(worktree)).toBe(true);
+    expect(await retryPendingWorktreeRuntimeLeaseReleases()).toBe(0);
+    expect(hasKeepSentinel(worktree)).toBe(false);
   });
 
   it('preserves when another live instance cannot publish runtime evidence', async () => {

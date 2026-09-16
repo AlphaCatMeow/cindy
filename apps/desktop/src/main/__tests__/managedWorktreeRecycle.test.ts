@@ -151,6 +151,29 @@ describe('shared worktree recycling', () => {
       await release?.();
     }
   });
+  it('protects borrowed source when the owner still reads only profile-local leases', async () => {
+    const borrowerProfile = path.join(state.root, 'profile-a');
+    const ownerProfile = path.join(state.root, 'legacy-profile');
+    // Match the pre-change reader: the owner never scans the shared registry.
+    vi.mocked(readWorktreeRuntimePaths).mockImplementation(async () => {
+      const directory = path.join(state.userData, 'worktree-runtime-leases');
+      const names = await fs.readdir(directory).catch(() => [] as string[]);
+      return new Set(await Promise.all(names.filter((name) => name.endsWith('.json')).map(async (name) =>
+        JSON.parse(await fs.readFile(path.join(directory, name), 'utf8')).path as string)));
+    });
+    state.userData = borrowerProfile;
+    const release = await acquireIOSSimulatorProjectUse('borrower', meta.path, new AbortController());
+    try {
+      state.userData = ownerProfile;
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      expect(await recycle()).toBe(false);
+      expect((await readRecycleRecord(meta.path))?.reason).toBe('keep-sentinel');
+      expect(archive).not.toHaveBeenCalled();
+      expect(await fs.readFile(path.join(meta.path, 'draft.txt'), 'utf8')).toBe('uncommitted contents');
+      await release!();
+      expect(await recycle()).toBe(true);
+    } finally { await release?.(); }
+  });
   it('protects a borrower running in a subdirectory', async () => {
     state.refs.push({ ...state.refs[0], id: 'borrower', status: 'active', workingDir: path.join(meta.path, 'src'), worktreePath: null });
     expect(await recycle()).toBe(false);
