@@ -1,0 +1,72 @@
+import { realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+
+import { IOSSimulatorInstanceError } from '@cindy/ios-simulator-runtime';
+
+import { createLogger } from '../logger';
+import { subscribeWorktreeRecycleEvents } from '../worktree/recycleEvents';
+import { readRecycleRecord } from '../worktree/recycleJournal';
+import { withWorktreeResourceLock, worktreeResourceId } from '../worktree/resourceLock';
+import {
+  acquireWorktreeRuntimeLease,
+  managedWorktreeRoot,
+  releaseWorktreeRuntimeLease,
+} from '../worktree/runtimeLeases';
+
+const log = createLogger('ios-simulator-project-source');
+
+/** Project selection changes the build source, never the task or device owner. */
+export async function resolveIOSSimulatorProjectDir(taskRoot: string, projectDir?: string): Promise<string> {
+  if (projectDir === undefined) return taskRoot;
+  try {
+    const resolved = await realpath(path.resolve(taskRoot, projectDir));
+    if ((await stat(resolved)).isDirectory()) return resolved;
+  } catch { /* Return a stable tool error rather than a raw filesystem path. */ }
+  throw new IOSSimulatorInstanceError('INVALID_ARGUMENT', 'projectDir must resolve to an existing local directory.');
+}
+
+/** Reuse the worktree recycler's cross-process lease; release only after source I/O has drained. */
+export async function acquireIOSSimulatorProjectUse(
+  sessionId: string,
+  projectRoot: string,
+  controller: AbortController,
+): Promise<(() => Promise<void>) | null> {
+  const managedRoot = managedWorktreeRoot(projectRoot);
+  if (!managedRoot) return null;
+  return withWorktreeResourceLock(managedRoot, async () => {
+    // Recheck after taking the deletion lock: selection may have raced reclamation.
+    const available = await stat(projectRoot).then((value) => value.isDirectory(), () => false);
+    if (!available) {
+      throw new IOSSimulatorInstanceError('INVALID_ARGUMENT', 'The selected project directory is unavailable.');
+    }
+    const lease = await acquireWorktreeRuntimeLease(`ios-simulator:${sessionId}`, projectRoot);
+    if (!lease) return null;
+    const resourceId = worktreeResourceId(lease.physicalPath);
+    const unsubscribe = subscribeWorktreeRecycleEvents((event) => {
+      if (!event.opportunity && event.resourceId === resourceId) controller.abort();
+    });
+    const release = async (): Promise<void> => {
+      unsubscribe();
+      try {
+        await releaseWorktreeRuntimeLease(lease);
+      } catch {
+        // The durable release request is retried by worktree maintenance. Keeping
+        // the lease protects the directory until that retry succeeds.
+        log.warn('project worktree lease release deferred');
+      }
+    };
+    try {
+      const record = await readRecycleRecord(managedRoot);
+      if (record && !['removed', 'restored'].includes(record.phase)) {
+        const identity = await stat(managedRoot);
+        if (record.directoryIdentity === `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`) {
+          controller.abort();
+        }
+      }
+      return release;
+    } catch (error) {
+      await release();
+      throw error;
+    }
+  });
+}

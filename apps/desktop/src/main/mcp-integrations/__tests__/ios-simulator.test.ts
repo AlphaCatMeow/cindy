@@ -48,6 +48,7 @@ import {
   IOSSimulatorOwnershipStore,
   IOSSimulatorOwnershipRegistryFile,
   IOSSimulatorProjectBuildError,
+  IOSSimulatorProjectBuilder,
   IOSSimulatorResourceScheduler,
   WdaError,
   WdaProcessManager,
@@ -71,6 +72,9 @@ vi.mock('../../appSessionState.js', async (importOriginal) => {
 });
 
 import type { IOSSimulatorPublicRouteStatus } from '../../../shared/iosSimulatorIpc';
+import { newRecycleRecord, writeRecycleRecord } from '../../worktree/recycleJournal';
+import { physicalWorktreeKey, withWorktreeResourceLock } from '../../worktree/resourceLock';
+import { readWorktreeRuntimePaths } from '../../worktree/runtimeLeases';
 import {
   cancelIOSSimulatorSessionOperations,
   cleanupIOSSimulatorRemovedSession,
@@ -317,6 +321,219 @@ describe('iOS Simulator host', () => {
   function localSession(id: string) {
     return { id, workDir: `/tmp/${id}`, remoteHostId: null };
   }
+
+  async function projectSelectionHarness(mobile = false) {
+    const temp = await mkdtemp(path.join(os.tmpdir(), 'cindy-ios-project-dir-'));
+    const root = await realpath(temp);
+    const taskRoot = path.join(root, 'task-a');
+    const otherTaskRoot = path.join(root, 'task-c');
+    const projectRoot = path.join(root, '.cindy-worktrees', 'project-b');
+    const userData = path.join(root, 'user-data');
+    await mkdir(path.join(userData, '.dev-instances'), { recursive: true });
+    await mkdir(path.join(taskRoot, 'Demo.xcodeproj'), { recursive: true });
+    await mkdir(path.join(otherTaskRoot, 'Demo.xcodeproj'), { recursive: true });
+    await mkdir(path.join(projectRoot, 'Demo.xcodeproj'), { recursive: true });
+    if (mobile) {
+      const mobileRoot = path.join(projectRoot, 'apps', 'mobile');
+      await mkdir(mobileRoot, { recursive: true });
+      await writeFile(path.join(mobileRoot, 'app.config.js'), 'export default {};');
+      await writeFile(path.join(mobileRoot, 'package.json'), JSON.stringify({ name: 'mobile' }));
+    }
+    const sourceApp = path.join(root, 'Demo.app');
+    await mkdir(sourceApp);
+    const getPath = vi.spyOn(app, 'getPath').mockReturnValue(userData);
+    const actor = new IOSSimulatorInstanceActor({
+      store: new IOSSimulatorOwnershipStore({ createId: () => crypto.randomUUID() }),
+      lifecycle: {
+        findExact: vi.fn(), bootExact: vi.fn(), shutdownExact: vi.fn(),
+        createExact: vi.fn(), deleteExact: vi.fn(),
+      },
+    });
+    const inspector = new IOSSimulatorProjectBuilder();
+    const inspect = vi.fn(inspector.inspect.bind(inspector));
+    const build = vi.fn<IOSSimulatorProjectBuilderAdapter['build']>(async (input) => ({
+      kind: mobile ? 'cindy-mobile' : 'xcode-project',
+      worktreeRoot: input.worktreeRoot,
+      projectRoot: input.worktreeRoot,
+      containerPath: input.containerPath ?? null,
+      scheme: 'Demo', appPath: sourceApp, buildLogTail: '',
+    }));
+    const validateLaunch = vi.fn<NonNullable<IOSSimulatorProjectBuilderAdapter['validateLaunch']>>(async () => null);
+    const inspectArtifact = vi.fn<IOSSimulatorAppLifecycleAdapter['inspectArtifact']>(async (worktreeRoot, appPath, authorizedRoot) => ({
+      artifactId: crypto.randomUUID(), worktreeRoot, appPath,
+      authorizedRoot: authorizedRoot ?? path.dirname(appPath),
+      bundleId: 'com.example.demo', createdAt: new Date().toISOString(),
+    }));
+    const installExact = vi.fn(async () => undefined);
+    const launchExact = vi.fn(async () => undefined);
+    const secondDevice = { ...READY_REPORT.devices[0]!, udid: 'F05BFC28-5AE5-48C8-97E0-EF064558B4D3', state: 'Shutdown' as const };
+    const host = createIOSSimulatorHost({
+      actor, resourceScheduler: testResourceScheduler(),
+      runtime: { inspect: vi.fn(async () => ({
+        ...READY_REPORT, devices: [{ ...READY_REPORT.devices[0]!, state: 'Shutdown' as const }, secondDevice],
+      })) },
+      getSession: vi.fn(async (id) => ({ id, workDir: id === 'session-c' ? otherTaskRoot : taskRoot, remoteHostId: null })),
+      projectBuilder: { inspect, build, validateLaunch },
+      appLifecycle: {
+        inspectArtifact, installExact, launchExact,
+        terminateExact: vi.fn(), openUrlExact: vi.fn(),
+      },
+    });
+    const context = { sessionId: 'session-a', origin: 'user' as const };
+    const close = async () => {
+      await host.dispose();
+      getPath.mockRestore();
+      await rm(temp, { recursive: true, force: true });
+    };
+    try {
+      const attached = await host.callTool('attach_device', { udid: READY_REPORT.devices[0]!.udid }, context);
+      expect(attached, JSON.stringify(attached)).toMatchObject({ ok: true });
+      const attachedInstance = actor.list(context.sessionId)[0]!;
+      // Exercise Host app mutations with a ready actor and mocked CoreSimulator;
+      // the real viewer/WDA startup is outside these source-selection tests.
+      const instance = await actor.start({
+        sessionId: context.sessionId, instanceId: attachedInstance.instanceId,
+        generation: attachedInstance.generation, leaseId: attachedInstance.lease.id,
+      });
+      const route = { instanceId: instance.instanceId, generation: instance.generation, leaseId: instance.lease.id };
+      return { root, taskRoot, otherTaskRoot, projectRoot, secondDevice, actor, host, context, route, build, inspect, inspectArtifact, installExact, launchExact, validateLaunch, close };
+    } catch (error) {
+      await close();
+      throw error;
+    }
+  }
+
+  it('selects an external build source per call while keeping ownership, artifacts and caches distinct', async () => {
+    const h = await projectSelectionHarness();
+    try {
+      const original = h.actor.list('session-a')[0]!;
+      expect(await h.host.callTool('build_app', h.route, h.context)).toMatchObject({ ok: true });
+      const external = await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot, containerPath: './Demo.xcodeproj' }, h.context);
+      expect(external).toMatchObject({ ok: true, data: { artifact: { project: { name: 'project-b', containerPath: 'Demo.xcodeproj' } } } });
+      const alias = path.join(h.root, 'alias-b');
+      await symlink(h.projectRoot, alias, 'junction');
+      expect(await h.host.callTool('build_app', { ...h.route, projectDir: alias }, h.context)).toMatchObject({ ok: true });
+      expect(await h.host.callTool('build_app', h.route, h.context)).toMatchObject({ ok: true });
+      const inputs = h.build.mock.calls.map(([input]) => input);
+      expect(inputs.map((input) => input.worktreeRoot)).toEqual([h.taskRoot, h.projectRoot, h.projectRoot, h.taskRoot]);
+      expect(inputs[0]!.derivedDataPath).not.toBe(inputs[1]!.derivedDataPath);
+      expect(inputs[1]!.derivedDataPath).toBe(inputs[2]!.derivedDataPath);
+      expect(inputs[0]!.derivedDataPath).toBe(inputs[3]!.derivedDataPath);
+      expect(inputs[1]!.clonedSourcePackagesDirPath).toBe(inputs[2]!.clonedSourcePackagesDirPath);
+      expect(h.inspectArtifact.mock.calls.map(([source]) => source)).toEqual([h.taskRoot, h.projectRoot, h.projectRoot, h.taskRoot]);
+      expect(h.actor.list('session-a')[0]).toMatchObject({
+        sessionId: 'session-a', worktreeRoot: h.taskRoot, sourceFingerprint: original.sourceFingerprint,
+        instanceId: original.instanceId, generation: original.generation, lease: { id: original.lease.id },
+      });
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    } finally { await h.close(); }
+  });
+
+  it('installs the external artifact on task A and validates Cindy Mobile launch against B', async () => {
+    const h = await projectSelectionHarness(true);
+    try {
+      const result = await h.host.callTool('build_app', { ...h.route, projectDir: path.relative(h.taskRoot, h.projectRoot) }, h.context);
+      expect(result).toMatchObject({ ok: true });
+      const artifactId = (await h.inspectArtifact.mock.results[0]!.value).artifactId;
+      const installed = await h.host.callTool('install_app', { ...h.route, artifactId }, h.context);
+      expect(installed, JSON.stringify(installed)).toMatchObject({ ok: true });
+      const launched = await h.host.callTool('launch_app', { ...h.route, artifactId, args: [] }, h.context);
+      expect(launched, JSON.stringify(launched)).toMatchObject({ ok: true });
+      expect(h.validateLaunch).toHaveBeenCalledWith(h.projectRoot, READY_REPORT.devices[0]!.udid, expect.any(AbortSignal));
+      expect(h.installExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), expect.any(AbortSignal));
+      expect(h.launchExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), [], expect.any(AbortSignal));
+      expect(await h.host.callTool('install_app', { ...h.route, artifactId }, { sessionId: 'session-b', origin: 'user' })).toMatchObject({ ok: false });
+    } finally { await h.close(); }
+  });
+
+  it('rejects invalid project directories and container escapes relative to the selected source', async () => {
+    const h = await projectSelectionHarness();
+    try {
+      const file = path.join(h.root, 'file');
+      await writeFile(file, 'not a directory');
+      const outside = path.join(h.taskRoot, 'Demo.xcodeproj');
+      await symlink(outside, path.join(h.projectRoot, 'Escape.xcodeproj'), 'junction');
+      for (const args of [
+        { projectDir: path.join(h.root, 'missing') }, { projectDir: file }, { projectDir: '' },
+        { projectDir: h.projectRoot, containerPath: outside },
+        { projectDir: h.projectRoot, containerPath: path.relative(h.projectRoot, outside) },
+        { projectDir: h.projectRoot, containerPath: 'Escape.xcodeproj' },
+        { containerPath: path.join(h.projectRoot, 'Demo.xcodeproj') },
+      ]) {
+        expect(await h.host.callTool('build_app', { ...h.route, ...args }, h.context)).toMatchObject({ ok: false, errorCode: 'INVALID_ARGUMENT' });
+      }
+      expect(h.build).not.toHaveBeenCalled();
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot, containerPath: 'Demo.xcodeproj' }, h.context)).toMatchObject({ ok: true });
+    } finally { await h.close(); }
+  });
+
+  it('serializes two tasks building the same external source through different path spellings', async () => {
+    const h = await projectSelectionHarness();
+    let unblock: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { unblock = resolve; });
+    const buildImpl = h.build.getMockImplementation()!;
+    h.build.mockImplementationOnce(async (input) => { await gate; return buildImpl(input); });
+    try {
+      const otherContext = { sessionId: 'session-c', origin: 'user' as const };
+      expect(await h.host.callTool('attach_device', { udid: h.secondDevice.udid }, otherContext)).toMatchObject({ ok: true });
+      const otherInstance = h.actor.list('session-c')[0]!;
+      const otherRoute = { instanceId: otherInstance.instanceId, generation: otherInstance.generation, leaseId: otherInstance.lease.id };
+      expect(otherInstance.worktreeRoot).toBe(h.otherTaskRoot);
+      const first = h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context);
+      await vi.waitFor(() => expect(h.build).toHaveBeenCalledOnce());
+      const otherArgs = { ...otherRoute, projectDir: path.relative(h.otherTaskRoot, h.projectRoot), containerPath: './Demo.xcodeproj' };
+      expect(await h.host.callTool('build_app', otherArgs, otherContext)).toMatchObject({ ok: false, errorCode: 'DEVICE_BUSY' });
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(h.projectRoot)]));
+      unblock();
+      expect(await first).toMatchObject({ ok: true });
+      expect(await h.host.callTool('build_app', otherArgs, otherContext)).toMatchObject({ ok: true });
+      const [a, c] = h.build.mock.calls.map(([input]) => input);
+      expect(a!.derivedDataPath).toBe(c!.derivedDataPath);
+      expect(a!.clonedSourcePackagesDirPath).toBe(c!.clonedSourcePackagesDirPath);
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    } finally { unblock(); await h.close(); }
+  });
+
+  it.each(['source-recycle', 'task-cancel'] as const)('keeps B protected until the external build drains after %s', async (reason) => {
+    const h = await projectSelectionHarness();
+    let unblock: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { unblock = resolve; });
+    h.build.mockImplementationOnce(async () => {
+      await gate;
+      throw new Error('cancelled build drained');
+    });
+    try {
+      const result = h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context);
+      await vi.waitFor(() => expect(h.build).toHaveBeenCalledOnce());
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(h.projectRoot)]));
+      let cancelFinished = false;
+      let cancelling: Promise<void> | undefined;
+      if (reason === 'task-cancel') {
+        cancelling = h.host.cancelSessionOperations('session-a').then(() => { cancelFinished = true; });
+      } else {
+        const record = await newRecycleRecord({
+          sessionId: 'session-b', name: 'project-b', path: h.projectRoot, baseRepo: h.root,
+          branch: 'codex/project-b', sourceBranch: 'main', createdAt: new Date().toISOString(),
+        });
+        const identity = await stat(h.projectRoot);
+        record.directoryIdentity = `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`;
+        await withWorktreeResourceLock(h.projectRoot, () => writeRecycleRecord(record));
+      }
+      await vi.waitFor(() => expect(h.build.mock.calls[0]![0].signal!.aborted).toBe(true));
+      expect(cancelFinished).toBe(false);
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(h.projectRoot)]));
+      unblock();
+      expect(await result).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
+      await cancelling;
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      expect((await stat(h.projectRoot)).isDirectory()).toBe(true);
+      if (reason === 'source-recycle') {
+        expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
+        expect(h.build).toHaveBeenCalledOnce();
+      }
+    } finally { unblock(); await h.close(); }
+  });
 
   it('keeps the default ownership registry lazy for disabled MCP discovery and teardown', async () => {
     const getPath = vi.spyOn(app, 'getPath');
