@@ -5,7 +5,7 @@ import { IOSSimulatorInstanceError } from '@cindy/ios-simulator-runtime';
 
 import { createLogger } from '../logger';
 import { subscribeWorktreeRecycleEvents } from '../worktree/recycleEvents';
-import { readRecycleRecord } from '../worktree/recycleJournal';
+import { readRecycleRecordsAcrossProfiles } from '../worktree/recycleJournal';
 import { withWorktreeResourceLock, worktreeResourceId } from '../worktree/resourceLock';
 import {
   acquireWorktreeRuntimeLease,
@@ -41,6 +41,17 @@ export async function acquireIOSSimulatorProjectUse(
     if (!available) {
       throw new IOSSimulatorInstanceError('INVALID_ARGUMENT', 'The selected project directory is unavailable.');
     }
+    // Check the owner's authoritative intent before publishing a lease that could
+    // otherwise obstruct recovery of a partially removed directory.
+    const records = await readRecycleRecordsAcrossProfiles(managedRoot);
+    const identity = await stat(managedRoot);
+    if (records.some((record) => !['removed', 'restored'].includes(record.phase)
+      && (record.directoryIdentity === `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`
+        || (record.phase === 'restoring' && record.directoryIdentity == null)))) {
+      controller.abort();
+      throw new IOSSimulatorInstanceError('MUTATION_CANCELLED', 'The selected project worktree is being recycled or restored.', true);
+    }
+    signal.throwIfAborted();
     const lease = await acquireWorktreeRuntimeLease(`ios-simulator:${sessionId}`, projectRoot, { crossProfile: true });
     if (!lease) return null;
     const resourceId = worktreeResourceId(lease.physicalPath);
@@ -57,19 +68,7 @@ export async function acquireIOSSimulatorProjectUse(
         log.warn('project worktree lease release deferred');
       }
     };
-    try {
-      const record = await readRecycleRecord(managedRoot);
-      if (record && !['removed', 'restored'].includes(record.phase)) {
-        const identity = await stat(managedRoot);
-        if (record.directoryIdentity === `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`) {
-          controller.abort();
-        }
-      }
-      return release;
-    } catch (error) {
-      await release();
-      throw error;
-    }
+    return release;
   }, signal).catch((error) => {
     if (signal.aborted) {
       throw new IOSSimulatorInstanceError('MUTATION_CANCELLED', 'The app operation was cancelled while acquiring its project worktree.', true);

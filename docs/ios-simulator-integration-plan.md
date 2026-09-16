@@ -1029,7 +1029,12 @@ fingerprint 和相对 container 路径；该 fingerprint 不代表 Git revision 
 模拟器借用会同时发布 profile 内租约和 `appData/Cindy/shared-worktree-runtime-leases`
 中的共享副本，回收器合并读取两处，避免隔离 profile 之间看不到对方的借用；释放失败
 沿用 `.release` 回执重试，进程退出本身不能证明 Xcode 或 Metro 已停止读取。
-跨 profile 借用要求回收方也运行包含共享租约读取支持的版本；profile 内副本保留原读取协议。
+借用前还在同一资源锁内，经 `appData/Cindy/shared-worktree-recycle-journals` 登记的日志位置
+读取各 profile 对该目录的原始回收记录；当前目录处于待回收、快照、删除或恢复阶段时，
+在发布租约前拒绝构建/启动，避免使用残缺目录或阻挡 owner 恢复。完成的记录或旧目录身份
+不阻止新目录使用。日志监听启动时登记既有日志，写入新意图前也必须完成登记；共享索引
+只保存日志位置，不复制状态、不改变原 profile 的日志格式和恢复归属。
+跨 profile 借用要求回收方也运行包含共享租约读取及日志登记支持的版本；profile 内副本保留原读取协议。
 任务 A 结束时排空自己的操作，不因其构建了 B 就把 B 加入 A 的目录删除范围。
 这仍是工程选择与目录边界校验，不是对 Xcode build scripts 的文件系统沙箱。
 

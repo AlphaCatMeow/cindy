@@ -221,7 +221,13 @@ describe('shared worktree recycling', () => {
     expect(await recycle()).toBe(false);
     expect((await readRecycleRecord(meta.path))?.reason).toBe('directory-replaced');
   });
-  it('partial EBUSY deletion retains evidence and retries only unchanged surviving bytes', async () => {
+  it('partial EBUSY deletion rejects cross-profile borrowing and retries unchanged surviving bytes', async () => {
+    const actual = await vi.importActual<typeof import('../worktree/runtimeLeases')>('../worktree/runtimeLeases');
+    vi.mocked(readWorktreeRuntimePaths).mockImplementation(actual.readWorktreeRuntimePaths);
+    const borrowerProfile = path.join(state.root, 'borrower-profile');
+    for (const profile of [state.root, borrowerProfile]) {
+      await fs.mkdir(path.join(profile, '.dev-instances'), { recursive: true });
+    }
     const rm = fs.rm;
     const fail = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
       if (String(target) === meta.path) throw Object.assign(new Error('locked'), { code: 'EBUSY' });
@@ -237,6 +243,19 @@ describe('shared worktree recycling', () => {
     expect(await recycle()).toBe(false);
     expect((await readRecycleRecord(meta.path))?.phase).toBe('removing');
     expect(state.registry.has(meta.sessionId)).toBe(true);
+    await expect(fs.stat(path.join(meta.path, '.git'))).rejects.toMatchObject({ code: 'ENOENT' });
+    state.userData = borrowerProfile;
+    let release: (() => Promise<void>) | null = null;
+    try {
+      await expect(acquireIOSSimulatorProjectUse('borrower', meta.path, new AbortController()).then((value) => {
+        release = value; return value;
+      })).rejects.toMatchObject({ code: 'MUTATION_CANCELLED' });
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      expect(await fs.readFile(path.join(meta.path, 'draft.txt'), 'utf8')).toBe('uncommitted contents');
+    } finally {
+      await (release as (() => Promise<void>) | null)?.();
+      state.userData = '';
+    }
     fail.mockRestore();
     expect(await recycle()).toBe(true);
     expect(snapshot).toHaveBeenCalledTimes(1);

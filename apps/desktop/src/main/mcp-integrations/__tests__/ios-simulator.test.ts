@@ -341,7 +341,12 @@ describe('iOS Simulator host', () => {
     }
     const sourceApp = path.join(root, 'Demo.app');
     await mkdir(sourceApp);
-    const getPath = vi.spyOn(app, 'getPath').mockReturnValue(userData);
+    let activeProfile = userData;
+    const getPath = vi.spyOn(app, 'getPath').mockImplementation((name) => name === 'appData' ? path.join(root, 'app-data') : activeProfile);
+    const useProfile = async (name: string) => {
+      activeProfile = path.join(root, name);
+      await mkdir(path.join(activeProfile, '.dev-instances'), { recursive: true });
+    };
     const actor = new IOSSimulatorInstanceActor({
       store: new IOSSimulatorOwnershipStore({ createId: () => crypto.randomUUID() }),
       lifecycle: {
@@ -396,7 +401,7 @@ describe('iOS Simulator host', () => {
         generation: attachedInstance.generation, leaseId: attachedInstance.lease.id,
       });
       const route = { instanceId: instance.instanceId, generation: instance.generation, leaseId: instance.lease.id };
-      return { root, taskRoot, otherTaskRoot, projectRoot, secondDevice, actor, host, context, route, build, inspect, inspectArtifact, installExact, launchExact, validateLaunch, close };
+      return { root, taskRoot, otherTaskRoot, projectRoot, secondDevice, actor, host, context, route, build, inspect, inspectArtifact, installExact, launchExact, validateLaunch, useProfile, close };
     } catch (error) {
       await close();
       throw error;
@@ -555,6 +560,68 @@ describe('iOS Simulator host', () => {
       openSpy.mockRestore();
       await h.close();
     }
+  });
+
+  it.each([
+    ['build_app', 'pending'], ['build_app', 'snapshotted'], ['build_app', 'removing'],
+    ['build_app', 'restoring'],
+    ['launch_app', 'pending'], ['launch_app', 'snapshotted'], ['launch_app', 'removing'],
+    ['launch_app', 'restoring'],
+  ] as const)('rejects %s when another profile left the source in %s recycling', async (tool, phase) => {
+    const h = await projectSelectionHarness(tool === 'launch_app');
+    try {
+      let artifactId: string | undefined;
+      if (tool === 'launch_app') {
+        expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: true });
+        artifactId = (await h.inspectArtifact.mock.results[0]!.value).artifactId;
+        expect(await h.host.callTool('install_app', { ...h.route, artifactId }, h.context)).toMatchObject({ ok: true });
+      }
+      await h.useProfile('owner-data');
+      const record = await newRecycleRecord({
+        sessionId: 'session-b', name: 'project-b', path: h.projectRoot, baseRepo: h.root,
+        branch: 'codex/project-b', sourceBranch: 'main', createdAt: new Date().toISOString(),
+      });
+      const identity = await stat(h.projectRoot);
+      record.directoryIdentity = phase === 'restoring' ? null : `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`;
+      record.phase = phase;
+      await withWorktreeResourceLock(h.projectRoot, () => writeRecycleRecord(record));
+      const journal = path.join(h.root, 'owner-data', 'worktree-recycle', `${record.id}.json`);
+      const evidence = await readFile(journal, 'utf8');
+      await h.useProfile('user-data');
+      h.build.mockClear(); h.inspect.mockClear();
+
+      expect(await h.host.callTool(tool, { ...h.route, projectDir: h.projectRoot, artifactId, args: [] }, h.context))
+        .toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
+      expect(h.inspect).not.toHaveBeenCalled();
+      expect(h.build).not.toHaveBeenCalled();
+      expect(h.validateLaunch).not.toHaveBeenCalled();
+      expect(h.launchExact).not.toHaveBeenCalled();
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+      expect(await readFile(journal, 'utf8')).toBe(evidence);
+    } finally { await h.close(); }
+  });
+
+  it.each(['removed', 'restored', 'replacement'] as const)('allows borrowing after an owner journal is %s', async (phase) => {
+    const h = await projectSelectionHarness();
+    try {
+      await h.useProfile('owner-data');
+      const record = await newRecycleRecord({
+        sessionId: 'session-b', name: 'project-b', path: h.projectRoot, baseRepo: h.root,
+        branch: 'codex/project-b', sourceBranch: 'main', createdAt: new Date().toISOString(),
+      });
+      const identity = await stat(h.projectRoot);
+      record.directoryIdentity = `${identity.dev}:${identity.ino}:${identity.birthtimeMs}`;
+      record.phase = phase === 'replacement' ? 'pending' : phase;
+      await withWorktreeResourceLock(h.projectRoot, () => writeRecycleRecord(record));
+      if (phase === 'replacement') {
+        await fsp.rename(h.projectRoot, `${h.projectRoot}-old`);
+        await mkdir(path.join(h.projectRoot, 'Demo.xcodeproj'), { recursive: true });
+      }
+      await h.useProfile('user-data');
+      expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: true });
+      expect(h.build).toHaveBeenCalledOnce();
+      expect(await readWorktreeRuntimePaths()).toEqual(new Set());
+    } finally { await h.close(); }
   });
 
   it.each(['source-recycle', 'task-cancel'] as const)('keeps B protected until the external build drains after %s', async (reason) => {
