@@ -13,7 +13,6 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing } from 'react-native';
-import { useReduceMotionEnabled } from '@/hooks/useReduceMotion';
 
 export interface ModalFadeLifecycleOptions {
   /** 进场时长(ms)。docs/design-rules/cindy-design-system.md §14.4:纯透明度过渡 ≤150ms。 */
@@ -37,8 +36,6 @@ export function useModalFadeLifecycle(
   visible: boolean,
   { inMs, outMs, onClosed }: ModalFadeLifecycleOptions,
 ): ModalFadeLifecycle {
-  const reduceMotion = useReduceMotionEnabled();
-  const animate = reduceMotion === false;
   const [mounted, setMounted] = useState(visible);
   const progress = useRef(new Animated.Value(visible ? 1 : 0)).current;
   // Modal 原生层是否已呈现(onShow 已触发且尚未卸载):决定重开时进场动画由谁起。
@@ -49,18 +46,13 @@ export function useModalFadeLifecycle(
   mountedRef.current = mounted;
 
   const startIn = useCallback(() => {
-    progress.stopAnimation();
-    if (!animate) {
-      progress.setValue(1);
-      return;
-    }
     Animated.timing(progress, {
       duration: inMs,
       easing: Easing.out(Easing.quad),
       toValue: 1,
       useNativeDriver: true,
     }).start();
-  }, [animate, inMs, progress]);
+  }, [inMs, progress]);
 
   const onShowStartIn = useCallback(() => {
     shownRef.current = true;
@@ -75,12 +67,6 @@ export function useModalFadeLifecycle(
       if (shownRef.current) startIn();
     } else {
       if (!mountedRef.current) return; // 从未打开/已完全关闭:无需播退场。
-      progress.stopAnimation();
-      if (!animate) {
-        progress.setValue(0);
-        setMounted(false);
-        return;
-      }
       Animated.timing(progress, {
         duration: outMs,
         easing: Easing.in(Easing.quad),
@@ -92,8 +78,7 @@ export function useModalFadeLifecycle(
         if (finished && !visibleRef.current) setMounted(false);
       });
     }
-    return () => progress.stopAnimation();
-  }, [visible, progress, outMs, startIn, animate]);
+  }, [visible, progress, outMs, startIn]);
 
   // onClosed 延迟到 mounted 翻 false 的 commit 之后(见头注释)。
   const onClosedRef = useRef(onClosed);
