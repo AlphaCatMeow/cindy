@@ -68,7 +68,6 @@ import {
   DIALOGUE_GROUP_ALL_KEY,
 } from '../../hooks/helpers/sidebarFilterCore';
 import {
-  advanceViewedPriorityHold,
   buildMainListEntries,
   getMainListEntrySessions,
   holdViewedPriorityRank,
@@ -77,6 +76,8 @@ import {
   type MainListEntry,
   type ViewedPriorityHoldState,
 } from '../../lib/mainListModel';
+import { sidebarPriorityContext } from '../../lib/sidebarPriorityContext';
+import { useViewedPriorityHold } from '../../hooks/useViewedPriorityHold';
 import { projectKeyComparisonKey, type BotGroupNode } from '../../lib/projectGrouping';
 import { buildSessionSourceLabelMap } from '../../lib/sessionSourceLabel';
 import { useSessionAttentionKinds } from '@/lib/sessionAttentionStore';
@@ -457,45 +458,16 @@ export function ProjectsSection({
   );
   // 正在看的任务 id:files 路由下回落到被浏览文件所属任务。
   const viewedIdForSort = viewedSessionId ?? activeSessionId;
-  const priorityContext = useMemo(() => {
-    const running = new Set(runningSessionIds);
-    const attention = new Set(notifications);
+  const naturalPriorityContext = useMemo(() => {
     const waiting = new Set<string>(urgentSet);
     for (const [sessionId, kind] of attentionKinds) {
       if (kind === 'awaiting' || kind === 'error') waiting.add(sessionId);
     }
-    const considerRemote = (session: Session) => {
-      const activity = getRemoteSessionActivity(session.id, session.deviceLinkDeviceId);
-      if (!activity) return; // 本地会话 / 无活动条目:一次 Map 查找即返回
-      if (activity.phase === 'running') {
-        running.add(session.id);
-        return;
-      }
-      // needs-interaction / error → waiting;completed(镜像只保留未读终态,
-      // 已读收尾包会删条目)→ 完成未读档。
-      attention.add(session.id);
-      if (activity.phase === 'needs-interaction' || activity.phase === 'error') {
-        waiting.add(session.id);
-      }
-    };
-    for (const project of projects) for (const session of project.sessions) considerRemote(session);
-    for (const session of dialogues) considerRemote(session);
-    for (const session of unclassified) considerRemote(session);
-
-    const hold = advanceViewedPriorityHold(
-      viewedPriorityHold,
-      viewedIdForSort,
-      { runningSessionIds: running, attentionSessionIds: attention, waitingSessionIds: waiting },
-      Date.now(),
+    return sidebarPriorityContext(
+      { runningSessionIds, attentionSessionIds: notifications, waitingSessionIds: waiting },
+      [...projects.flatMap((project) => project.sessions), ...dialogues, ...unclassified],
+      (session) => getRemoteSessionActivity(session.id, session.deviceLinkDeviceId)?.phase,
     );
-
-    return {
-      runningSessionIds: running,
-      attentionSessionIds: attention,
-      waitingSessionIds: waiting,
-      heldPriorityRanks: hold.heldPriorityRanks,
-      recentlyViewedAtMs: hold.recentlyViewedAtMs,
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remoteActivityRevision 代表 getRemoteSessionActivity 读到的整表内容
   }, [
     runningSessionIds,
@@ -506,8 +478,16 @@ export function ProjectsSection({
     dialogues,
     unclassified,
     remoteActivityRevision,
-    viewedIdForSort,
   ]);
+  const hold = useViewedPriorityHold(viewedPriorityHold, viewedIdForSort, naturalPriorityContext);
+  const priorityContext = useMemo(
+    () => ({
+      ...naturalPriorityContext,
+      heldPriorityRanks: hold.heldPriorityRanks,
+      recentlyViewedAtMs: hold.recentlyViewedAtMs,
+    }),
+    [naturalPriorityContext, hold],
+  );
 
   // starting 只让位给真实 in-flight:本地 isRunning(见 useStartingSessionIds),
   // 远程 running / needs-interaction。终态 attention 不再吸收 —— 旧终态会误伤
