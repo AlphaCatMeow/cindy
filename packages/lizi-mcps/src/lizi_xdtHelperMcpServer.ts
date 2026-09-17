@@ -34,6 +34,7 @@ import { jsonObjectArg } from './json-object-arg.js';
 
 import { XdtHelperToolRegistry } from './lizi_xdtHelperToolRegistry.js';
 import { registerCreateProjectTool, type CreateProjectCallback } from './xdt-helper/create_project.js';
+import { registerMoveSessionTool, type MoveSessionCallback } from './xdt-helper/move_session.js';
 import { registerProjectManagementTools, type ProjectManagementCallbacks } from './xdt-helper/project_management.js';
 import {
   registerGetCapabilitiesTool,
@@ -595,6 +596,7 @@ export interface XdtHelperMcpDeps {
   sendToSession?: SendToSessionCallback;
   /** Register an existing local directory as a Cindy project without starting a task. */
   createProject?: CreateProjectCallback;
+  moveSession?: MoveSessionCallback;
   projectManagement?: ProjectManagementCallbacks;
   /** Cindy Bot-only background Session-task controls. Host validates the caller Session. */
   sessionTasks?: SessionTaskCallbacks;
@@ -691,6 +693,12 @@ export function createXdtHelperMcpServer(
     registerProjectManagementTools(registry, {
       getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
       callbacks: deps.projectManagement,
+    });
+  }
+  if (deps.moveSession) {
+    registerMoveSessionTool(registry, {
+      getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
+      moveSession: deps.moveSession,
     });
   }
   if (deps.renameSessions) {

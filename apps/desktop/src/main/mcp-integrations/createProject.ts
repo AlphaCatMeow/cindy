@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import { eq } from 'drizzle-orm';
@@ -104,6 +104,9 @@ export async function createProject({
   return withLocalProjectContext(callerSessionId, async ({ client, owner, assertCurrent }) => {
     if (!(await stat(directory.workingDir)).isDirectory())
       return fail('NOT_A_DIRECTORY', 'working_dir is not a directory.');
+    // Symlinks/junctions must not disguise a managed task worktree as a project.
+    const physicalDirectory = validateLocalProjectDirectory(await realpath(directory.workingDir));
+    if (!physicalDirectory.ok) return physicalDirectory;
     assertCurrent();
     if (!(await upsertRecentWorkdir(directory.workingDir, Date.now(), process.platform, client))) {
       return fail('INTERNAL', 'Could not register the project directory.');

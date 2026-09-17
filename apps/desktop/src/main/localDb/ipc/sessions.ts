@@ -1710,7 +1710,16 @@ export async function updateSessionInDb(
   sid: string,
   p: Record<string, unknown>,
   opts: RegisterSessionIpcOpts = registeredSessionIpcOpts,
+  moveGuard?: {
+    /** Identity only: also used after commit and inside transcript relocation. */
+    assertCurrent: () => void;
+    /** Runs inside the existing route/worktree locks, including dialogue moves. */
+    beforeUpdate: () => Promise<void>;
+    /** Mutable running/IM preconditions must not reject an already committed move. */
+    beforeWrite?: () => void;
+  },
 ): Promise<ReturnType<typeof sessionToCamel>> {
+  moveGuard?.assertCurrent();
   const ownerScope = captureOwnerScope();
   if (p.extraDirs !== undefined || p.writableDirs !== undefined) {
     throwIpcError(
@@ -1723,6 +1732,11 @@ export async function updateSessionInDb(
   // 工作目录切换必须和发送/懒启动共用同一把路由锁。否则发送可能在
   // 读取旧目录后、写入新目录前重建 runtime，随后仍在旧目录执行。
   const update = async () => {
+    if (moveGuard) {
+      moveGuard.assertCurrent();
+      await moveGuard.beforeUpdate();
+      moveGuard.assertCurrent();
+    }
     if (p.workspaceKind !== undefined) {
       const value = p.workspaceKind;
       if (value !== 'project' && value !== 'dialogue') {
@@ -1794,6 +1808,7 @@ export async function updateSessionInDb(
     // before persisting the new directory so the next send lazily recreates the
     // runtime with the moved session's cwd instead of continuing in the old one.
     if (movingLocalNonClaudeSession) {
+      moveGuard?.assertCurrent();
       if (!opts.closeIdleSessionForMove) {
         throwIpcError('INTERNAL', '会话移动 runtime 操作未配置');
       }
@@ -1841,12 +1856,15 @@ export async function updateSessionInDb(
       sid,
       p.status,
       async () => {
+        moveGuard?.assertCurrent();
+        moveGuard?.beforeWrite?.();
         if (p.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sid);
         await writeSessionPatch(db, sid, setObj, p.status);
         cleanupSessionRuntimeForTerminalStatus(sid, p.status);
       },
       p.workingDir !== undefined,
     );
+    moveGuard?.assertCurrent();
     // session-git-pr-context:/clear 经此处写 clearedAt——边界之前的消息对用户
     // 不可见,PR 引用同步重算(fire-and-forget,内部按 clearedAt/rewindAt 过滤)。
     if (p.clearedAt !== undefined) {
@@ -1874,16 +1892,19 @@ export async function updateSessionInDb(
       normalizeWorkingDirForStorage(beforeMove.workingDir) !== p.workingDir
     ) {
       const m = await import('../../maker-host/claude-transcript-relocation.js');
+      moveGuard?.assertCurrent();
       const reloc = await m.relocateClaudeTranscriptsForSessionMove(
         sid,
         beforeMove.workingDir,
         p.workingDir,
+        ...(moveGuard ? [{ client: dbClient, assertCurrent: moveGuard.assertCurrent }] : []),
       );
       if (reloc.persistedSdkSessionId) {
         (p as Record<string, unknown>).sdkSessionId = reloc.persistedSdkSessionId;
       }
     }
     const row = await selectSessionWithCount(db, sid);
+    moveGuard?.assertCurrent();
     if (!row) throwIpcError('NOT_FOUND', 'Session 不存在');
     // 取消置顶后摘要不再有展示面,立刻清掉,避免列表/再次置顶前继续吃旧句。
     if (p.pinnedAt !== undefined && row.pinnedAt == null) {
@@ -1943,6 +1964,7 @@ export async function updateSessionInDb(
               ? { status: broadcastStatus }
               : {}),
           };
+    moveGuard?.assertCurrent();
     if (
       projectTargetChanged ||
       settingsChanged ||
@@ -1974,7 +1996,7 @@ export async function updateSessionInDb(
     compactTerminalSessionToolResults(dbClient, sid, p.status);
     return updated;
   };
-  if (p.workingDir === undefined) return update();
+  if (p.workingDir === undefined && !moveGuard) return update();
   return withSessionRouteLock(sid, async () => {
     const [binding] = await db
       .select({ remoteHostId: sessions.remoteHostId })

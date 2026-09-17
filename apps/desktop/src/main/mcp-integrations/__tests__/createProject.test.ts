@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -109,6 +109,15 @@ describe('createProject', () => {
       errorCode: 'NOT_FOUND',
     });
     expect(h.upsert).not.toHaveBeenCalled();
+  });
+  it('rejects symlink and junction aliases of managed worktrees before registration', async () => {
+    const managed = path.join(directory, '.cindy-worktrees', 'task');
+    await mkdir(managed, { recursive: true });
+    const alias = path.join(directory, 'alias');
+    await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_ARGS' });
+    expect(h.upsert).not.toHaveBeenCalled();
+    expect(h.restore).not.toHaveBeenCalled();
   });
   it('rejects files, relative paths and managed task worktrees', async () => {
     const file = path.join(directory, 'file');

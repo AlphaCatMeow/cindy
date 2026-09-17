@@ -1,5 +1,6 @@
 import { getPluginMarketService } from '../plugin-market/service.js';
 import { createProject } from './createProject.js';
+import { createMoveSession } from './moveSession.js';
 import { listProjects, renameProject, removeProject } from './projectManagement.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import type { createBotCapabilityService } from '../maker-ipc/botCapabilityService.js';
@@ -47,6 +48,7 @@ import {
   tryGetBotDelegationService,
   tryGetBotDirectMessageService,
   tryGetOrcaCollabService,
+  isSessionInTurn,
 } from '../maker-ipc/register.js';
 import { createBotProfile } from '../localDb/ipc/bots.js';
 import { submitGithubIssueForSession } from '../github-issue/index.js';
@@ -371,6 +373,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
     xdtHelper: {
       logger: createLogger('mcp/cindy_helper'),
       createProject,
+      moveSession: createMoveSession(isSessionInTurn),
       projectManagement: { list: listProjects, rename: renameProject, remove: removeProject },
       resolveSurface: async ({ sessionId }) => {
         const dbClient = tryGetDbClient();
