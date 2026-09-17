@@ -232,6 +232,7 @@ import {
 } from '../localDb/client/current.js';
 import { createBotRuntimeRestoreCoordinator } from './botRuntimeRestore.js';
 import { createWorkingDirectoryRecovery, isUnavailableFilesystemError } from './workingDirectoryRecovery.js';
+import { workdirDiagnosticContext, workdirDiagnosticErrorCode, workdirDiagnosticId } from '../workdirDiagnostics.js';
 import { statWorkingDirectory, mkdirWorkingDirectory, realpathWorkingDirectory, findSimilarWorkingDirectory } from '../workdir-probe-host/index.js';
 import { getMessagesForHistory } from '../localDb/chatHistoryReader.js';
 import {
@@ -1098,8 +1099,9 @@ import { handleSessionEvent, type SessionEventDependencies } from './sessionEven
 import { installSessionTurnObserver } from './sessionTurnObserver.js';
 
 const log = createLogger('maker-ipc');
+const workdirLog = createLogger('workdir-diagnostics');
 const workingDirectoryRecovery = createWorkingDirectoryRecovery({ stat: statWorkingDirectory, mkdir: mkdirWorkingDirectory, realpath: realpathWorkingDirectory }, async (sessionId) =>
-  ensureDialogueWorkspaceDir(sessionId, Date.now()));
+  ensureDialogueWorkspaceDir(sessionId, Date.now()), workdirLog);
 
 function localModelWindowSwitchErrorCode(code: IpcErrorCode): IpcErrorCode {
   return isDeviceLinkInvoke() ? 'PRECONDITION_FAILED' : code;
@@ -6543,7 +6545,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   }> {
     if (o.id && o.workingDir && !o.remoteHostId) {
       o.workingDir = workingDirectoryRecovery.resolve(o.id, o.workingDir);
-      await workingDirectoryRecovery.observe(o.id, o.workingDir).catch(() => undefined);
+      await workingDirectoryRecovery.observe(o.id, o.workingDir).catch((error) => {
+        workdirLog.warn('workdir bootstrap observation failed', {
+          ...workdirDiagnosticContext(o.id!, o.workingDir), code: workdirDiagnosticErrorCode(error),
+        });
+      });
     }
     o.hostStartupPreferences = {
       userPrompt: o.userPrompt,
@@ -12252,6 +12258,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       applyPendingAgentSwitchIfIdle(agentSwitchDeps, sessionId),
     prepareUnhealthySession: (sessionId) =>
       contextOverflowRolloverHolder?.prepareUnhealthySession(sessionId) ?? Promise.resolve(false),
+    workdirDiagnostics: workdirLog,
     log,
   });
 
@@ -18016,9 +18023,16 @@ async function checkWorkDirExists(
   // suppressMissingBroadcast: 调用方(SEND 事务)手里还有 DB 权威值可兜底时,
   // 首检失败只记日志不广播错误横幅——兜底成功的话用户不该看到假错误。
   const suppress = opts?.suppressMissingBroadcast === true;
+  const startedAt = Date.now();
+  const diagnosticContext = {
+    ...workdirDiagnosticContext(sessionId, workingDir),
+    suppressMissingBroadcast: suppress,
+    usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
+  };
   try {
     const stat = await statWorkingDirectory(workingDir);
     if (!stat.isDirectory()) {
+      workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'not-directory' });
       if (suppress) {
         log.warn('send: workdir not a directory (broadcast suppressed, caller has fallback)', {
           sessionId,
@@ -18036,6 +18050,7 @@ async function checkWorkDirExists(
     if (getManagedWorktreeBasePath(normalizedWorkingDir) !== null) {
       const ready = await restoreMissingManagedWorktreeForSession(sessionId, workingDir);
       if (!ready) {
+        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'managed-worktree-not-ready' });
         if (suppress) {
           log.warn('send: managed worktree not ready (broadcast suppressed, caller has fallback)', {
             sessionId,
@@ -18048,15 +18063,28 @@ async function checkWorkDirExists(
       }
     }
     if (getManagedWorktreeBasePath(normalizedWorkingDir) === null) {
-      if (!await workingDirectoryRecovery.recover(sessionId, workingDir)) return false;
+      if (!await workingDirectoryRecovery.recover(sessionId, workingDir)) {
+        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'recovery-failed-after-stat' });
+        return false;
+      }
       await workingDirectoryRecovery.observe(sessionId, workingDir);
     }
+    workdirLog.info('workdir preflight ready', {
+      ...diagnosticContext,
+      usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
+      resolvedDirectoryRef: workdirDiagnosticId(workingDirectoryRecovery.resolve(sessionId, workingDir)),
+      elapsedMs: Date.now() - startedAt,
+    });
     return true;
   } catch (error) {
+    workdirLog.warn('workdir preflight failed', {
+      ...diagnosticContext, code: workdirDiagnosticErrorCode(error), elapsedMs: Date.now() - startedAt,
+    });
     // Cindy 托管 worktree 被外部 PR cleanup / 手动 git 命令移除时，先按 DB 中
     // 的精确 worktree_path 从本地或 origin tracking 分支重建，保留原代码与快照。
     const restored = await restoreMissingManagedWorktreeForSession(sessionId, workingDir);
     if (restored) {
+      workdirLog.info('workdir preflight recovered', { ...diagnosticContext, action: 'managed-worktree-restored' });
       log.info('send: restored missing managed worktree', { sessionId, workingDir });
       return true;
     }
@@ -18079,7 +18107,15 @@ async function checkWorkDirExists(
           .filter((session) => !session.remoteHostId)
           .map((session) => ({ id: session.id, workingDir: session.workDir })))
     ) {
-      log.info('send: recreated missing working directory for conversation', { sessionId, workingDir });
+      const resolvedDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
+      workdirLog.info('workdir preflight recovered', {
+        ...diagnosticContext, code: workdirDiagnosticErrorCode(error),
+        resolvedDirectoryRef: workdirDiagnosticId(resolvedDir),
+        usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
+        sameDirectory: path.resolve(workingDir) === path.resolve(resolvedDir),
+        elapsedMs: Date.now() - startedAt,
+      });
+      log.info('send: working directory recovery completed', { sessionId, workingDir });
       return true;
     }
     if (suppress) {
@@ -18089,6 +18125,12 @@ async function checkWorkDirExists(
       });
       return false;
     }
+    workdirLog.warn('workdir preflight blocked', {
+      ...diagnosticContext, code: workdirDiagnosticErrorCode(error), reportedReason: 'not-exist',
+      recoveryEligible: (error as NodeJS.ErrnoException).code === 'ENOENT' || unavailable,
+      managedWorktree: getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) !== null,
+      similarPathFound: !!similar, elapsedMs: Date.now() - startedAt,
+    });
     emitWorkDirMissingError(sessionId, workingDir, source, 'not-exist', similar);
     return false;
   }
