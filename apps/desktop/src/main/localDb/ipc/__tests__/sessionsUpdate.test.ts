@@ -35,6 +35,7 @@ const h = vi.hoisted(() => ({
   closeSession: vi.fn(async (_sessionId: string) => undefined),
   tapWindowBroadcast: vi.fn(),
   windows: [] as Array<{
+    trusted?: boolean;
     isDestroyed: ReturnType<typeof vi.fn>;
     webContents: { send: ReturnType<typeof vi.fn> };
   }>,
@@ -123,6 +124,8 @@ vi.mock('../../../sessionTaskSummary.js', () => ({
 }));
 vi.mock('../../../security/trustedAppRenderer.js', () => ({
   assertTrustedAppRendererEvent: vi.fn(),
+  isTrustedAppRendererWindow: (w: { trusted?: boolean; isDestroyed: () => boolean }) =>
+    !w.isDestroyed() && w.trusted !== false,
 }));
 vi.mock('../../agentIslandSessionPatch', () => ({ notifyAgentIslandSessionPatch: vi.fn() }));
 vi.mock('../../../messagePersistBroadcaster', () => ({ noteSessionClearBoundary: vi.fn() }));
@@ -329,6 +332,40 @@ afterEach(async () => {
 });
 
 describe('local-db:sessions:update handler wiring', () => {
+  it('rechecks window trust for both movement broadcasts after navigation', async () => {
+    const trusted = {
+      trusted: true,
+      isDestroyed: vi.fn(() => false),
+      webContents: { send: vi.fn() },
+    };
+    const auxiliary = {
+      trusted: false,
+      isDestroyed: vi.fn(() => false),
+      webContents: { send: vi.fn() },
+    };
+    h.windows = [trusted, auxiliary];
+    await invokeUpdate('codex-local', { workingDir: '/new/dir', workspaceKind: 'project' });
+    expect(trusted.webContents.send).toHaveBeenCalledWith('local-db:recent-workdirs:changed', {
+      path: '/new/dir',
+    });
+    expect(trusted.webContents.send).toHaveBeenCalledWith(
+      'local-db:sessions:patched',
+      expect.objectContaining({ sessionId: 'codex-local' }),
+    );
+    expect(auxiliary.webContents.send).not.toHaveBeenCalled();
+
+    trusted.webContents.send.mockClear();
+    trusted.trusted = false;
+    await invokeUpdate('codex-local', { workingDir: '/another/dir', workspaceKind: 'project' });
+    await invokeUpdate('codex-local', { workspaceKind: 'dialogue' });
+    expect(trusted.webContents.send).not.toHaveBeenCalled();
+    expect(auxiliary.webContents.send).not.toHaveBeenCalled();
+    expect(h.tapWindowBroadcast).toHaveBeenCalledWith(
+      'local-db:sessions:patched',
+      expect.objectContaining({ sessionId: 'codex-local' }),
+    );
+  });
+
   it('isolates device-link and renderer failures while broadcasting a session patch', () => {
     const failedWindowSend = vi.fn(() => {
       throw new Error('window closed');
@@ -937,21 +974,33 @@ describe('local-db:sessions:update handler wiring', () => {
   });
 
   it.each([{ workingDir: '/new/dir', workspaceKind: 'project' }, { workspaceKind: 'dialogue' }])(
-    'runs MCP move checks inside the route lock before persisting %j', async (patch) => {
+    'runs MCP move checks inside the route lock before persisting %j',
+    async (patch) => {
       let locked = false;
       h.routeLock.mockImplementation(async (_id, task) => {
         locked = true;
-        try { return await task(); } finally { locked = false; }
+        try {
+          return await task();
+        } finally {
+          locked = false;
+        }
       });
       const beforeUpdate = vi.fn(async () => {
         expect(locked).toBe(true);
-        throw Object.assign(new Error('[PRECONDITION_FAILED] move blocked'), { code: 'PRECONDITION_FAILED' });
+        throw Object.assign(new Error('[PRECONDITION_FAILED] move blocked'), {
+          code: 'PRECONDITION_FAILED',
+        });
       });
-      await expect(updateSessionInDb('cc-local', patch, undefined, {
-        assertCurrent: () => undefined, beforeUpdate,
-      })).rejects.toThrow('move blocked');
+      await expect(
+        updateSessionInDb('cc-local', patch, undefined, {
+          assertCurrent: () => undefined,
+          beforeUpdate,
+        }),
+      ).rejects.toThrow('move blocked');
       expect(beforeUpdate).toHaveBeenCalledOnce();
-      expect(h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('cc-local')).toEqual({ working_dir: '/old/dir' });
+      expect(
+        h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('cc-local'),
+      ).toEqual({ working_dir: '/old/dir' });
       expect(h.relocate).not.toHaveBeenCalled();
       expect(h.tapWindowBroadcast).not.toHaveBeenCalled();
     },
@@ -959,24 +1008,46 @@ describe('local-db:sessions:update handler wiring', () => {
 
   it('checks the move account fence again after closing an idle runtime and before writing', async () => {
     let current = true;
-    h.closeIdleSessionForMove.mockImplementationOnce(async () => { current = false; return true; });
-    await expect(updateSessionInDb('codex-local', { workingDir: '/new/dir' }, undefined, {
-      beforeUpdate: async () => undefined,
-      assertCurrent: () => { if (!current) throw Object.assign(new Error('[PRECONDITION_FAILED] account changed'), { code: 'PRECONDITION_FAILED' }); },
-    })).rejects.toThrow('account changed');
-    expect(h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('codex-local')).toEqual({ working_dir: '/old/dir' });
+    h.closeIdleSessionForMove.mockImplementationOnce(async () => {
+      current = false;
+      return true;
+    });
+    await expect(
+      updateSessionInDb('codex-local', { workingDir: '/new/dir' }, undefined, {
+        beforeUpdate: async () => undefined,
+        assertCurrent: () => {
+          if (!current)
+            throw Object.assign(new Error('[PRECONDITION_FAILED] account changed'), {
+              code: 'PRECONDITION_FAILED',
+            });
+        },
+      }),
+    ).rejects.toThrow('account changed');
+    expect(
+      h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('codex-local'),
+    ).toEqual({ working_dir: '/old/dir' });
     expect(h.tapWindowBroadcast).not.toHaveBeenCalled();
   });
 
   it('retains transcript relocation and returned resume identity for a guarded MCP move', async () => {
-    const updated = await updateSessionInDb('cc-local', { workingDir: '/new/dir', workspaceKind: 'project' }, undefined, {
-      beforeUpdate: async () => undefined, assertCurrent: () => undefined,
-    });
+    const updated = await updateSessionInDb(
+      'cc-local',
+      { workingDir: '/new/dir', workspaceKind: 'project' },
+      undefined,
+      {
+        beforeUpdate: async () => undefined,
+        assertCurrent: () => undefined,
+      },
+    );
     expect(updated.workingDir).toBe('/new/dir');
     expect(h.relocate).toHaveBeenCalledWith('cc-local', '/old/dir', '/new/dir', {
-      client: h.client, assertCurrent: expect.any(Function),
+      client: h.client,
+      assertCurrent: expect.any(Function),
     });
-    expect(h.tapWindowBroadcast).toHaveBeenCalledWith('local-db:sessions:patched', expect.objectContaining({ sessionId: 'cc-local' }));
+    expect(h.tapWindowBroadcast).toHaveBeenCalledWith(
+      'local-db:sessions:patched',
+      expect.objectContaining({ sessionId: 'cc-local' }),
+    );
   });
 
   it('returns and broadcasts the sdkSessionId persisted during relocation', async () => {

@@ -27,7 +27,14 @@ import { getDbClient } from '../client/current';
 import * as currentDb from '../client/current';
 import type { DbClient } from '../client/DbClient';
 import { sessions, messages } from '../schema';
-import { selectSessionListRows, selectSessionWithCount, selectSessionsByIds, flattenSessionReadRow, projectSessionReadResult, type SessionListRow } from '../sessionQueries';
+import {
+  selectSessionListRows,
+  selectSessionWithCount,
+  selectSessionsByIds,
+  flattenSessionReadRow,
+  projectSessionReadResult,
+  type SessionListRow,
+} from '../sessionQueries';
 import { commitBotProfileDeletion } from '../botProfileDeletionStore.js';
 import {
   persistSessionListProjectionBatch,
@@ -85,7 +92,10 @@ import {
 import { dismissErrorMessage, rebroadcastAgentSwitchBoundary } from './messages';
 import { SESSION_READ_BATCH_LIMIT } from '../../../shared/sessionRead';
 import { isDeviceLinkInvoke } from '../../device-link/invoke-context.js';
-import { assertTrustedAppRendererEvent } from '../../security/trustedAppRenderer.js';
+import {
+  assertTrustedAppRendererEvent,
+  isTrustedAppRendererWindow,
+} from '../../security/trustedAppRenderer.js';
 import { removeTurnChangeSetsForSession } from '../../turn-change-set/store.js';
 import { quiesceSessionBeforeWorktreeRecycle } from './sessionRemovalOperations.js';
 import { withSessionRouteLock, withSessionRouteLocks } from '../sessionRouteLock.js';
@@ -361,7 +371,7 @@ export function broadcastSessionPatched(
   }
   for (const w of windows) {
     try {
-      if (w.isDestroyed()) continue;
+      if (!isTrustedAppRendererWindow(w)) continue;
       if (hasCapturedScope) {
         w.webContents.send('local-db:sessions:patched', { sessionId, patch }, ownerStamp);
       } else if (ownerStamp === undefined) {
@@ -383,7 +393,7 @@ function broadcastRecentWorkdirsChanged(path: string, ownerScope: OwnerScope): v
   const hasCapturedScope = ownerScope !== null;
   const ownerStamp = hasCapturedScope ? ownerScope.ownerStamp : getSafeOwnerPushStamp();
   for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
+    if (!isTrustedAppRendererWindow(window)) continue;
     if (hasCapturedScope || ownerStamp !== undefined) {
       window.webContents.send('local-db:recent-workdirs:changed', { path }, ownerStamp);
     } else {
@@ -1226,7 +1236,9 @@ export function registerSessionIpc(
         }
 
         scheduleSessionListProjectionBackfill(mergedRows);
-        return mergedRows.map((row) => projectSessionReadResult(flattenSessionReadRow(row), opts.resolveContextWindow));
+        return mergedRows.map((row) =>
+          projectSessionReadResult(flattenSessionReadRow(row), opts.resolveContextWindow),
+        );
       };
       const loadUsageHistoryRows = async () => {
         // 用量历史的“最耗任务”必须覆盖整个会话表，再由 renderer 按所选日历范围
@@ -1516,7 +1528,10 @@ export function registerSessionIpc(
   ipcMain.handle('local-db:sessions:get-many', async (event, value: unknown) => {
     if (!isDeviceLinkInvoke()) assertTrustedAppRendererEvent(event);
     if (!Array.isArray(value) || value.length > SESSION_READ_BATCH_LIMIT) {
-      throwIpcError('INVALID_PARAMS', `sessionIds must be an array of at most ${SESSION_READ_BATCH_LIMIT} ids`);
+      throwIpcError(
+        'INVALID_PARAMS',
+        `sessionIds must be an array of at most ${SESSION_READ_BATCH_LIMIT} ids`,
+      );
     }
     const ids = [...new Set(value.map((id) => requireString(id, 'sessionId')))];
     if (!ids.length) return [];

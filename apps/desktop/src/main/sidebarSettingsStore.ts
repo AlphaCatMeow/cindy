@@ -44,7 +44,10 @@ import {
   isLegacyOwnerNamespaceClaimOwnedBy,
   isLegacyOwnerNamespaceClaimedByOtherOwner,
 } from './ownerNamespaceMigration.js';
-import { assertTrustedAppRendererEvent } from './security/trustedAppRenderer.js';
+import {
+  assertTrustedAppRendererEvent,
+  isTrustedAppRendererWindow,
+} from './security/trustedAppRenderer.js';
 import { atomicWriteFileSync, readAtomicFileSync } from './utils/atomicWriteFile.js';
 import { throwIpcError } from './utils/ipcValidate.js';
 import { isAppContentWindow } from './windowFocusClassifier.js';
@@ -424,7 +427,7 @@ function broadcastHiddenProjectKeysChanged(
   ownerStamp: DataOwnerPushStamp,
 ): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!isAppContentWindow(window)) continue;
+    if (!isTrustedAppRendererWindow(window)) continue;
     window.webContents.send(
       'sidebar-settings:hidden-project-keys-changed',
       Array.from(projectKeys),
