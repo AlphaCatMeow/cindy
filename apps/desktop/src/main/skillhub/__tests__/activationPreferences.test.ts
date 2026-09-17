@@ -45,7 +45,7 @@ describe('Skill activation preferences', () => {
     await reloaded.setCindySkillEnabled(b, true);
     expect(reloaded.readDisabledSkillPaths()).toEqual([]);
   });
-  it('also disables Codex native fallback when the Cindy built-in Skill is disabled', async () => {
+  it('also disables native runtime projections when the Cindy built-in Skill is disabled', async () => {
     const prefs = await import('../activationPreferences');
     const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root)[0]!;
     fs.mkdirSync(descriptor.absolutePath, { recursive: true });
@@ -53,6 +53,7 @@ describe('Skill activation preferences', () => {
     await prefs.setCindySkillEnabled(descriptor.absolutePath, false);
     expect(prefs.readDisabledSkillPaths()).toEqual(expect.arrayContaining([
       prefs.skillActivationKey(descriptor.absolutePath),
+      descriptor.nativeClaudePath,
       descriptor.nativeCodexPath,
     ]));
     await prefs.setCindySkillEnabled(descriptor.absolutePath, true);

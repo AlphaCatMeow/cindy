@@ -105,6 +105,7 @@ describe('scanAllSkills', () => {
     const result = await scanAllSkills({}, maker, [], [{
       name: 'skill-creator',
       absolutePath: builtIn,
+      nativeClaudePath: path.join(root, 'user-data', 'claude-home', 'skills', 'skill-creator'),
       nativeCodexPath: path.join(root, 'user-data', 'codex-home', 'skills', '.system', 'skill-creator'),
     }]);
 

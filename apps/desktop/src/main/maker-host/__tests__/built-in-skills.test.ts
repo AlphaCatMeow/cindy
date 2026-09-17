@@ -40,6 +40,9 @@ describe('built-in Skills', () => {
     expect(first.changed).toBe(true);
     expect(first.warnings).toEqual([]);
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(descriptor.absolutePath));
+    expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(
+      fs.realpathSync(descriptor.absolutePath),
+    );
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       '# Creator',
     );
@@ -72,6 +75,19 @@ describe('built-in Skills', () => {
     const result = await prepareBuiltInSkills(input);
     expect(fs.readFileSync(path.join(userSkill, 'SKILL.md'), 'utf8')).toBe('# User copy\n');
     expect(fs.existsSync(path.join(result.descriptors[0]!.absolutePath, 'SKILL.md'))).toBe(true);
+    expect(result.warnings.join('\n')).toContain('already owned by the user');
+  });
+
+  it('keeps a user-owned Skill in the isolated Claude config directory', async () => {
+    const input = fixture();
+    const descriptor = builtInSkillDescriptors(input.userDataDir)[0]!;
+    fs.mkdirSync(descriptor.nativeClaudePath, { recursive: true });
+    fs.writeFileSync(path.join(descriptor.nativeClaudePath, 'SKILL.md'), '# Claude user copy\n');
+
+    const result = await prepareBuiltInSkills(input);
+    expect(fs.readFileSync(path.join(descriptor.nativeClaudePath, 'SKILL.md'), 'utf8')).toBe(
+      '# Claude user copy\n',
+    );
     expect(result.warnings.join('\n')).toContain('already owned by the user');
   });
 

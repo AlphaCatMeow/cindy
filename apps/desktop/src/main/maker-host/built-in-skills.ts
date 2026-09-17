@@ -13,6 +13,7 @@ const MANIFEST_FILE = '.cindy-system-skills.json';
 export interface BuiltInSkillDescriptor {
   name: string;
   absolutePath: string;
+  nativeClaudePath: string;
   nativeCodexPath: string;
 }
 
@@ -52,6 +53,7 @@ export function builtInSkillDescriptors(userDataDir: string): BuiltInSkillDescri
   return BUILT_IN_SKILL_NAMES.map((name) => ({
     name,
     absolutePath: path.join(root, name),
+    nativeClaudePath: path.join(userDataDir, 'claude-home', 'skills', name),
     nativeCodexPath: path.join(userDataDir, 'codex-home', 'skills', '.system', name),
   }));
 }
@@ -134,13 +136,11 @@ async function materializeSkill(
   return true;
 }
 
-async function ensureSharedEntry(
+async function ensureSkillEntry(
   descriptor: BuiltInSkillDescriptor,
-  homeDir: string,
+  linkPath: string,
 ): Promise<{ changed: boolean; warning?: string }> {
-  const sharedRoot = path.join(homeDir, '.agents', 'skills');
-  const linkPath = path.join(sharedRoot, descriptor.name);
-  await fsp.mkdir(sharedRoot, { recursive: true });
+  await fsp.mkdir(path.dirname(linkPath), { recursive: true });
 
   try {
     const current = await fsp.realpath(linkPath);
@@ -168,9 +168,20 @@ async function ensureSharedEntry(
   return { changed: true };
 }
 
+async function ensureSharedEntry(
+  descriptor: BuiltInSkillDescriptor,
+  homeDir: string,
+): Promise<{ changed: boolean; warning?: string }> {
+  return ensureSkillEntry(
+    descriptor,
+    path.join(homeDir, '.agents', 'skills', descriptor.name),
+  );
+}
+
 /**
  * Materialize Cindy-owned Skill bytes under a stable userData path, then expose
- * them through the shared ~/.agents discovery root without replacing user data.
+ * them through the shared ~/.agents discovery root and Cindy's isolated Claude
+ * config directory without replacing user data.
  */
 export async function prepareBuiltInSkills(
   options: PrepareBuiltInSkillsOptions,
@@ -208,6 +219,16 @@ export async function prepareBuiltInSkills(
     } catch (error) {
       warnings.push(
         `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    try {
+      const linked = await ensureSkillEntry(descriptor, descriptor.nativeClaudePath);
+      changed = linked.changed || changed;
+      if (linked.warning) warnings.push(linked.warning);
+    } catch (error) {
+      warnings.push(
+        `could not expose built-in Skill ${descriptor.name} to Claude: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

@@ -51,12 +51,12 @@ export function readDisabledSkillPaths(): readonly string[] {
       catch { return false; }
     }),
   ]);
-  // Cindy's bundled copy normally wins through ~/.agents/skills. If that
-  // projection is unavailable, Codex can still expose its own embedded system
-  // copy. Mirror the same user preference to that fallback path.
+  // Cindy's bundled copy normally wins through ~/.agents/skills. Claude uses an
+  // isolated config directory in Desktop dev, while Codex can expose its own
+  // embedded system copy. Mirror the same user preference to both runtime paths.
   for (const descriptor of builtInSkillDescriptors(app.getPath('userData'))) {
     if (value.disabledPaths.includes(skillActivationKey(descriptor.absolutePath))) {
-      paths.push(descriptor.nativeCodexPath);
+      paths.push(descriptor.nativeClaudePath, descriptor.nativeCodexPath);
     }
   }
   return [...new Set(paths)];

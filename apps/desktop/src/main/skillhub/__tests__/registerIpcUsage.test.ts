@@ -232,6 +232,7 @@ describe('registerSkillhubIpc usage handlers', () => {
       getBuiltInSkills: () => [{
         name: 'skill-creator',
         absolutePath: builtInRoot,
+        nativeClaudePath: '/tmp/claude-home/skills/skill-creator',
         nativeCodexPath: '/tmp/codex-home/skills/.system/skill-creator',
       }],
       getAllowedProjectRoots,
