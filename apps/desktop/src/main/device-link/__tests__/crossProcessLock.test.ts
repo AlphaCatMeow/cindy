@@ -716,9 +716,15 @@ describe('接管陈旧锁', () => {
     expect(fs.existsSync(lock)).toBe(true);
   });
 
-  it('bounds repeated successful stale takeovers by time and count', async () => {
+  it.each([
+    { takeoverMs: 100, expectedTakeovers: 3 },
+    { takeoverMs: 2_500, expectedTakeovers: 1 },
+  ])('bounds repeated successful stale takeovers by time and count ($takeoverMs ms)', async ({ takeoverMs, expectedTakeovers }) => {
     const lock = path.join(dir, 'lock');
     await writeStaleStrictLock(lock);
+    // Exercise the protocol budget independently of Windows filesystem latency.
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const originalRename = fsp.rename;
     let takeovers = 0;
     const spy = vi.spyOn(fsp, 'rename').mockImplementation((async (
@@ -728,25 +734,29 @@ describe('接管陈旧锁', () => {
       const result = await (originalRename as (...args: unknown[]) => Promise<unknown>)(from, to);
       if (from === lock && typeof to === 'string' && to.startsWith(`${lock}.reclaim-`)) {
         takeovers += 1;
+        now += takeoverMs;
         await writeStaleStrictLock(lock);
       }
       return result;
     }) as typeof fsp.rename);
     try {
-      const started = performance.now();
+      const started = Date.now();
       await expect(
         withCrossProcessLock(lock, { label: 'churn', waitMs: 2_000 }, async (s) => s),
       ).resolves.toEqual({ held: false, reason: 'busy' });
-      expect(performance.now() - started).toBeLessThan(1_000);
-      expect(takeovers).toBe(3);
+      expect(takeovers).toBe(expectedTakeovers);
+      expect(Date.now() - started).toBe(takeoverMs * expectedTakeovers);
     } finally {
       spy.mockRestore();
+      clock.mockRestore();
     }
   });
 
   it('publishes after the final stale takeover when the path stays empty', async () => {
     const lock = path.join(dir, 'lock');
     await writeStaleStrictLock(lock);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const originalRename = fsp.rename;
     let takeovers = 0;
     const spy = vi.spyOn(fsp, 'rename').mockImplementation((async (
@@ -756,6 +766,7 @@ describe('接管陈旧锁', () => {
       const result = await (originalRename as (...args: unknown[]) => Promise<unknown>)(from, to);
       if (from === lock && typeof to === 'string' && to.startsWith(`${lock}.reclaim-`)) {
         takeovers += 1;
+        now += 100;
         if (takeovers < 3) await writeStaleStrictLock(lock);
       }
       return result;
@@ -767,12 +778,15 @@ describe('接管陈旧锁', () => {
       expect(takeovers).toBe(3);
     } finally {
       spy.mockRestore();
+      clock.mockRestore();
     }
   });
 
   it('retries publication after the final takeover when Windows still reports the path busy', async () => {
     const lock = path.join(dir, 'lock');
     await writeStaleStrictLock(lock);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const originalRename = fsp.rename;
     const originalLink = fsp.link;
     let takeovers = 0;
@@ -784,6 +798,7 @@ describe('接管陈旧锁', () => {
       const result = await (originalRename as (...args: unknown[]) => Promise<unknown>)(from, to);
       if (from === lock && typeof to === 'string' && to.startsWith(`${lock}.reclaim-`)) {
         takeovers += 1;
+        now += 100;
         if (takeovers < 3) await writeStaleStrictLock(lock);
       }
       return result;
@@ -807,6 +822,7 @@ describe('接管陈旧锁', () => {
     } finally {
       renameSpy.mockRestore();
       linkSpy.mockRestore();
+      clock.mockRestore();
     }
   });
 

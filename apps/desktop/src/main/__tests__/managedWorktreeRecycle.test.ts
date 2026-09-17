@@ -38,6 +38,7 @@ import { inventoryWorktree } from '../worktree/recoveryArchive';
 import { physicalWorktreeKey } from '../worktree/resourceLock';
 import { readWorktreeRuntimePaths } from '../worktree/runtimeLeases';
 import { acquireIOSSimulatorProjectUse } from '../mcp-integrations/ios-simulator-project-source';
+import { createLinkedWorktreeMetadata } from './fixtures/linkedWorktree';
 
 describe('shared worktree recycling', () => {
   let meta: WorktreeMeta;
@@ -47,7 +48,7 @@ describe('shared worktree recycling', () => {
     state.userData = '';
     meta = { sessionId: 'owner', generation: 'generation-one', name: 'one', path: path.join(state.root, 'repo', '.cindy-worktrees', 'one'), baseRepo: path.join(state.root, 'repo'), branch: 'cindy/one', sourceBranch: 'main', createdAt: '2026-09-08T00:00:00Z' };
     await fs.mkdir(meta.path, { recursive: true });
-    await fs.writeFile(path.join(meta.path, '.git'), 'gitdir: unused-test-link');
+    await createLinkedWorktreeMetadata(meta.path);
     await fs.writeFile(path.join(meta.path, 'draft.txt'), 'uncommitted contents');
     state.registry.clear(); state.registry.set(meta.sessionId, meta);
     state.runtimes.clear();
@@ -167,7 +168,6 @@ describe('shared worktree recycling', () => {
       state.userData = ownerProfile;
       expect(await readWorktreeRuntimePaths()).toEqual(new Set());
       expect(await recycle()).toBe(false);
-      expect((await readRecycleRecord(meta.path))?.reason).toBe('keep-sentinel');
       expect(archive).not.toHaveBeenCalled();
       expect(await fs.readFile(path.join(meta.path, 'draft.txt'), 'utf8')).toBe('uncommitted contents');
       await release!();

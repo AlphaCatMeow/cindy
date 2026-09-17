@@ -37,6 +37,8 @@ const leaseNamePattern = /^\d+-[a-f0-9]{64}\.json$/;
 const releaseRequestPattern = /^\d+-[a-f0-9]{64}\.json\.release$/;
 
 interface RuntimeKeepSentinel {
+  /** Older release receipts omit this and refer to the in-tree keep marker. */
+  file?: string;
   content: string;
   identity: string;
 }
@@ -65,8 +67,8 @@ export async function acquireWorktreeRuntimeLease(
       // Publish both under the deletion lock. Keep the original profile copy
       // readable by existing clients sharing this userData.
       shared = await publishRuntimeLease(sessionId, lease.physicalPath, sharedRuntimeRoot());
-      // Older owner profiles only read their own leases, but already honor this
-      // sentinel before both recycling and pool reset. Publish under their lock.
+      // Older profiles already check Git's external worktree lock before
+      // recycling or pool reset. Build-time git clean cannot remove this file.
       keepSentinel = await acquireRuntimeKeepSentinel(shared);
       if (keepSentinel) {
         // Ownership lives with a real borrower, not merely in a recognizable
@@ -102,9 +104,26 @@ async function publishRuntimeLease(sessionId: string, physicalPath: string, dire
   return lease;
 }
 
+/** Validate Git's linked-worktree metadata before writing outside the source. */
+async function runtimeGitLockFile(root: string): Promise<string> {
+  const link = path.join(root, '.git');
+  const linkStat = await fs.lstat(link);
+  if (!linkStat.isFile() || linkStat.isSymbolicLink()) throw new Error('project requires a linked Git worktree');
+  const match = /^gitdir: (.+)$/.exec((await fs.readFile(link, 'utf8')).trim());
+  if (!match) throw new Error('invalid worktree Git link');
+  const gitDir = await physicalWorktreeKey(path.resolve(root, match[1]!));
+  const common = await physicalWorktreeKey(path.resolve(gitDir, (await fs.readFile(path.join(gitDir, 'commondir'), 'utf8')).trim()));
+  const backlink = await physicalWorktreeKey(path.resolve(gitDir, (await fs.readFile(path.join(gitDir, 'gitdir'), 'utf8')).trim()));
+  if (path.dirname(gitDir) !== path.join(common, 'worktrees') || backlink !== link
+    || gitDir === root || gitDir.startsWith(`${root}${path.sep}`)) {
+    throw new Error('worktree Git metadata must belong to the source and remain outside it');
+  }
+  return path.join(gitDir, 'locked');
+}
+
 async function acquireRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<RuntimeKeepSentinel | undefined> {
-  const file = path.join(lease.physicalPath, '.worktree-keep');
-  const newContent = JSON.stringify({ kind: 'cindy-runtime-keep', version: 1, nonce: randomUUID() });
+  const file = await runtimeGitLockFile(lease.physicalPath);
+  const newContent = JSON.stringify({ kind: 'cindy-runtime-lock', version: 1, nonce: randomUUID() });
   let created = false;
   try {
     await fs.writeFile(file, newContent, { flag: 'wx', mode: 0o600 });
@@ -112,14 +131,13 @@ async function acquireRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
-  // stat must also succeed: a dangling user symlink is invisible to old pool
-  // guards. Never overwrite an existing marker, including files/directories.
+  // Never overwrite a user's existing Git lock, including files/directories.
   await fs.stat(file);
   const identity = await fs.lstat(file);
   if (!identity.isFile() || identity.isSymbolicLink()) return undefined;
   let content: string;
   try { content = await fs.readFile(file, 'utf8'); } catch { return undefined; }
-  const marker = { content, identity: `${identity.dev}:${identity.ino}:${identity.birthtimeMs}` };
+  const marker = { file, content, identity: `${identity.dev}:${identity.ino}:${identity.birthtimeMs}` };
   if (created) return content === newContent ? marker : undefined;
   const directory = path.dirname(lease.file);
   for (const name of await fs.readdir(directory)) {
@@ -127,7 +145,7 @@ async function acquireRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<
     try {
       const other = JSON.parse(await fs.readFile(path.join(directory, name), 'utf8'));
       if (other.version !== 1 || typeof other.path !== 'string') throw new Error('unreadable worktree lease');
-      if (other.path === lease.physicalPath && other.keepSentinel?.content === content
+      if (other.path === lease.physicalPath && other.keepSentinel?.file === file && other.keepSentinel?.content === content
         && other.keepSentinel?.identity === marker.identity) return marker;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -140,7 +158,7 @@ async function acquireRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<
 async function releaseRuntimeKeepSentinel(lease: WorktreeRuntimeLease): Promise<void> {
   const marker = lease.keepSentinel;
   if (!marker) return;
-  const file = path.join(lease.physicalPath, '.worktree-keep');
+  const file = marker.file ?? path.join(lease.physicalPath, '.worktree-keep');
   try {
     const identity = await fs.lstat(file);
     if (!identity.isFile() || identity.isSymbolicLink()
@@ -229,7 +247,9 @@ async function retryPendingRuntimeLeaseReleasesIn(directory: string): Promise<nu
       if (request.version !== 1 || typeof request.file !== 'string' || typeof request.path !== 'string'
         || path.dirname(request.file) !== directory || !leaseNamePattern.test(path.basename(request.file))
         || (request.keepSentinel !== undefined && (!request.keepSentinel
-          || typeof request.keepSentinel.content !== 'string' || typeof request.keepSentinel.identity !== 'string'))) {
+          || typeof request.keepSentinel.content !== 'string' || typeof request.keepSentinel.identity !== 'string'
+          || (request.keepSentinel.file !== undefined && (typeof request.keepSentinel.file !== 'string'
+            || !path.isAbsolute(request.keepSentinel.file) || path.basename(request.keepSentinel.file) !== 'locked'))))) {
         pending++;
         continue;
       }

@@ -18,6 +18,7 @@ import path from 'node:path';
 
 import { app } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createLinkedWorktreeMetadata } from '../../__tests__/fixtures/linkedWorktree';
 
 const { mockFsCp } = vi.hoisted(() => ({ mockFsCp: vi.fn() }));
 
@@ -333,6 +334,7 @@ describe('iOS Simulator host', () => {
     await mkdir(path.join(taskRoot, 'Demo.xcodeproj'), { recursive: true });
     await mkdir(path.join(otherTaskRoot, 'Demo.xcodeproj'), { recursive: true });
     await mkdir(path.join(projectRoot, 'Demo.xcodeproj'), { recursive: true });
+    const projectGitLock = await createLinkedWorktreeMetadata(projectRoot);
     if (mobile) {
       const mobileRoot = path.join(projectRoot, 'apps', 'mobile');
       await mkdir(mobileRoot, { recursive: true });
@@ -401,7 +403,7 @@ describe('iOS Simulator host', () => {
         generation: attachedInstance.generation, leaseId: attachedInstance.lease.id,
       });
       const route = { instanceId: instance.instanceId, generation: instance.generation, leaseId: instance.lease.id };
-      return { root, taskRoot, otherTaskRoot, projectRoot, secondDevice, actor, host, context, route, build, inspect, inspectArtifact, installExact, launchExact, validateLaunch, useProfile, close };
+      return { root, taskRoot, otherTaskRoot, projectRoot, projectGitLock, secondDevice, actor, host, context, route, build, inspect, inspectArtifact, installExact, launchExact, validateLaunch, useProfile, close };
     } catch (error) {
       await close();
       throw error;
@@ -438,7 +440,7 @@ describe('iOS Simulator host', () => {
     const h = await projectSelectionHarness(true);
     try {
       h.validateLaunch.mockImplementationOnce(async () => {
-        expect((await stat(path.join(h.projectRoot, '.worktree-keep'))).isFile()).toBe(true);
+        expect((await stat(h.projectGitLock)).isFile()).toBe(true);
         return null;
       });
       const result = await h.host.callTool('build_app', { ...h.route, projectDir: path.relative(h.taskRoot, h.projectRoot) }, h.context);
@@ -448,7 +450,7 @@ describe('iOS Simulator host', () => {
       expect(installed, JSON.stringify(installed)).toMatchObject({ ok: true });
       const launched = await h.host.callTool('launch_app', { ...h.route, artifactId, args: [] }, h.context);
       expect(launched, JSON.stringify(launched)).toMatchObject({ ok: true });
-      await expect(stat(path.join(h.projectRoot, '.worktree-keep'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(stat(h.projectGitLock)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(h.validateLaunch).toHaveBeenCalledWith(h.projectRoot, READY_REPORT.devices[0]!.udid, expect.any(AbortSignal));
       expect(h.installExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), expect.any(AbortSignal));
       expect(h.launchExact).toHaveBeenCalledWith(READY_REPORT.devices[0]!.udid, expect.objectContaining({ artifactId, worktreeRoot: h.projectRoot }), [], expect.any(AbortSignal));
@@ -621,6 +623,7 @@ describe('iOS Simulator host', () => {
       if (phase === 'replacement') {
         await fsp.rename(h.projectRoot, `${h.projectRoot}-old`);
         await mkdir(path.join(h.projectRoot, 'Demo.xcodeproj'), { recursive: true });
+        await createLinkedWorktreeMetadata(h.projectRoot);
       }
       await h.useProfile('user-data');
       expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: true });
@@ -657,12 +660,12 @@ describe('iOS Simulator host', () => {
       await vi.waitFor(() => expect(h.build.mock.calls[0]![0].signal!.aborted).toBe(true));
       expect(cancelFinished).toBe(false);
       expect(await readWorktreeRuntimePaths()).toEqual(new Set([await physicalWorktreeKey(h.projectRoot)]));
-      expect((await stat(path.join(h.projectRoot, '.worktree-keep'))).isFile()).toBe(true);
+      expect((await stat(h.projectGitLock)).isFile()).toBe(true);
       unblock();
       expect(await result).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
       await cancelling;
       expect(await readWorktreeRuntimePaths()).toEqual(new Set());
-      await expect(stat(path.join(h.projectRoot, '.worktree-keep'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(stat(h.projectGitLock)).rejects.toMatchObject({ code: 'ENOENT' });
       expect((await stat(h.projectRoot)).isDirectory()).toBe(true);
       if (reason === 'source-recycle') {
         expect(await h.host.callTool('build_app', { ...h.route, projectDir: h.projectRoot }, h.context)).toMatchObject({ ok: false, errorCode: 'MUTATION_CANCELLED' });
