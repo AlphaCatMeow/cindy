@@ -28,27 +28,6 @@ export function createMoveSession(
     return withLocalProjectContext(callerSessionId, async (context) => {
       const assertMoveAllowed = async () => {
         context.assertCurrent();
-        // Re-read active team membership at each checkpoint, including after
-        // transcript copying/runtime close. Do not retain the pre-move snapshot.
-        const workers = await context.client.drizzle
-          .select({ sessionId: orcaWorkers.sessionId })
-          .from(orcaWorkers)
-          .innerJoin(orcaTeams, eq(orcaWorkers.teamId, orcaTeams.id))
-          .where(and(eq(orcaTeams.leadSessionId, sessionId), eq(orcaTeams.status, 'active')));
-        context.assertCurrent();
-        if (
-          isSessionRunning(sessionId) ||
-          workers.some((worker) => isSessionRunning(worker.sessionId))
-        ) {
-          throwIpcError(
-            'PRECONDITION_FAILED',
-            'Running tasks or leads with running workers cannot be moved.',
-          );
-        }
-        if (bindingStore.findByTarget(sessionId))
-          throwIpcError('PRECONDITION_FAILED', 'IM-controlled tasks cannot be moved.');
-      };
-      const beforeUpdate = async () => {
         const [target] = await context.client.drizzle
           .select()
           .from(sessions)
@@ -79,7 +58,25 @@ export function createMoveSession(
           const physicalDirectory = await validateExistingLocalProjectDirectory(targetDir);
           if (!physicalDirectory.ok) throwIpcError('INVALID_PARAMS', physicalDirectory.message);
         }
-        await assertMoveAllowed();
+        // Re-read active team membership at each checkpoint, including after
+        // transcript copying/runtime close. Do not retain the pre-move snapshot.
+        const workers = await context.client.drizzle
+          .select({ sessionId: orcaWorkers.sessionId })
+          .from(orcaWorkers)
+          .innerJoin(orcaTeams, eq(orcaWorkers.teamId, orcaTeams.id))
+          .where(and(eq(orcaTeams.leadSessionId, sessionId), eq(orcaTeams.status, 'active')));
+        context.assertCurrent();
+        if (
+          isSessionRunning(sessionId) ||
+          workers.some((worker) => isSessionRunning(worker.sessionId))
+        ) {
+          throwIpcError(
+            'PRECONDITION_FAILED',
+            'Running tasks or leads with running workers cannot be moved.',
+          );
+        }
+        if (bindingStore.findByTarget(sessionId))
+          throwIpcError('PRECONDITION_FAILED', 'IM-controlled tasks cannot be moved.');
       };
       const patch =
         targetDir === null
@@ -87,7 +84,7 @@ export function createMoveSession(
           : { workspaceKind: 'project', workingDir: targetDir };
       const updated = await updateSessionInDb(sessionId, patch, undefined, {
         assertCurrent: context.assertCurrent,
-        beforeUpdate,
+        beforeUpdate: assertMoveAllowed,
         beforeWrite: assertMoveAllowed,
       });
       return {

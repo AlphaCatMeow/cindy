@@ -134,6 +134,25 @@ describe('moveSession host', () => {
     },
   );
 
+  it.each([false, true])(
+    'rechecks target lifecycle and ownership at commit (project=%s)',
+    async (project) => {
+      for (const change of ['archived', 'bot-link', 'im']) {
+        h.query.mockResolvedValue([{ id: 'target', status: 'active' }]);
+        h.botLinks = [];
+        h.attached = false;
+        h.beforeCommit.mockImplementationOnce(() => {
+          if (change === 'archived')
+            h.query.mockResolvedValue([{ id: 'target', status: 'archived' }]);
+          if (change === 'bot-link') h.botLinks = [{ botId: 'bot' }];
+          if (change === 'im') h.attached = true;
+        });
+        expect(await run(project ? directory : null)).toMatchObject({ ok: false });
+      }
+      expect(h.saved).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['source', 'link'])(
     'rejects Bot %s callers before entering the target update',
     async (signal) => {
@@ -207,32 +226,34 @@ describe('moveSession host', () => {
     expect(await run('relative')).toMatchObject({ errorCode: 'INVALID_ARGS' });
     expect(h.saved).not.toHaveBeenCalled();
   });
-  it.for(['.cindy-worktrees', '.xdt-worktrees', 'dialogues'])(
-    'rejects a %s alias retargeted while waiting for the route lock',
-    async (managedName, ctx) => {
-      const ordinary = path.join(directory, 'ordinary');
-      const managed = path.join(directory, managedName, 'task');
-      const alias = path.join(directory, 'alias');
-      await mkdir(ordinary);
-      await mkdir(managed, { recursive: true });
-      try {
-        await symlink(ordinary, alias, process.platform === 'win32' ? 'junction' : 'dir');
-      } catch (error) {
-        if (['EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) {
-          ctx.skip();
-          return;
-        }
-        throw error;
+  it.for(
+    ['.cindy-worktrees', '.xdt-worktrees', 'dialogues'].flatMap((name) =>
+      ['lock', 'commit'].map((phase) => [name, phase] as const),
+    ),
+  )('rejects a %s alias retargeted before %s', async ([managedName, phase], ctx) => {
+    const ordinary = path.join(directory, 'ordinary');
+    const managed = path.join(directory, managedName, 'task');
+    const alias = path.join(directory, 'alias');
+    await mkdir(ordinary);
+    await mkdir(managed, { recursive: true });
+    try {
+      await symlink(ordinary, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        ctx.skip();
+        return;
       }
-      expect(await run(alias)).toMatchObject({ ok: true, workingDir: alias.replaceAll('\\', '/') });
-      h.saved.mockClear();
-      h.enterLock.mockImplementationOnce(async () => {
-        await rm(alias);
-        await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
-      });
-      expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_PARAMS' });
-      expect(h.saved).not.toHaveBeenCalled();
-      expect(await run(null)).toMatchObject({ ok: true, workingDir: '/old' });
-    },
-  );
+      throw error;
+    }
+    expect(await run(alias)).toMatchObject({ ok: true, workingDir: alias.replaceAll('\\', '/') });
+    h.saved.mockClear();
+    const checkpoint = phase === 'lock' ? h.enterLock : h.beforeCommit;
+    checkpoint.mockImplementationOnce(async () => {
+      await rm(alias);
+      await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    });
+    expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_PARAMS' });
+    expect(h.saved).not.toHaveBeenCalled();
+    expect(await run(null)).toMatchObject({ ok: true, workingDir: '/old' });
+  });
 });
