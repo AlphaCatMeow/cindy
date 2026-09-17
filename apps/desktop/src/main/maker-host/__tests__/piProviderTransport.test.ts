@@ -260,6 +260,19 @@ describe('native provider failure diagnostics', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('does not report HTTP 200 as the cause of a malformed response stream', async () => {
+    const fetchImpl = vi.fn(async () => new Response('data: invalid-json\n\n', {
+      status: 200, headers: { 'content-type': 'text/event-stream' },
+    }));
+    const send = createPiProviderFetch({ row, providerId: 'together', apiKey: 'fixture-key', fetchImpl });
+    const text = await (await send('https://unused.invalid', request())).text();
+    expect(text).toContain('response.failed');
+    expect(text).toContain('phase=adapter-event');
+    expect(text).toContain('category=unknown');
+    expect(text).not.toContain('HTTP 200');
+    expect(text).not.toContain('invalid-json');
+  });
+
   it('does not reuse HTTP failure status from an earlier request', async () => {
     const fetchImpl = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('{}', { status: 401 }))
@@ -274,27 +287,30 @@ describe('native provider failure diagnostics', () => {
 });
 
 
-it('keeps iterator exceptions private and labels the stream-read phase', async () => {
+it.each([undefined, 200, 302])('keeps iterator exceptions private after HTTP %s and labels the stream-read phase', async (status) => {
   const row = PROVIDER_MODEL_CATALOG.providers.together.find(row => row.execution.pi.api === 'openai-completions')!;
+  let adapterFetch: typeof fetch | undefined;
   const iterator = {
     async *[Symbol.asyncIterator]() {
+      if (status !== undefined) await adapterFetch!('https://fixture.invalid');
       yield { type: 'text_delta', delta: 'fixture prefix' };
       throw new Error('secret-fixture-key private prompt');
     },
   };
-  const stream = vi.spyOn(openaiCompletions, 'streamSimple').mockReturnValueOnce(
-    iterator as unknown as ReturnType<typeof openaiCompletions.streamSimple>,
-  );
+  const stream = vi.spyOn(openaiCompletions, 'streamSimple').mockImplementationOnce((_model, _context, options) => {
+    adapterFetch = options?.fetch;
+    return iterator as unknown as ReturnType<typeof openaiCompletions.streamSimple>;
+  });
   try {
     const send = createPiProviderFetch({ row, providerId: 'together', apiKey: 'fixture-key',
-      fetchImpl: async () => { throw new Error('unused'); },
+      fetchImpl: async () => new Response(null, { status: status ?? 200 }),
     });
     const response = await send('https://unused.invalid', { body: JSON.stringify({ model: row.id, input: 'ping' }) });
     const error = await response.text().catch(error => error as Error);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('phase=stream-read');
     expect((error as Error).message).toContain('category=unknown');
-    expect((error as Error).message).not.toMatch(/secret-fixture-key|private prompt/);
+    expect((error as Error).message).not.toMatch(/secret-fixture-key|private prompt|HTTP/);
   } finally {
     stream.mockRestore();
   }

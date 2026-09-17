@@ -256,7 +256,8 @@ export function createPiProviderFetch(options: PiProviderTransportOptions): type
         : httpStatus !== undefined && httpStatus >= 500 ? 'provider_unavailable'
         : httpStatus !== undefined && httpStatus >= 400 ? 'request_rejected'
         : 'unknown';
-      const status = httpStatus === undefined ? '' : `; HTTP ${httpStatus}`;
+      const status = httpStatus !== undefined && httpStatus >= 400 && httpStatus < 600
+        ? `; HTTP ${httpStatus}` : '';
       return `Native provider request failed [phase=${phase}${status}; category=${category}; request=${responseId}]`;
     };
     const cloudflareGateway = model.provider === 'cloudflare-ai-gateway';
