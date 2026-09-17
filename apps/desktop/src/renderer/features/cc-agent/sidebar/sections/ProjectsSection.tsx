@@ -795,13 +795,8 @@ export function ProjectsSection({
     return [...projects.flatMap((project) => project.sessions), ...dialogues];
   }, [filter.groupBy, projects, dialogues]);
   const dialogueSourceLabelMap = useMemo(
-    () =>
-      buildSessionSourceLabelMap(
-        flattenedSessionsForSourceLabels,
-        allKnownProjects,
-        t('ccAgent.sidebar.dialogues'),
-      ),
-    [flattenedSessionsForSourceLabels, allKnownProjects, t],
+    () => buildSessionSourceLabelMap(flattenedSessionsForSourceLabels, allKnownProjects),
+    [flattenedSessionsForSourceLabels, allKnownProjects],
   );
 
   // F-PJ-10：即使 projects 因 filter 收窄到空，也要保留段头供用户切回 Filter。
