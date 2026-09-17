@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   upsert: vi.fn(),
   restore: vi.fn(),
   send: vi.fn(),
+  untrustedSend: vi.fn(),
   registered: [] as Array<{ path: string }>,
   list: vi.fn(),
   aliases: vi.fn(),
@@ -20,8 +21,14 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('electron', () => ({
   BrowserWindow: {
-    getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: h.send } }],
+    getAllWindows: () => [
+      { trusted: true, webContents: { send: h.send } },
+      { trusted: false, webContents: { send: h.untrustedSend } },
+    ],
   },
+}));
+vi.mock('../../security/trustedAppRenderer.js', () => ({
+  isTrustedAppRendererWindow: (window: { trusted: boolean }) => window.trusted,
 }));
 vi.mock('../../appSessionState.js', () => ({
   getActiveDataOwnerPushStamp: () => ({ ...h.owner }),
@@ -101,6 +108,7 @@ describe('createProject', () => {
       { path: workingDir },
       h.owner,
     );
+    expect(h.untrustedSend).not.toHaveBeenCalled();
     expect(await readFile(path.join(directory, 'keep.txt'), 'utf8')).toBe('unchanged');
     expect(await run(directory)).toEqual({ ok: true, workingDir });
   });

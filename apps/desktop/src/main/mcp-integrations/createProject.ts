@@ -13,6 +13,7 @@ import type { ControlResult } from '@cindy/mcps';
 import type { DbClient } from '../localDb/client/DbClient.js';
 import type { DataOwnerPushStamp } from '../../shared/dataOwnerPush.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
+import { isTrustedAppRendererWindow } from '../security/trustedAppRenderer.js';
 
 const log = createLogger('mcp/projects');
 const fail = (errorCode: string, message: string) => ({ ok: false as const, errorCode, message });
@@ -120,7 +121,7 @@ export async function createProject({
     await restoreLocalProjectVisibility(directory.workingDir, owner);
     assertCurrent();
     for (const window of BrowserWindow.getAllWindows()) {
-      if (window.isDestroyed()) continue;
+      if (!isTrustedAppRendererWindow(window)) continue;
       try {
         window.webContents.send(
           'local-db:recent-workdirs:changed',
