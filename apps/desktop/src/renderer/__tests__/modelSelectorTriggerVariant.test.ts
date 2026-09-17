@@ -857,7 +857,7 @@ describe('ModelSelector trigger variants', () => {
     expect(modelListMaxHeightForRows(100)).toBe(300);
   });
 
-  it('bounds the default-session trigger in narrow and ultra-narrow composers', () => {
+  it('bounds the default-session trigger in wide, narrow and ultra-narrow composers', () => {
     const props = {
       modelId: 'claude-opus-4-8',
       effort: 'xhigh' as Effort,
@@ -866,7 +866,16 @@ describe('ModelSelector trigger variants', () => {
       vendorKey: 'cc' as const,
       compactToolbar: true,
     };
-    const view = render(React.createElement(ModelSelector, props));
+    const view = render(React.createElement(ModelSelector, { ...props, compactToolbar: false }));
+
+    const wideTrigger = screen.getByRole('button', {
+      name: /Current: Opus 4\.8, effort: 超高/,
+    });
+    expect(wideTrigger.className).toContain('max-w-[min(320px,100%)]');
+    expect(within(wideTrigger).getByText('Opus 4.8').className).toContain('truncate');
+    expect(wideTrigger.getAttribute('title')).toContain('Opus 4.8');
+
+    view.rerender(React.createElement(ModelSelector, props));
 
     let trigger = screen.getByRole('button', {
       name: /Current: Opus 4\.8, effort: 超高/,
@@ -891,6 +900,25 @@ describe('ModelSelector trigger variants', () => {
     // 可及名仍保留完整模型 + effort，视觉仅收起文字，不丢选择能力。
     expect(trigger.getAttribute('aria-label')).toContain('Opus 4.8');
     expect(trigger.getAttribute('aria-label')).toContain('超高');
+  });
+
+  it('caps the toolbar panel while field panels still follow their field width', () => {
+    const props = {
+      modelId: 'claude-opus-4-8',
+      effort: 'high' as Effort,
+      onModelChange: vi.fn(),
+      onEffortChange: vi.fn(),
+      vendorKey: 'cc' as const,
+      unifiedPanel: true,
+    };
+    const view = render(React.createElement(ModelSelectorContent, props));
+    let pane = view.container.querySelector('[data-unified-model-panel]') as HTMLElement;
+    expect(pane.className).toContain('max-w-[min(420px,calc(100vw-48px))]');
+
+    view.rerender(React.createElement(ModelSelectorContent, { ...props, fluidWidth: true }));
+    pane = view.container.querySelector('[data-unified-model-panel]') as HTMLElement;
+    expect(pane.className).toContain('w-full min-w-0');
+    expect(pane.className).not.toContain('420px');
   });
 
   it('keeps the session Agent explicit when Claude Code uses an OpenAI-branded model', () => {
