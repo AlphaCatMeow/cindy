@@ -88,11 +88,12 @@ describe('伙伴设置包含独立能力选择入口', () => {
 });
 
 describe('伙伴消息流收起内部工作过程', () => {
-  it('只对伙伴过滤工作卡，状态由真实生命周期驱动', () => {
+  it('只对伙伴收拢过程，运行期间保留单一状态出口', () => {
     expect(sessionView).toContain('simplifiedBotConversation={Boolean(botChatIdentity)}');
-    expect(messageStream).toContain('simplifyBotRenderItems(grouped, isSessionStreaming)');
-    expect(messageStream).toContain("item.message.role === 'assistant'");
-    expect(messageStream).toContain('item.message.content.trim().length > 0');
+    expect(messageStream).toContain('simplifyBotRenderItems(grouped, isSessionStreaming, visibleGeneratedFileKeys)');
+    // Text/tool grouping is covered by botConversationPresentation behavioral tests.
+    expect(messageStream).toContain("from '@/features/bots/botConversationPresentation'");
+    expect(messageStream).toContain('compact={simplifiedBotConversation}');
     expect(messageStream).not.toContain('data-testid="bot-thinking-indicator"');
     expect(sessionView).toContain('<BotWorkingStatus');
     expect(sessionView).toContain('visible={composerRuntimeVisible}');
