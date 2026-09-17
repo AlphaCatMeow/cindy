@@ -789,7 +789,7 @@ function createProviderAwareGuardianReviewerTransform(
  * 请求的 `tools`。插件搜索是增强项，不能作为该基础能力的前置条件，因此在明确走
  * Cindy Gateway 的 GPT-5.6 请求中补回标准 `web_search` 工具；已有声明保持原样。
  */
-function createGatewayNativeWebSearchTransform(): RequestTransform {
+function createGatewayNativeWebSearchTransform(frozenAuthInjection?: CodexProxyAuthInjection): RequestTransform {
   return (body, ctx) => {
     if (!isPlainObject(body) || typeof body.model !== 'string') return null;
     if (guardianParentThreadIdFromHeaders(ctx.headers)) return null;
@@ -807,7 +807,9 @@ function createGatewayNativeWebSearchTransform(): RequestTransform {
     const gatewayModel = model.startsWith('codex/') ? model.slice('codex/'.length) : model;
     if (!/^gpt-5\.6(?:$|[-.])/.test(gatewayModel)) return null;
 
-    const authInjection = getCodexProxyAuthInjection();
+    // Match the effective auth context used by this proxy's routing transform. Another
+    // app-server may change the global mode while a frozen OAuth proxy is still active.
+    const authInjection = frozenAuthInjection ?? getCodexProxyAuthInjection();
     const canUseExplicitSessionRoute = Boolean(sessionId && !subagentRoute && (
       authInjection === 'oauth-bearer' ||
       isUserProviderSession(sessionId) ||
@@ -2885,7 +2887,7 @@ function createTransformRequestChain(
     createForcedSubagentRequestTransform(),
     createCodexTransform(),
     createLockedSubagentExecGuardTransform(),
-    createGatewayNativeWebSearchTransform(),
+    createGatewayNativeWebSearchTransform(frozenAuthInjection),
     // 必须先于 xAI/MiniMax 兼容改写:先把供应商绑定的历史项降级成标准 message，
     // 后续针对具体供应商的 input 归一化才能稳定处理。
     createCrossProviderCompactionCompatTransform(),
