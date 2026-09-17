@@ -586,6 +586,10 @@ import { readXaiSubscriptionUsageSnapshotForDeviceLink, readClaudeSubscriptionUs
 import { requireEnum, requireObject, throwIpcError } from '../utils/ipcValidate.js';
 import { applyPersistedCindyMakeMarker } from './cindyMakeSessionStart.js';
 import { CINDY_MAKE_SESSION_SOURCE } from '../../shared/cindyMakeSession.js';
+import { cindyMakeManager } from '../cindy-make/manager.js';
+import { assertCindyMakeWorkspace, withCindyMakeProjectUse } from '../cindy-make/projectAccess.js';
+import { isCindyMakeWorktreePath } from '../cindy-make/sourcePaths.js';
+import { assertCindyMakeTaskReady, configureCindyMakeTaskSender, CINDY_MAKE_TASK_DISPATCH } from '../cindy-make/taskRuntime.js';
 import { isIpcError, type IpcErrorCode } from '../../shared/ipc-errors.js';
 import { piPackageCommandDiagnostic } from '../maker-host/pi-package-diagnostic.js';
 import {
@@ -4571,6 +4575,8 @@ const sessionEventDependencies: SessionEventDependencies = {
 };
 
 const sessionTurnObserverDependencies = {
+  beforeLocalProviderStart: (session: Session) =>
+    withCindyMakeProjectUse(app.getPath('userData'), session.workDir, async () => undefined),
   silentStopTurnLeaseGate,
   sessionTurnLeaseTracker,
   providerTurnLeaseId,
@@ -8465,47 +8471,57 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     anchorClientId: string,
     opts: SessionSendOptions,
   ): Promise<SessionSendResult> {
-    let baselineStarted = false;
-    let turnChangeSetStarted = false;
-    const pendingHandoff = await agentHandoffPending.peek(session.id);
-    const outgoingMessage: UserMessage = pendingHandoff
-      ? (prependHandoffToUserMessage(
-          { type: 'user', content: message },
-          pendingHandoff,
-        ) as UserMessage)
-      : { type: 'user', content: message };
-    try {
-      const sendResult = await session.send(outgoingMessage, {
-        ...opts,
-        onAccepted: async () => {
-          await opts.onAccepted?.();
-          await beginTurnChangeSetAtDispatch(session, anchorClientId);
-          turnChangeSetStarted = true;
-          if (gitSnapshotCoordinator) {
-            await gitSnapshotCoordinator.onTurnStart(session.id);
-            baselineStarted = true;
-          }
-        },
-      });
-      if (turnChangeSetStarted && !sendResult.accepted) {
-        clearPendingTurnChangeSets(session.id);
-      }
-      if (baselineStarted && !sendResult.accepted) {
-        gitSnapshotCoordinator?.onTurnAbort(session.id);
-      }
-      if (pendingHandoff && sendResult.accepted) {
-        agentHandoffPending.consume(session.id);
-      }
-      return sendResult;
-    } catch (err) {
-      if (turnChangeSetStarted) {
-        clearPendingTurnChangeSets(session.id);
-      }
-      if (baselineStarted) {
-        gitSnapshotCoordinator?.onTurnAbort(session.id);
-      }
-      throw err;
+    if (!session.remoteHostId && isCindyMakeWorktreePath(app.getPath('userData'), session.workDir)) {
+      if (cindyMakeManager.isTaskPreparing(session.id))
+        throwIpcError('PRECONDITION_FAILED', 'Cindy Make is still preparing this task');
+      await assertCindyMakeTaskReady(session.id);
     }
+    const dispatch = async (): Promise<SessionSendResult> => {
+      let baselineStarted = false;
+      let turnChangeSetStarted = false;
+      const pendingHandoff = await agentHandoffPending.peek(session.id);
+      const outgoingMessage: UserMessage = pendingHandoff
+        ? (prependHandoffToUserMessage(
+            { type: 'user', content: message },
+            pendingHandoff,
+          ) as UserMessage)
+        : { type: 'user', content: message };
+      try {
+        const sendResult = await session.send(outgoingMessage, {
+          ...opts,
+          onAccepted: async () => {
+            await opts.onAccepted?.();
+            await beginTurnChangeSetAtDispatch(session, anchorClientId);
+            turnChangeSetStarted = true;
+            if (gitSnapshotCoordinator) {
+              await gitSnapshotCoordinator.onTurnStart(session.id);
+              baselineStarted = true;
+            }
+          },
+        });
+        if (turnChangeSetStarted && !sendResult.accepted) {
+          clearPendingTurnChangeSets(session.id);
+        }
+        if (baselineStarted && !sendResult.accepted) {
+          gitSnapshotCoordinator?.onTurnAbort(session.id);
+        }
+        if (pendingHandoff && sendResult.accepted) {
+          agentHandoffPending.consume(session.id);
+        }
+        return sendResult;
+      } catch (err) {
+        if (turnChangeSetStarted) {
+          clearPendingTurnChangeSets(session.id);
+        }
+        if (baselineStarted) {
+          gitSnapshotCoordinator?.onTurnAbort(session.id);
+        }
+        throw err;
+      }
+    };
+    return session.remoteHostId
+      ? dispatch()
+      : withCindyMakeProjectUse(app.getPath('userData'), session.workDir, dispatch);
   }
 
   async function sendToSessionInternal(params: {
@@ -12265,6 +12281,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   const sendToAgentAccepted: typeof sendToAgentAcceptedUnlocked = async (...args) => {
     const [sessionId] = args;
     if (typeof sessionId !== 'string') return await sendToAgentAcceptedUnlocked(...args);
+    if (cindyMakeManager.isTaskPreparing(sessionId) && (args[3] as Record<PropertyKey, unknown> | undefined)?.[CINDY_MAKE_TASK_DISPATCH] !== true) {
+      throwIpcError('PRECONDITION_FAILED', 'Cindy Make is still preparing this task');
+    }
     await assertReviewExternalInputAllowed(sessionId);
     await reconcileBotModelRoute(sessionId);
     const compactedRuntime = maker.getSession(sessionId);
@@ -12275,6 +12294,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         .drizzle.select({
           source: sessions.source,
           role: botSessionLinks.role,
+          workingDir: sessions.workingDir,
+          remoteHostId: sessions.remoteHostId,
           profileStatus: botProfiles.status,
           hiddenAt: botProfiles.hiddenAt,
         })
@@ -12284,6 +12305,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         .where(eq(sessions.id, sessionId))
         .limit(1);
       const blocked = botSessionInputBlockReason(botInput ?? null);
+      if (botInput?.source === CINDY_MAKE_SESSION_SOURCE && (args[3] as Record<PropertyKey, unknown> | undefined)?.[CINDY_MAKE_TASK_DISPATCH] !== true) {
+        await assertCindyMakeTaskReady(sessionId);
+      }
       if (isDeviceLinkInvoke() && botInput?.source === 'bot' && (botInput.hiddenAt || botInput.profileStatus === 'archived')) {
         throwIpcError('NOT_FOUND', 'Session does not exist');
       }
@@ -12291,7 +12315,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (inputCoordinator.isExecutionPaused(sessionId)) {
         throwIpcError('PRECONDITION_FAILED', 'Task is paused; resume it before continuing');
       }
-      return sendToAgentAcceptedUnlocked(...args);
+      return botInput?.remoteHostId ? sendToAgentAcceptedUnlocked(...args)
+        : withCindyMakeProjectUse(app.getPath('userData'), botInput?.workingDir, () => sendToAgentAcceptedUnlocked(...args));
     });
   };
   contextOverflowRolloverHolder = createContextOverflowRollover({
@@ -12587,7 +12612,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         (row.source !== 'desktop' || isHeadlessGhostSetupTurn(sessionId) || bindingStore.findByTarget(sessionId))) {
         return { accepted: false };
       }
-      const result = await sendToAgentAcceptedUnlocked(
+      const sendReplay = () => sendToAgentAcceptedUnlocked(
         sessionId,
         persistedUserContentToWireMessage(agentFacingWireContent ?? content),
         createOpts,
@@ -12602,6 +12627,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             }
           : { signal: recovery?.signal },
       );
+      const result = row.remoteHostId ? await sendReplay()
+        : await withCindyMakeProjectUse(app.getPath('userData'), row.workingDir, sendReplay);
       return { accepted: result.accepted === true };
     },
     withSessionLock: withSendToSessionLock,
@@ -12800,6 +12827,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     };
   };
   const revokeTrustedDesktopQueueOrigin = (item?: AgentInputQueuedMessage): void => { if (item?.origin) delete (item.origin as Record<PropertyKey, unknown>)[TRUSTED_DESKTOP_QUEUE_ORIGIN]; };
+  configureCindyMakeTaskSender((sessionId, message, createOpts, sendOpts) =>
+    sendToAgentAccepted(sessionId, message, createOpts, attachTrustedDesktopSendContext(message, sendOpts)),
+    (sessionId) => inputCoordinator.getClearBoundaryMs(sessionId),
+  );
   registerMakerSessionSendHandler(
     {
       handle(channel, handler) {
@@ -15327,6 +15358,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           isRemoteInvoke: remoteInvoke,
         });
         const projection = inputCoordinator.clearSession(sid, clearBoundary);
+        cindyMakeManager.cancelTasksForSession(sid);
         workingDirectoryRecovery.discard(sid);
         resetAutomaticRecoveryForExplicitStop(sid);
         // 丢弃缓存的待注入交接 / fork 来源标记:它们是按 clear 之前的历史算出来的,
@@ -18018,6 +18050,8 @@ async function checkWorkDirExists(
   // 或者 agent 真跑起来时由远端 codex 自己报 ENOENT)。这里直接放行。
   if (remoteHostId) return true;
   if (!workingDir?.trim()) return true;
+  const cindyMakeWorkspace = isCindyMakeWorktreePath(app.getPath('userData'), workingDir);
+  if (cindyMakeWorkspace) workingDirectoryRecovery.discard(sessionId);
   workingDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
   const source: AgentKind = agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';
   // suppressMissingBroadcast: 调用方(SEND 事务)手里还有 DB 权威值可兜底时,
@@ -18030,6 +18064,7 @@ async function checkWorkDirExists(
     usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
   };
   try {
+    if (cindyMakeWorkspace) await assertCindyMakeWorkspace(app.getPath('userData'), workingDir);
     const stat = await statWorkingDirectory(workingDir);
     if (!stat.isDirectory()) {
       workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'not-directory' });
@@ -18062,7 +18097,7 @@ async function checkWorkDirExists(
         return false;
       }
     }
-    if (getManagedWorktreeBasePath(normalizedWorkingDir) === null) {
+    if (!cindyMakeWorkspace && getManagedWorktreeBasePath(normalizedWorkingDir) === null) {
       if (!await workingDirectoryRecovery.recover(sessionId, workingDir)) {
         workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'recovery-failed-after-stat' });
         return false;
@@ -18080,6 +18115,10 @@ async function checkWorkDirExists(
     workdirLog.warn('workdir preflight failed', {
       ...diagnosticContext, code: workdirDiagnosticErrorCode(error), elapsedMs: Date.now() - startedAt,
     });
+    if (cindyMakeWorkspace) {
+      if (!suppress) emitWorkDirMissingError(sessionId, workingDir, source, 'not-exist');
+      return false;
+    }
     // Cindy 托管 worktree 被外部 PR cleanup / 手动 git 命令移除时，先按 DB 中
     // 的精确 worktree_path 从本地或 origin tracking 分支重建，保留原代码与快照。
     const restored = await restoreMissingManagedWorktreeForSession(sessionId, workingDir);

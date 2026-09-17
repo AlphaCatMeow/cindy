@@ -1,4 +1,6 @@
 import { readDisabledSkillPaths } from '../skillhub/activationPreferences';
+import { cindyMakeManager } from '../cindy-make/manager.js';
+import { makeSourceRoot } from '../cindy-make/sourcePaths.js';
 import { clearCodexAccountUsageSnapshot } from '../usageBroadcaster.js';
 /**
  * apps/desktop/src/main/maker-host
@@ -1071,10 +1073,12 @@ export function getMaker(): Maker {
         }
         const env = await createMakeToolchainEnvironment(userData);
         const title = meta.title?.trim();
-        return commitCindyMakeChanges(
-          (args) =>
-            runSourceGit(env.processEnvironment(), args, meta.workDir, AbortSignal.timeout(60_000)),
-          `Cindy Make: ${title || sessionId}`,
+        return cindyMakeManager.withProject(makeSourceRoot(userData), () =>
+          commitCindyMakeChanges(
+            (args) =>
+              runSourceGit(env.processEnvironment(), args, meta.workDir, AbortSignal.timeout(60_000)),
+            `Cindy Make: ${title || sessionId}`,
+          ),
         );
       },
       persist: (sessionId, meta) =>
