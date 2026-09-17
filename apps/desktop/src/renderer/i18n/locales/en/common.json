@@ -11134,6 +11134,11 @@
       "importSuccess": "{{name}} imported{{suffix}}",
       "importFailed": "Failed to import skill"
     },
+    "builtIn": {
+      "skillCreator": {
+        "description": "Create or update a Cindy Skill with clear instructions and supporting resources."
+      }
+    },
     "common": {
       "openFolderFailed": "Failed to open folder",
       "close": "Close",

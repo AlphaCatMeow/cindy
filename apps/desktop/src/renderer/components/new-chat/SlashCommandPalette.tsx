@@ -25,6 +25,7 @@ import {
   isSlashCommandUnavailable,
   type UnifiedCommand,
 } from '@/lib/slashCommands';
+import { builtInSkillDescriptionKey } from '@/features/skillhub/lib/builtInSkillPresentation';
 
 const TOOLTIP_W = 280;
 const TOOLTIP_GAP = 8;
@@ -126,8 +127,14 @@ export function SlashCommandPalette({
   }, [focusedIndex]);
 
   const focusedCmd = filtered[focusedIndex];
+  const focusedDescriptionKey = focusedCmd?.kind === 'agent-skill'
+    ? builtInSkillDescriptionKey(focusedCmd)
+    : undefined;
+  const focusedDescription = focusedDescriptionKey
+    ? t(focusedDescriptionKey)
+    : focusedCmd?.description;
   const tooltipKey = focusedCmd
-    ? `${focusedCmd.kind}:${focusedCmd.name}:${focusedCmd.description ?? ''}`
+    ? `${focusedCmd.kind}:${focusedCmd.name}:${focusedDescription ?? ''}`
     : null;
   const tooltipHeight = tooltipMeasure.key === tooltipKey
     ? tooltipMeasure.height
@@ -322,7 +329,7 @@ export function SlashCommandPalette({
           <div className="mt-[8px] text-13 leading-[1.5] text-[var(--cmd-palette-tooltip-body)]">
             {isSlashCommandUnavailable(focusedCmd)
               ? t('commandPalette.projectSkillNotLoaded')
-              : focusedCmd.description}
+              : focusedDescription}
           </div>
         </div>,
         document.body,

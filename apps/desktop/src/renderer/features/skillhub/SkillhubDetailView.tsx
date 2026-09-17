@@ -53,6 +53,7 @@ import {
   findLocalSkillByPath,
   findLocalSkillRouteEntry,
 } from './lib/localRoutes';
+import { builtInSkillDescriptionKey } from './lib/builtInSkillPresentation';
 import { isMarketDeleted as checkMarketDeleted, getCachedInfo, invalidate as invalidateInfo, refreshInfo } from './lib/infoDedupe';
 import {
   activePublishedReviewFromVersions,
@@ -227,16 +228,22 @@ function FrontmatterPanel({ entry }: { entry: SkillhubSkill }) {
             // description gets the clamp-with-show-more treatment; every
             // other field is rendered inline since they're short enough
             // (name, version, category, ...).
-            const isLongTextField = k === 'description' && typeof v === 'string';
+            const descriptionKey = k === 'description'
+              ? builtInSkillDescriptionKey(entry)
+              : undefined;
+            const displayValue = descriptionKey ? t(descriptionKey) : v;
+            const isLongTextField = k === 'description' && typeof displayValue === 'string';
             return (
               <div key={k} className="flex flex-col gap-1">
                 <dt className="text-xs text-[var(--cmd-palette-item-meta)]">{k}</dt>
                 <dd>
                   {isLongTextField ? (
-                    <ClampedText value={v as string} />
+                    <ClampedText value={displayValue as string} />
                   ) : (
                     <span className="whitespace-pre-wrap break-words text-sm text-[var(--msg-assistant-text)]">
-                      {typeof v === 'string' ? v : JSON.stringify(v)}
+                      {typeof displayValue === 'string'
+                        ? displayValue
+                        : JSON.stringify(displayValue)}
                     </span>
                   )}
                 </dd>

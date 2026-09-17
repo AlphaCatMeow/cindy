@@ -11118,6 +11118,11 @@
       "importSuccess": "{{name}} 가져오기 완료{{suffix}}",
       "importFailed": "스킬 가져오기 실패"
     },
+    "builtIn": {
+      "skillCreator": {
+        "description": "명확한 지침과 필요한 지원 리소스를 갖춘 Cindy 스킬을 만들거나 업데이트합니다."
+      }
+    },
     "common": {
       "openFolderFailed": "폴더 열기 실패",
       "close": "닫기",

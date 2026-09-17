@@ -11118,6 +11118,11 @@
       "importSuccess": "{{name}} をインポートしました{{suffix}}",
       "importFailed": "スキルのインポートに失敗しました"
     },
+    "builtIn": {
+      "skillCreator": {
+        "description": "明確な手順と必要な補助リソースを備えた Cindy スキルを作成または更新します。"
+      }
+    },
     "common": {
       "openFolderFailed": "フォルダを開けませんでした",
       "close": "閉じる",

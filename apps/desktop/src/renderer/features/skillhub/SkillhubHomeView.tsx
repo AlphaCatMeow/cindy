@@ -29,6 +29,7 @@ import {
   PluginManagementPage,
 } from '@/features/plugin/PluginManagementLayout';
 import { buildLocalSkillRoute, findLocalSkillByPath } from './lib/localRoutes';
+import { builtInSkillDescriptionKey } from './lib/builtInSkillPresentation';
 import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
 import {
   MARKET_PAGE_SIZE,
@@ -52,7 +53,6 @@ import { InstallTargetPicker, type InstallTargetSkill } from './components/Insta
 import { SkillCategoryFilterBar } from './components/SkillCategoryFilterBar';
 import { HomeMarketCard } from './components/HomeMarketCard';
 import { SkillIcon } from './components/SkillIcon';
-import { SkillTagList } from './components/SkillTagList';
 import { SkillhubMarketPreviewPanel } from './SkillhubMarketPreviewPanel';
 import { useSkillhubIdentityPolicy } from './hooks/useSkillhubIdentityPolicy';
 
@@ -143,14 +143,19 @@ export function SkillhubHomeView({
   const globalSkills = useMemo(
     () =>
       skills.filter(
-        (skill) =>
-          skill.scope === 'global' &&
-          includesSkillQuery(
-            [skill.name, skill.description, skill.kind, skill.engine],
-            normalizedQuery,
-          ),
+        (skill) => {
+          const descriptionKey = builtInSkillDescriptionKey(skill);
+          const displayDescription = descriptionKey ? t(descriptionKey) : skill.description;
+          return (
+            skill.scope === 'global' &&
+            includesSkillQuery(
+              [skill.name, displayDescription, skill.description, skill.kind, skill.engine],
+              normalizedQuery,
+            )
+          );
+        },
       ),
-    [normalizedQuery, skills],
+    [normalizedQuery, skills, t],
   );
   const projectGroups = useMemo(() => {
     const byRoot = new Map<string, SkillhubSkill[]>();
@@ -167,16 +172,18 @@ export function SkillhubHomeView({
         return {
           root,
           label,
-          skills: list.filter((skill) =>
-            includesSkillQuery(
-              [skill.name, skill.description, skill.kind, skill.engine, label],
+          skills: list.filter((skill) => {
+            const descriptionKey = builtInSkillDescriptionKey(skill);
+            const displayDescription = descriptionKey ? t(descriptionKey) : skill.description;
+            return includesSkillQuery(
+              [skill.name, displayDescription, skill.description, skill.kind, skill.engine, label],
               normalizedQuery,
-            ),
-          ),
+            );
+          }),
         };
       })
       .filter((group) => group.skills.length > 0);
-  }, [normalizedQuery, skills, projects]);
+  }, [normalizedQuery, skills, projects, t]);
   const visibleLocalCount = useMemo(
     () =>
       globalSkills.length + projectGroups.reduce((count, group) => count + group.skills.length, 0),
@@ -559,6 +566,8 @@ function LocalGroup({
       <div className={cn('plugin-motion-stagger', PLUGIN_MANAGEMENT_CARD_GRID_CLASS)}>
         {skills.map((s) => {
           const Icon = KIND_ICON[s.kind] ?? Package;
+          const descriptionKey = builtInSkillDescriptionKey(s);
+          const displayDescription = descriptionKey ? t(descriptionKey) : s.description;
           // 来源:'skillhub' = 从市场安装的副本(填充徽标);'local' = 自己开发/发布、
           // 没走 SkillHub 安装的本地副本(弱化文字,不与 SkillHub 抢视觉)。
           // origin 缺失的历史 registry 靠 server isMine 兜底判定(见 deriveSkillSource)。
@@ -603,9 +612,9 @@ function LocalGroup({
                       : t('skillhub.home.sourceLocal')}
                   </span>
                 </span>
-                {s.description && (
+                {displayDescription && (
                   <span className="line-clamp-1 text-12 leading-4 text-[var(--text-secondary)]">
-                    {s.description}
+                    {displayDescription}
                   </span>
                 )}
               </span>

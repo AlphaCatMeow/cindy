@@ -11118,6 +11118,11 @@
       "importSuccess": "{{name}} 已导入{{suffix}}",
       "importFailed": "导入技能失败"
     },
+    "builtIn": {
+      "skillCreator": {
+        "description": "创建或更新 Cindy 技能，并编写清晰的说明和所需支持资源。"
+      }
+    },
     "common": {
       "openFolderFailed": "打开文件夹失败",
       "close": "关闭",

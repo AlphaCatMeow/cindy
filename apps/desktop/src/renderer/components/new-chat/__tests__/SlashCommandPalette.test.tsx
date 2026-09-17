@@ -149,4 +149,52 @@ describe('SlashCommandPalette project Skill rows', () => {
 
     expect(onSelect).toHaveBeenCalledWith(loaded);
   });
+
+  it('localizes the built-in Skill Creator description in the input palette', () => {
+    const skillCreator: UnifiedCommand = {
+      kind: 'agent-skill',
+      name: 'skill-creator',
+      description: 'Create or update a Cindy Skill',
+      source: 'skill',
+      scope: 'user',
+    };
+
+    render(
+      <SlashCommandPalette
+        query=""
+        commands={[skillCreator]}
+        focusedIndex={0}
+        onFocusedIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('skillhub.builtIn.skillCreator.description')).toBeTruthy();
+    expect(screen.queryByText(skillCreator.description!)).toBeNull();
+  });
+
+  it('keeps a user-owned Skill Creator description unchanged', () => {
+    const userSkillCreator: UnifiedCommand = {
+      kind: 'agent-skill',
+      name: 'skill-creator',
+      description: 'Create Skills for my private workflow',
+      source: 'skill',
+      scope: 'user',
+    };
+
+    render(
+      <SlashCommandPalette
+        query=""
+        commands={[userSkillCreator]}
+        focusedIndex={0}
+        onFocusedIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(userSkillCreator.description!)).toBeTruthy();
+    expect(screen.queryByText('skillhub.builtIn.skillCreator.description')).toBeNull();
+  });
 });

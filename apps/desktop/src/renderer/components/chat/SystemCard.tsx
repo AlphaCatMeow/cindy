@@ -44,6 +44,7 @@ import {
 } from './activityRowChrome';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { CindyMakeDoctorCard } from './CindyMakeDoctorCard';
+import { builtInSkillDescriptionKey } from '@/features/skillhub/lib/builtInSkillPresentation';
 
 interface SystemCardProps {
   cardType:
@@ -104,6 +105,7 @@ const codeClass = cn(
 );
 
 function HelpCard({ data }: { data?: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const commands =
     (data?.commands as Array<{ name: string; description?: string; source: string }>) ?? [];
   const desktopCmds = commands.filter((c) => c.source === 'desktop');
@@ -117,7 +119,11 @@ function HelpCard({ data }: { data?: Record<string, unknown> }) {
       {items.map((c) => (
         <div key={c.name} className={rowClass}>
           <span className={codeClass}>/{c.name}</span>
-          <span className={descClass}>{c.description ?? ''}</span>
+          <span className={descClass}>
+            {builtInSkillDescriptionKey(c)
+              ? t('skillhub.builtIn.skillCreator.description')
+              : c.description ?? ''}
+          </span>
         </div>
       ))}
     </div>
