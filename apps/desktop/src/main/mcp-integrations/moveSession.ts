@@ -26,8 +26,15 @@ export function createMoveSession(
     if (directory && !directory.ok) return directory;
     const targetDir = directory?.workingDir ?? null;
     return withLocalProjectContext(callerSessionId, async (context) => {
-      let workers: Array<{ sessionId: string }> = [];
-      const assertMoveAllowed = () => {
+      const assertMoveAllowed = async () => {
+        context.assertCurrent();
+        // Re-read active team membership at each checkpoint, including after
+        // transcript copying/runtime close. Do not retain the pre-move snapshot.
+        const workers = await context.client.drizzle
+          .select({ sessionId: orcaWorkers.sessionId })
+          .from(orcaWorkers)
+          .innerJoin(orcaTeams, eq(orcaWorkers.teamId, orcaTeams.id))
+          .where(and(eq(orcaTeams.leadSessionId, sessionId), eq(orcaTeams.status, 'active')));
         context.assertCurrent();
         if (
           isSessionRunning(sessionId) ||
@@ -68,19 +75,11 @@ export function createMoveSession(
         context.assertCurrent();
         if (target.source === 'bot' || botLink)
           throwIpcError('UNSUPPORTED_CAPABILITY', 'Bot tasks use their own managed workspace.');
-        workers =
-          target.orcaRole === 'lead'
-            ? await context.client.drizzle
-                .select({ sessionId: orcaWorkers.sessionId })
-                .from(orcaWorkers)
-                .innerJoin(orcaTeams, eq(orcaWorkers.teamId, orcaTeams.id))
-                .where(and(eq(orcaTeams.leadSessionId, sessionId), eq(orcaTeams.status, 'active')))
-            : [];
         if (targetDir) {
           const physicalDirectory = await validateExistingLocalProjectDirectory(targetDir);
           if (!physicalDirectory.ok) throwIpcError('INVALID_PARAMS', physicalDirectory.message);
         }
-        assertMoveAllowed();
+        await assertMoveAllowed();
       };
       const patch =
         targetDir === null

@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   boundary: false,
   ready: true,
   query: vi.fn(),
+  botLinks: vi.fn(),
   upsert: vi.fn(),
   restore: vi.fn(),
   send: vi.fn(),
@@ -38,12 +39,15 @@ vi.mock('../../appSessionState.js', () => ({
   getActiveDataOwnerPushStamp: () => ({ ...h.owner }),
   isAppSessionBoundaryPending: () => h.boundary,
 }));
-vi.mock('../../localDb/client/current.js', () => {
+vi.mock('../../localDb/client/current.js', async () => {
+  const { botSessionLinks } = await import('../../localDb/schema.js');
   const client = {
     drizzle: {
       select: () => ({
-        from: () =>
-          Object.assign(Promise.resolve(h.registered), { where: () => ({ limit: h.query }) }),
+        from: (table: unknown) =>
+          Object.assign(Promise.resolve(h.registered), {
+            where: () => ({ limit: table === botSessionLinks ? h.botLinks : h.query }),
+          }),
       }),
     },
   };
@@ -81,6 +85,7 @@ describe('createProject', () => {
     h.boundary = false;
     h.ready = true;
     h.query.mockResolvedValue([{ id: 'caller', remoteHostId: null }]);
+    h.botLinks.mockResolvedValue([]);
     h.upsert.mockResolvedValue(true);
     h.restore.mockResolvedValue(false);
     h.registered = [{ path: directory.replaceAll('\\', '/') }];
@@ -130,6 +135,36 @@ describe('createProject', () => {
     expect(h.untrustedSend).not.toHaveBeenCalled();
     expect(await readFile(path.join(directory, 'keep.txt'), 'utf8')).toBe('unchanged');
     expect(await run(directory)).toEqual({ ok: true, workingDir });
+  });
+
+  it.each(['source', 'link'])(
+    'rejects Bot %s callers before any project callback',
+    async (signal) => {
+      h.query.mockResolvedValue([{ id: 'caller', source: signal === 'source' ? 'bot' : null }]);
+      h.botLinks.mockResolvedValue(signal === 'link' ? [{ botId: 'bot' }] : []);
+      for (const operation of [
+        () => run(directory),
+        () =>
+          listProjects({ callerSessionId: 'caller', includeHidden: true, offset: 0, limit: 100 }),
+        () => renameProject({ callerSessionId: 'caller', workingDir: directory, name: 'changed' }),
+        () => removeProject({ callerSessionId: 'caller', workingDir: directory }),
+      ])
+        expect(await operation()).toMatchObject({ errorCode: 'UNSUPPORTED_CAPABILITY' });
+      for (const effect of [h.upsert, h.restore, h.list, h.aliases, h.rename, h.visibility, h.send])
+        expect(effect).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows ordinary delegated callers but fences owner changes during Bot lookup', async () => {
+    h.query.mockResolvedValue([{ id: 'caller', parentSessionId: 'bot-task' }]);
+    expect(await run(directory)).toMatchObject({ ok: true });
+    h.upsert.mockClear();
+    h.botLinks.mockImplementationOnce(async () => {
+      h.owner.ownerGeneration++;
+      return [];
+    });
+    expect(await run(directory)).toMatchObject({ errorCode: 'PRECONDITION_FAILED' });
+    expect(h.upsert).not.toHaveBeenCalled();
   });
 
   it('does not create a missing directory', async () => {

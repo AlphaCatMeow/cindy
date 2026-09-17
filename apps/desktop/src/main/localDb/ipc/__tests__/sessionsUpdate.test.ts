@@ -1050,6 +1050,39 @@ describe('local-db:sessions:update handler wiring', () => {
     );
   });
 
+  it.each(['cc-local', 'codex-local', 'pi-local'])(
+    'awaits the final mutable move check after preparing %s',
+    async (id) => {
+      let prepared = false;
+      h.relocate.mockImplementation(async () => {
+        prepared = true;
+        return { persistedSdkSessionId: null };
+      });
+      h.closeIdleSessionForMove.mockImplementation(async () => {
+        prepared = true;
+        return true;
+      });
+      await expect(
+        updateSessionInDb(id, { workingDir: '/new/dir' }, undefined, {
+          beforeUpdate: async () => undefined,
+          assertCurrent: () => undefined,
+          beforeWrite: async () => {
+            await Promise.resolve();
+            if (prepared)
+              throw Object.assign(new Error('[PRECONDITION_FAILED] new worker running'), {
+                code: 'PRECONDITION_FAILED',
+              });
+          },
+        }),
+      ).rejects.toThrow('new worker running');
+      expect(prepared).toBe(true);
+      expect(h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get(id)).toEqual({
+        working_dir: '/old/dir',
+      });
+      expect(h.tapWindowBroadcast).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['during relocation', 'after commit'])(
     'keeps cwd and transcripts aligned when the account switches %s',
     async (phase) => {

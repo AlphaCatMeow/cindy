@@ -1731,7 +1731,7 @@ export async function updateSessionInDb(
     /** Runs inside the existing route/worktree locks, including dialogue moves. */
     beforeUpdate: () => Promise<void>;
     /** Mutable running/IM preconditions must not reject an already committed move. */
-    beforeWrite?: () => void;
+    beforeWrite?: () => void | Promise<void>;
   },
 ): Promise<ReturnType<typeof sessionToCamel>> {
   moveGuard?.assertCurrent();
@@ -1874,7 +1874,8 @@ export async function updateSessionInDb(
     ) {
       const m = await import('../../maker-host/claude-transcript-relocation.js');
       moveGuard?.assertCurrent();
-      moveGuard?.beforeWrite?.();
+      await moveGuard?.beforeWrite?.();
+      moveGuard?.assertCurrent();
       const reloc = await m.relocateClaudeTranscriptsForSessionMove(
         sid,
         beforeMove.workingDir,
@@ -1899,8 +1900,9 @@ export async function updateSessionInDb(
       p.status,
       async () => {
         moveGuard?.assertCurrent();
-        moveGuard?.beforeWrite?.();
         if (p.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sid);
+        await moveGuard?.beforeWrite?.();
+        moveGuard?.assertCurrent();
         await writeSessionPatch(db, sid, setObj, p.status);
         cleanupSessionRuntimeForTerminalStatus(sid, p.status);
       },

@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   update: vi.fn(),
   saved: vi.fn(),
   enterLock: vi.fn(),
+  beforeCommit: vi.fn(),
 }));
 vi.mock('../../localDb/dialogueWorkspace.js', () => ({
   dialogueWorkspaceRootDir: () => h.dialogueRoot,
@@ -65,6 +66,7 @@ describe('moveSession host', () => {
     h.botLinks = [];
     h.attached = false;
     h.enterLock.mockImplementation(() => undefined);
+    h.beforeCommit.mockImplementation(() => undefined);
     h.query.mockResolvedValue([
       { id: 'target', status: 'active', remoteHostId: null, source: null, orcaRole: null },
     ]);
@@ -73,7 +75,8 @@ describe('moveSession host', () => {
       guard.assertCurrent();
       await guard.beforeUpdate();
       guard.assertCurrent();
-      guard.beforeWrite?.();
+      await h.beforeCommit();
+      await guard.beforeWrite?.();
       h.saved(patch);
       guard.assertCurrent();
       return { id, workingDir: patch.workingDir ?? '/old', workspaceKind: patch.workspaceKind };
@@ -117,6 +120,31 @@ describe('moveSession host', () => {
       expect(h.saved).not.toHaveBeenCalled();
     },
   );
+  it.each([false, true])(
+    'rejects a newly running Worker created after initial validation (project=%s)',
+    async (project) => {
+      h.beforeCommit.mockImplementation(() => {
+        h.workers = [{ sessionId: 'late-worker' }];
+        h.running.add('late-worker');
+      });
+      expect(await run(project ? directory : null)).toMatchObject({
+        errorCode: 'PRECONDITION_FAILED',
+      });
+      expect(h.saved).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['source', 'link'])(
+    'rejects Bot %s callers before entering the target update',
+    async (signal) => {
+      h.query.mockResolvedValueOnce([{ id: 'caller', source: signal === 'source' ? 'bot' : null }]);
+      h.botLinks = signal === 'link' ? [{ botId: 'bot' }] : [];
+      expect(await run(directory)).toMatchObject({ errorCode: 'UNSUPPORTED_CAPABILITY' });
+      expect(h.update).not.toHaveBeenCalled();
+      expect(h.saved).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not report a committed move as rejected when IM attaches after the write', async () => {
     h.saved.mockImplementationOnce(() => {
       h.attached = true;
