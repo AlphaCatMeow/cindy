@@ -64,7 +64,10 @@ import {
   DESKTOP_VISIBLE_SESSION_SOURCES,
   isRetainableProjectSessionSource,
 } from '../../../shared/sessionSource.js';
-import { normalizeWorkingDirForStorage } from '../../../shared/workingDir.js';
+import {
+  normalizeWorkingDirForProjectSettings,
+  normalizeWorkingDirForStorage,
+} from '../../../shared/workingDir.js';
 import { assertRendererSessionSourceAllowed } from './sessionSourceGuard.js';
 import type { SessionReference } from '../../../shared/sessionReference.js';
 import * as broadcastTap from '../../device-link/broadcast-tap.js';
@@ -880,7 +883,8 @@ export async function touchUserSendInDb(id: string, atMs?: number): Promise<void
   const ownerScope = captureOwnerScope();
   const ts =
     typeof atMs === 'number' && Number.isFinite(atMs) && atMs > 0 ? Math.floor(atMs) : Date.now();
-  const db = getDbClient().drizzle;
+  const dbClient = getDbClient();
+  const db = dbClient.drizzle;
   // 原子 guard：单条 UPDATE + WHERE 代替 SELECT→条件判断→UPDATE 三步走。
   // 旧实现存在 TOCTOU 竞态：两个并发调用（如 scheduler fire + 手动发送）都可能
   // 通过旧值检查后都执行 UPDATE，后写入的更早时间戳会覆盖已写入的更新值。
@@ -904,7 +908,14 @@ export async function touchUserSendInDb(id: string, atMs?: number): Promise<void
   // 通过 SELECT 拿回实际落库的 updatedAt（已经是 MAX'd 结果）用于广播，
   // 避免把旧 ts 当作 updatedAt 广播给 renderer。
   const updated = await db
-    .select({ userSendAt: sessions.userSendAt, updatedAt: sessions.updatedAt })
+    .select({
+      userSendAt: sessions.userSendAt,
+      updatedAt: sessions.updatedAt,
+      workingDir: sessions.workingDir,
+      workspaceKind: sessions.workspaceKind,
+      remoteHostId: sessions.remoteHostId,
+      source: sessions.source,
+    })
     .from(sessions)
     .where(and(eq(sessions.id, id), eq(sessions.userSendAt, ts)))
     .limit(1);
@@ -925,6 +936,19 @@ export async function touchUserSendInDb(id: string, atMs?: number): Promise<void
       },
       ownerScope,
     );
+  }
+  // 项目独立保留真实使用时间；不能等归档/删除时再取清理时间，也不能从剩余任务重算。
+  // 复用入口处的 client，避免 await 期间切换账号后把旧项目写入新账号数据库。
+  const row = updated[0];
+  if (
+    row.workspaceKind === 'project' &&
+    row.workingDir &&
+    !row.remoteHostId &&
+    isRetainableProjectSessionSource(row.source)
+  ) {
+    const projectDir = normalizeWorkingDirForProjectSettings(row.workingDir);
+    const touched = await upsertRecentWorkdir(projectDir, ts, process.platform, dbClient);
+    if (touched && projectDir) broadcastRecentWorkdirsChanged(projectDir, ownerScope);
   }
 }
 
@@ -1874,7 +1898,7 @@ export async function updateSessionInDb(
     // 否则「在新窗口打开」的副窗口无从得知会话已被移除,仍停留在旧视图(#3175)。
     const statusChanged = p.status !== undefined;
     if (
-      (projectTargetChanged || p.status === 'deleted' || p.status === 'archived') &&
+      projectTargetChanged &&
       row.workspaceKind === 'project' &&
       row.workingDir &&
       !row.remoteHostId &&
@@ -1998,7 +2022,7 @@ export async function patchSessionMetaInDb(
   const setObj = sessionPatchToRow(patch, { bumpUpdatedAt: false });
   // 控制端远程改名走这条,与本机改名同口径(同样先记号后写库)。
   if (patch.title !== undefined) noteUserTitleWritten(sessionId);
-  const { updated, source } = await withStatusWriteLock(db, sessionId, patch.status, async () => {
+  const updated = await withStatusWriteLock(db, sessionId, patch.status, async () => {
     if (patch.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sessionId);
     await writeSessionPatch(db, sessionId, setObj, patch.status);
     const row = await selectSessionWithCount(db, sessionId);
@@ -2008,23 +2032,8 @@ export async function patchSessionMetaInDb(
       row.summary = null;
     }
     cleanupSessionRuntimeForTerminalStatus(sessionId, patch.status);
-    return { updated: sessionToCamel(row), source: row.source };
+    return sessionToCamel(row);
   });
-  if (
-    (patch.status === 'deleted' || patch.status === 'archived') &&
-    updated.workspaceKind === 'project' &&
-    updated.workingDir &&
-    !updated.remoteHostId &&
-    isRetainableProjectSessionSource(source)
-  ) {
-    const touched = await upsertRecentWorkdir(
-      updated.workingDir,
-      Date.now(),
-      process.platform,
-      dbClient,
-    );
-    if (touched) broadcastRecentWorkdirsChanged(updated.workingDir, ownerScope);
-  }
   notifyAgentIslandSessionPatch(updated.id, {
     status: updated.status,
     title: updated.title,
@@ -2228,23 +2237,6 @@ export async function setSessionsStatusInDb(
   });
   for (const item of applied) {
     compactTerminalSessionToolResults(dbClient, item.sessionId, item.status);
-  }
-  if (status === 'archived') {
-    const touchedAt = Date.now();
-    const localProjectDirs = new Set(
-      applied.flatMap((item) =>
-        item.workspaceKind === 'project' &&
-        item.workingDir &&
-        !item.remoteHostId &&
-        isRetainableProjectSessionSource(item.source)
-          ? [item.workingDir]
-          : [],
-      ),
-    );
-    for (const workingDir of localProjectDirs) {
-      const touched = await upsertRecentWorkdir(workingDir, touchedAt, process.platform, dbClient);
-      if (touched) broadcastRecentWorkdirsChanged(workingDir, ownerScope);
-    }
   }
   if (!isOwnerScopeCurrent(ownerScope))
     return applied.map((item) => ({
