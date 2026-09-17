@@ -7163,7 +7163,7 @@
       "sortBy": "Sort by {{column}}",
       "loading": "Reading processes…",
       "remoteUnavailableTitle": "Unavailable for remote sessions",
-      "remoteUnavailableDescription": "This panel only reads processes on this device. It is available only for local sessions running on this device.",
+      "remoteUnavailableDescription": "Activity Monitor is available only for local sessions.",
       "selectHint": "Select a process",
       "readOnlyHint": "Only Agent processes used for tasks can be stopped",
       "terminate": "Stop Process",
@@ -9548,7 +9548,7 @@
     "sidebar": {
       "machineSwitcher": {
         "allMachines": "All",
-        "localMachine": "This device",
+        "localMachine": "Local",
         "connecting": "Connecting…",
         "tasksLoading": "Loading sessions from {{device}}…",
         "tasksLoadFailed": "Can't reach sessions on {{device}} right now — retrying automatically…",
@@ -9558,8 +9558,8 @@
         "multiSelect": "Multi-select",
         "deselect": "Deselect",
         "menuTrigger": "Session scope",
-        "selectedCount_one": "{{count}} machine",
-        "selectedCount_other": "{{count}} machines"
+        "selectedCount_one": "{{count}} device",
+        "selectedCount_other": "{{count}} devices"
       },
       "pinned": "Pinned",
       "pinnedToggleExpand": "Expand pinned",
@@ -9577,7 +9577,7 @@
       },
       "showAllSessions": "Show all {{count}}",
       "allSessions": "All sessions",
-      "scopeLocalSessions": "This device’s sessions",
+      "scopeLocalSessions": "Local",
       "dialogues": "Chat",
       "newDialogue": "New session",
       "creationInProgress": "Creation is already in progress",
@@ -9598,8 +9598,8 @@
       "createProjectFailed": "Failed to create project",
       "projectsToggleExpand": "Expand all project sessions",
       "projectsToggleCollapse": "Collapse all project sessions",
-      "filterAria": "Sidebar display settings (Status: {{status}}, Harness: {{vendor}}, Last activity: {{lastActivity}}, Group by: {{groupBy}}, Sort by: {{sortBy}}, Projects: {{projects}})",
-      "organizeSidebar": "Sidebar display settings",
+      "filterAria": "Sidebar settings (Status: {{status}}, Harness: {{vendor}}, Last activity: {{lastActivity}}, Group by: {{groupBy}}, Sort by: {{sortBy}}, Projects: {{projects}})",
+      "organizeSidebar": "Sidebar settings",
       "filterAllText": "all",
       "filterSelectedProjects": "{{count}} selected",
       "filterStatus": {
@@ -9621,7 +9621,7 @@
       },
       "filterGroupByDeviceManualTip": "Group by device is unavailable while sorting manually",
       "deviceGroup": {
-        "local": "This device",
+        "local": "Local",
         "offline": "Offline",
         "collapse": "Collapse this device",
         "expand": "Expand this device"
