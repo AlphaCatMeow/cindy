@@ -1795,7 +1795,7 @@ export async function updateSessionInDb(
         );
       }
     }
-    // 会话移动转录迁移:patch 带 workingDir 时先留存旧值,update 后对比实际变化。
+    // 会话移动转录迁移:patch 带 workingDir 时先留存旧值,提交前对比实际变化。
     // CLI 转录按 cwd 转码目录存放,workingDir 变了必须跟着搬,否则 resume 报
     // "No conversation found with session ID"(见 claude-transcript-relocation.ts)。
     const beforeMove =
@@ -1859,6 +1859,33 @@ export async function updateSessionInDb(
       setObj.listPreview = null;
       setObj.listPreviewRole = null;
     }
+    // 在提交新 cwd 前完成现有 CC 迁移,与 Pi/Codex 的 runtime 关闭同处提交前。
+    // 迁移只复制、不删除旧转录:切账号或写库失败时旧 cwd 仍可恢复；提交后
+    // 围栏即使拒绝返回,也不会留下新 cwd 配旧转录。复用原锁与 best-effort 策略。
+    // 动态 import 避免 localDb → maker-host 静态模块环。
+    if (
+      beforeMove &&
+      beforeMove.agentKind === 'cc' &&
+      !beforeMove.remoteHostId &&
+      beforeMove.workingDir &&
+      typeof p.workingDir === 'string' &&
+      p.workingDir &&
+      normalizeWorkingDirForStorage(beforeMove.workingDir) !== p.workingDir
+    ) {
+      const m = await import('../../maker-host/claude-transcript-relocation.js');
+      moveGuard?.assertCurrent();
+      moveGuard?.beforeWrite?.();
+      const reloc = await m.relocateClaudeTranscriptsForSessionMove(
+        sid,
+        beforeMove.workingDir,
+        p.workingDir,
+        ...(moveGuard ? [{ client: dbClient, assertCurrent: moveGuard.assertCurrent }] : []),
+      );
+      if (reloc.persistedSdkSessionId) {
+        p.sdkSessionId = reloc.persistedSdkSessionId;
+        setObj.sdkSessionId = reloc.persistedSdkSessionId;
+      }
+    }
     // 用户手动改名(重命名框 / 侧边栏)走这条:告诉自动起名收手。同值改名不会让
     // 条件写落空,不显式说一声的话智能标题会把他刚保存的名字盖掉(review P1)。
     // **必须先于 UPDATE**:写库是一次 worker RPC 往返,改名提交与这里拿到回执之间
@@ -1891,32 +1918,6 @@ export async function updateSessionInDb(
         broadcastSessionPatched(sid, { summary: null, preview: null }, ownerScope);
       }
       void recomputePrRefsForSession(sid).catch(() => undefined);
-    }
-    // workingDir 实际变化的本机 cc 会话:迁移 CLI 转录后再查询返回行/广播,保证
-    // renderer 拿到更新结果时转录已就位(用户可立即续聊),且迁移中持久化的最新
-    // sdkSessionId 能进返回行与广播 patch——否则 renderer 留着旧 resume id,下一次
-    // lazy-create 仍会 resume 到 pre-fork 会话。内部 best-effort 不抛错。
-    // 动态 import 避免 localDb → maker-host 的静态模块环(同下方 sessionTaskSummary)。
-    if (
-      beforeMove &&
-      beforeMove.agentKind === 'cc' &&
-      !beforeMove.remoteHostId &&
-      beforeMove.workingDir &&
-      typeof p.workingDir === 'string' &&
-      p.workingDir &&
-      normalizeWorkingDirForStorage(beforeMove.workingDir) !== p.workingDir
-    ) {
-      const m = await import('../../maker-host/claude-transcript-relocation.js');
-      moveGuard?.assertCurrent();
-      const reloc = await m.relocateClaudeTranscriptsForSessionMove(
-        sid,
-        beforeMove.workingDir,
-        p.workingDir,
-        ...(moveGuard ? [{ client: dbClient, assertCurrent: moveGuard.assertCurrent }] : []),
-      );
-      if (reloc.persistedSdkSessionId) {
-        (p as Record<string, unknown>).sdkSessionId = reloc.persistedSdkSessionId;
-      }
     }
     const row = await selectSessionWithCount(db, sid);
     moveGuard?.assertCurrent();

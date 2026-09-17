@@ -1050,6 +1050,59 @@ describe('local-db:sessions:update handler wiring', () => {
     );
   });
 
+  it.each(['during relocation', 'after commit'])(
+    'keeps cwd and transcripts aligned when the account switches %s',
+    async (phase) => {
+      let current = true;
+      const readCwd = () =>
+        (
+          h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('cc-local') as {
+            working_dir: string;
+          }
+        ).working_dir;
+      h.relocate.mockImplementationOnce(async () => {
+        expect(readCwd()).toBe('/old/dir');
+        if (phase === 'during relocation') current = false;
+        return { persistedSdkSessionId: null };
+      });
+      await expect(
+        updateSessionInDb(
+          'cc-local',
+          { workingDir: '/new/dir', workspaceKind: 'project' },
+          undefined,
+          {
+            beforeUpdate: async () => undefined,
+            assertCurrent: () => {
+              if (phase === 'after commit' && readCwd() === '/new/dir') current = false;
+              if (!current)
+                throw Object.assign(new Error('[PRECONDITION_FAILED] account changed'), {
+                  code: 'PRECONDITION_FAILED',
+                });
+            },
+          },
+        ),
+      ).rejects.toThrow('account changed');
+      expect(h.relocate).toHaveBeenCalledOnce();
+      expect(readCwd()).toBe(phase === 'after commit' ? '/new/dir' : '/old/dir');
+      expect(h.upsertRecentWorkdir).not.toHaveBeenCalled();
+      expect(h.tapWindowBroadcast).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the original cwd if persistence fails after transcript copying', async () => {
+    h.sqlite!.exec(
+      "CREATE TRIGGER reject_move BEFORE UPDATE OF working_dir ON sessions BEGIN SELECT RAISE(ABORT, 'move write failed'); END",
+    );
+    await expect(invokeUpdate('cc-local', { workingDir: '/new/dir' })).rejects.toThrow(
+      'Worktree is busy or its recovery record could not be saved',
+    );
+    expect(h.relocate).toHaveBeenCalledOnce();
+    expect(
+      h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').get('cc-local'),
+    ).toEqual({ working_dir: '/old/dir' });
+    expect(h.tapWindowBroadcast).not.toHaveBeenCalled();
+  });
+
   it('returns and broadcasts the sdkSessionId persisted during relocation', async () => {
     const liveId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     // 模拟真实编排:迁移把内存 id 持久化进 DB 并上报;handler 必须在迁移后才查
