@@ -293,7 +293,7 @@ function GhostCardCanvas({
       const render = (): void => {
         const d = getDur();
         scrubberRoot.render(<MediaScrubber currentTime={a.currentTime}
-          duration={Number.isFinite(a.duration) ? a.duration : 0}
+          duration={d}
           label={t('chat.media.audioProgress')}
           onSeek={(seconds) => { a.currentTime = seconds; render(); }} />);
         curEl.textContent = formatAudioClock(a.currentTime);
