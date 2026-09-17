@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
+  dialogueRoot: '',
   owner: { dataOwnerId: 'owner-a', ownerGeneration: 1 },
   boundary: false,
   ready: true,
@@ -18,6 +19,9 @@ const h = vi.hoisted(() => ({
   rename: vi.fn(),
   visibility: vi.fn(),
   hiddenKeys: [] as string[],
+}));
+vi.mock('../../localDb/dialogueWorkspace.js', () => ({
+  dialogueWorkspaceRootDir: () => h.dialogueRoot,
 }));
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -72,6 +76,7 @@ describe('createProject', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     directory = await mkdtemp(path.join(os.tmpdir(), 'cindy-create-project-'));
+    h.dialogueRoot = path.join(directory, 'dialogues');
     h.owner = { dataOwnerId: 'owner-a', ownerGeneration: 1 };
     h.boundary = false;
     h.ready = true;
@@ -91,6 +96,20 @@ describe('createProject', () => {
     await rm(directory, { recursive: true, force: true });
   });
   const run = (workingDir: string) => createProject({ callerSessionId: 'caller', workingDir });
+
+  it('rejects managed dialogue roots, descendants and symlink aliases but permits adjacent projects', async () => {
+    const managed = path.join(h.dialogueRoot, '2026-09-18', 'task');
+    await mkdir(managed, { recursive: true });
+    expect(await run(h.dialogueRoot)).toMatchObject({ ok: false });
+    expect(await run(managed)).toMatchObject({ ok: false });
+    const alias = path.join(directory, 'alias');
+    await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(await run(alias)).toMatchObject({ ok: false });
+    expect(h.upsert).not.toHaveBeenCalled();
+    const adjacent = `${h.dialogueRoot}-project`;
+    await mkdir(adjacent);
+    expect(await run(adjacent)).toMatchObject({ ok: true });
+  });
 
   it('registers an existing directory, restores visibility and refreshes with the captured owner', async () => {
     await writeFile(path.join(directory, 'keep.txt'), 'unchanged');

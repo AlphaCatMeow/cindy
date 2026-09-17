@@ -4,6 +4,7 @@ import { BrowserWindow } from 'electron';
 import { eq } from 'drizzle-orm';
 import { getActiveDataOwnerPushStamp, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { tryGetDbClient } from '../localDb/client/current.js';
+import { dialogueWorkspaceRootDir } from '../localDb/dialogueWorkspace.js';
 import { sessions } from '../localDb/schema.js';
 import { normalizeRecentWorkdirPath, upsertRecentWorkdir } from '../localDb/ipc/recentWorkdirs.js';
 import { restoreLocalProjectVisibility } from '../sidebarSettingsStore.js';
@@ -92,12 +93,32 @@ export function validateLocalProjectDirectory(
     : fail('INVALID_ARGS', 'Managed task worktrees cannot be registered as separate projects.');
 }
 
+function isWithinDirectory(directory: string, root: string): boolean {
+  const relative = path.relative(root, directory);
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  );
+}
+
 /** Check physical targets without changing the caller's normalized project identity. */
 export async function validateExistingLocalProjectDirectory(workingDir: string) {
+  const root = dialogueWorkspaceRootDir();
+  if (isWithinDirectory(workingDir, root)) {
+    return fail('INVALID_ARGS', 'Managed dialogue workspaces cannot be registered as projects.');
+  }
   if (!(await stat(workingDir)).isDirectory())
     return fail('NOT_A_DIRECTORY', 'working_dir is not a directory.');
-  // Both registration and task moves must reject disguised managed worktrees.
-  return validateLocalProjectDirectory(await realpath(workingDir));
+  // Resolve both sides: userData itself may use a symlink (e.g. /var on macOS).
+  const physicalDirectory = await realpath(workingDir);
+  const physicalRoot = await realpath(root).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return root;
+    throw error;
+  });
+  if (isWithinDirectory(physicalDirectory, physicalRoot)) {
+    return fail('INVALID_ARGS', 'Managed dialogue workspaces cannot be registered as projects.');
+  }
+  return validateLocalProjectDirectory(physicalDirectory);
 }
 
 /** Register only: filesystem creation and task execution remain separate agent actions. */

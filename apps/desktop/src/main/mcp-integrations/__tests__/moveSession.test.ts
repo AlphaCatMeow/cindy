@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
+  dialogueRoot: '',
   owner: { dataOwnerId: 'owner-a', ownerGeneration: 1 },
   query: vi.fn(),
   botLinks: [] as Array<{ botId: string }>,
@@ -13,6 +14,9 @@ const h = vi.hoisted(() => ({
   update: vi.fn(),
   saved: vi.fn(),
   enterLock: vi.fn(),
+}));
+vi.mock('../../localDb/dialogueWorkspace.js', () => ({
+  dialogueWorkspaceRootDir: () => h.dialogueRoot,
 }));
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] } }));
 vi.mock('../../appSessionState.js', () => ({
@@ -54,6 +58,7 @@ describe('moveSession host', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     directory = await mkdtemp(path.join(os.tmpdir(), 'cindy-move-session-'));
+    h.dialogueRoot = path.join(directory, 'dialogues');
     h.owner = { dataOwnerId: 'owner-a', ownerGeneration: 1 };
     h.running = new Set();
     h.workers = [];
@@ -174,7 +179,7 @@ describe('moveSession host', () => {
     expect(await run('relative')).toMatchObject({ errorCode: 'INVALID_ARGS' });
     expect(h.saved).not.toHaveBeenCalled();
   });
-  it.for(['.cindy-worktrees', '.xdt-worktrees'])(
+  it.for(['.cindy-worktrees', '.xdt-worktrees', 'dialogues'])(
     'rejects a %s alias retargeted while waiting for the route lock',
     async (managedName, ctx) => {
       const ordinary = path.join(directory, 'ordinary');
