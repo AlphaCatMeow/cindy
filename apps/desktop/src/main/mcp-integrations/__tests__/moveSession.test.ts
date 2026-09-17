@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,10 +31,13 @@ vi.mock('../../localDb/client/current.js', () => {
   };
   return { tryGetDbClient: () => client };
 });
-vi.mock('../../localDb/ipc/recentWorkdirs.js', () => ({
-  normalizeRecentWorkdirPath: (p: string) => p,
-  upsertRecentWorkdir: vi.fn(),
-}));
+vi.mock('../../localDb/ipc/recentWorkdirs.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../localDb/ipc/recentWorkdirs.js')>();
+  return {
+    normalizeRecentWorkdirPath: actual.normalizeRecentWorkdirPath,
+    upsertRecentWorkdir: vi.fn(),
+  };
+});
 vi.mock('../../sidebarSettingsStore.js', () => ({ restoreLocalProjectVisibility: vi.fn() }));
 vi.mock('../../logger.js', () => ({ createLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('../../im/binding.js', () => ({
@@ -58,7 +61,7 @@ describe('moveSession host', () => {
       { id: 'target', status: 'active', remoteHostId: null, source: null, orcaRole: null },
     ]);
     h.update.mockImplementation(async (id, patch, _opts, guard) => {
-      h.enterLock();
+      await h.enterLock();
       guard.assertCurrent();
       await guard.beforeUpdate();
       guard.assertCurrent();
@@ -79,6 +82,7 @@ describe('moveSession host', () => {
     });
 
   it('uses the shared update path for moving projects and preserves cwd when removing grouping', async () => {
+    // recent_workdirs stores logical project identities with forward slashes on all platforms.
     expect(await run(directory)).toMatchObject({
       ok: true,
       workingDir: directory.replaceAll('\\', '/'),
@@ -99,12 +103,16 @@ describe('moveSession host', () => {
     'rechecks running state after acquiring the route lock (%s)',
     async (target) => {
       h.enterLock.mockImplementation(() => h.running.add('target'));
-      expect(await run(target ? directory : null)).toMatchObject({ errorCode: 'PRECONDITION_FAILED' });
+      expect(await run(target ? directory : null)).toMatchObject({
+        errorCode: 'PRECONDITION_FAILED',
+      });
       expect(h.saved).not.toHaveBeenCalled();
     },
   );
   it('does not report a committed move as rejected when IM attaches after the write', async () => {
-    h.saved.mockImplementationOnce(() => { h.attached = true; });
+    h.saved.mockImplementationOnce(() => {
+      h.attached = true;
+    });
     expect(await run(null)).toMatchObject({ ok: true, workspaceKind: 'dialogue' });
   });
 
@@ -143,4 +151,32 @@ describe('moveSession host', () => {
     expect(await run('relative')).toMatchObject({ errorCode: 'INVALID_ARGS' });
     expect(h.saved).not.toHaveBeenCalled();
   });
+  it.for(['.cindy-worktrees', '.xdt-worktrees'])(
+    'rejects a %s alias retargeted while waiting for the route lock',
+    async (managedName, ctx) => {
+      const ordinary = path.join(directory, 'ordinary');
+      const managed = path.join(directory, managedName, 'task');
+      const alias = path.join(directory, 'alias');
+      await mkdir(ordinary);
+      await mkdir(managed, { recursive: true });
+      try {
+        await symlink(ordinary, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        if (['EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+          ctx.skip();
+          return;
+        }
+        throw error;
+      }
+      expect(await run(alias)).toMatchObject({ ok: true, workingDir: alias.replaceAll('\\', '/') });
+      h.saved.mockClear();
+      h.enterLock.mockImplementationOnce(async () => {
+        await rm(alias);
+        await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      });
+      expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_PARAMS' });
+      expect(h.saved).not.toHaveBeenCalled();
+      expect(await run(null)).toMatchObject({ ok: true, workingDir: '/old' });
+    },
+  );
 });

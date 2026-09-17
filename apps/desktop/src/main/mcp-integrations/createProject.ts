@@ -91,6 +91,14 @@ export function validateLocalProjectDirectory(
     : fail('INVALID_ARGS', 'Managed task worktrees cannot be registered as separate projects.');
 }
 
+/** Check physical targets without changing the caller's normalized project identity. */
+export async function validateExistingLocalProjectDirectory(workingDir: string) {
+  if (!(await stat(workingDir)).isDirectory())
+    return fail('NOT_A_DIRECTORY', 'working_dir is not a directory.');
+  // Both registration and task moves must reject disguised managed worktrees.
+  return validateLocalProjectDirectory(await realpath(workingDir));
+}
+
 /** Register only: filesystem creation and task execution remain separate agent actions. */
 export async function createProject({
   callerSessionId,
@@ -102,10 +110,7 @@ export async function createProject({
   const directory = validateLocalProjectDirectory(workingDir);
   if (!directory.ok) return directory;
   return withLocalProjectContext(callerSessionId, async ({ client, owner, assertCurrent }) => {
-    if (!(await stat(directory.workingDir)).isDirectory())
-      return fail('NOT_A_DIRECTORY', 'working_dir is not a directory.');
-    // Symlinks/junctions must not disguise a managed task worktree as a project.
-    const physicalDirectory = validateLocalProjectDirectory(await realpath(directory.workingDir));
+    const physicalDirectory = await validateExistingLocalProjectDirectory(directory.workingDir);
     if (!physicalDirectory.ok) return physicalDirectory;
     assertCurrent();
     if (!(await upsertRecentWorkdir(directory.workingDir, Date.now(), process.platform, client))) {

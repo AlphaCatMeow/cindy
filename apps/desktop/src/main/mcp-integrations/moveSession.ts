@@ -1,11 +1,14 @@
-import { stat } from 'node:fs/promises';
 import { and, eq } from 'drizzle-orm';
 import type { XdtHelperMcpDeps } from '@cindy/mcps';
 import { sessions, orcaTeams, orcaWorkers } from '../localDb/schema.js';
 import { updateSessionInDb } from '../localDb/ipc/sessions.js';
 import { bindingStore } from '../im/binding.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
-import { validateLocalProjectDirectory, withLocalProjectContext } from './createProject.js';
+import {
+  validateExistingLocalProjectDirectory,
+  validateLocalProjectDirectory,
+  withLocalProjectContext,
+} from './createProject.js';
 
 /** The caller supplies the same live running-state projection used by the sidebar. */
 export function createMoveSession(
@@ -64,8 +67,10 @@ export function createMoveSession(
                 .innerJoin(orcaTeams, eq(orcaWorkers.teamId, orcaTeams.id))
                 .where(and(eq(orcaTeams.leadSessionId, sessionId), eq(orcaTeams.status, 'active')))
             : [];
-        if (targetDir && !(await stat(targetDir)).isDirectory())
-          throwIpcError('INVALID_PARAMS', 'working_dir is not a directory.');
+        if (targetDir) {
+          const physicalDirectory = await validateExistingLocalProjectDirectory(targetDir);
+          if (!physicalDirectory.ok) throwIpcError('INVALID_PARAMS', physicalDirectory.message);
+        }
         assertMoveAllowed();
       };
       const patch =

@@ -38,12 +38,14 @@ vi.mock('../../localDb/client/current.js', () => {
   };
   return { tryGetDbClient: () => (h.ready ? client : null) };
 });
-vi.mock('../../localDb/ipc/recentWorkdirs.js', () => ({
-  normalizeRecentWorkdirPath: (value: string) =>
-    value.includes('.cindy-worktrees') ? null : value.replaceAll('\\', '/'),
-  upsertRecentWorkdir: h.upsert,
-  listRecentWorkdirs: h.list,
-}));
+vi.mock('../../localDb/ipc/recentWorkdirs.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../localDb/ipc/recentWorkdirs.js')>();
+  return {
+    normalizeRecentWorkdirPath: actual.normalizeRecentWorkdirPath,
+    upsertRecentWorkdir: h.upsert,
+    listRecentWorkdirs: h.list,
+  };
+});
 vi.mock('../../localDb/ipc/projectAliases.js', () => ({
   listProjectAliases: h.aliases,
   upsertProjectAlias: h.rename,
@@ -110,15 +112,30 @@ describe('createProject', () => {
     });
     expect(h.upsert).not.toHaveBeenCalled();
   });
-  it('rejects symlink and junction aliases of managed worktrees before registration', async () => {
-    const managed = path.join(directory, '.cindy-worktrees', 'task');
-    await mkdir(managed, { recursive: true });
-    const alias = path.join(directory, 'alias');
-    await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
-    expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_ARGS' });
-    expect(h.upsert).not.toHaveBeenCalled();
-    expect(h.restore).not.toHaveBeenCalled();
-  });
+  it.for(['.cindy-worktrees', '.xdt-worktrees'])(
+    'rejects %s aliases before registration',
+    async (managedName, ctx) => {
+      const managed = path.join(directory, managedName, 'task');
+      await mkdir(managed, { recursive: true });
+      const alias = path.join(directory, 'alias');
+      try {
+        await symlink(managed, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        if (['EPERM', 'EACCES', 'ENOSYS'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+          ctx.skip();
+          return;
+        }
+        throw error;
+      }
+      expect(await run(alias)).toMatchObject({ errorCode: 'INVALID_ARGS' });
+      expect(h.upsert).not.toHaveBeenCalled();
+      expect(h.restore).not.toHaveBeenCalled();
+      await rm(alias);
+      await symlink(directory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      // Preserve the logical alias identity, not the physical target path.
+      expect(await run(alias)).toMatchObject({ ok: true, workingDir: alias.replaceAll('\\', '/') });
+    },
+  );
   it('rejects files, relative paths and managed task worktrees', async () => {
     const file = path.join(directory, 'file');
     await writeFile(file, 'contents');
