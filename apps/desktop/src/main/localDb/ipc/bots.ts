@@ -30,7 +30,7 @@ import { assertTrustedAppRendererEvent } from '../../security/trustedAppRenderer
 import { isDeviceLinkInvoke } from '../../device-link/invoke-context.js';
 import { requireString, throwIpcError } from '../../utils/ipcValidate.js';
 import { isBotVisibleRemotely } from './botRemoteVisibility.js';
-import { readRemoteBotSessionAccess } from './botRemoteSessionAccess.js';
+import { readRemoteBotSessionAccess, readRemoteBotSessionAccessBatch } from './botRemoteSessionAccess.js';
 import { setRemoteBotSessionLookup } from '../../device-link/remoteBotSessionBoundary.js';
 import { resolveBusinessSessionId } from '../../sessionIds.js';
 import { ensureProjectGitInitialized } from '../../git-snapshot/projectGitBootstrap.js';
@@ -502,13 +502,14 @@ async function readProfile(
   const byId = new Map(sessionRows.map((row) => [row.id, row]));
   // Runtime snapshots are durable history. The list needs only the latest per
   // task; fetching every frozen capability JSON grows with months of restarts.
-  const runtimeRows = (await Promise.all(links.map((link) => db
-    .select()
-    .from(botRuntimeSnapshots)
-    .where(eq(botRuntimeSnapshots.sessionId, link.sessionId))
-    .orderBy(desc(botRuntimeSnapshots.preparedAt), desc(botRuntimeSnapshots.appliedAt))
-    .limit(1),
-  ))).flat();
+  const runtimeRows: (typeof botRuntimeSnapshots.$inferSelect)[] = [];
+  for (const link of links) {
+    owner.assertCurrent();
+    runtimeRows.push(...await db.select().from(botRuntimeSnapshots)
+      .where(eq(botRuntimeSnapshots.sessionId, link.sessionId))
+      .orderBy(desc(botRuntimeSnapshots.preparedAt), desc(botRuntimeSnapshots.appliedAt))
+      .limit(1));
+  }
   const runtimeBySession = new Map<string, (typeof runtimeRows)[number]>();
   for (const row of runtimeRows) {
     if (!runtimeBySession.has(row.sessionId)) runtimeBySession.set(row.sessionId, row);
@@ -805,7 +806,12 @@ export async function listBotRemoteResourceSources(): Promise<BotRemoteResourceS
   owner.assertCurrent();
   // The roster reads only identity + canonical preview, never runtime snapshots
   // or every historical task attached to a long-lived companion.
-  const sources = await Promise.all(profiles.map(({ id }) => readBotRemoteResourceSource(client, id)));
+  const sources: BotRemoteResourceSource[] = [];
+  // A large roster must not occupy one DB RPC slot per companion at once.
+  for (const { id } of profiles) {
+    owner.assertCurrent();
+    sources.push(await readBotRemoteResourceSource(client, id));
+  }
   owner.assertCurrent();
   return sources;
 }
@@ -1244,7 +1250,7 @@ export function registerBotIpc(): void {
     owner.assertCurrent();
     return generateBotCreationDraft(raw, profiles.map(p => p.name));
   });
-  setRemoteBotSessionLookup(readRemoteBotSessionAccess);
+  setRemoteBotSessionLookup(readRemoteBotSessionAccess, readRemoteBotSessionAccessBatch);
   ipcMain.handle('local-db:bots:model-chain-settings-get', async (event) => {
     assertTrustedAppRendererEvent(event);
     const state = await readBotModelChainSettingsState();
@@ -1298,13 +1304,14 @@ export function registerBotIpc(): void {
         if (status !== 'archived') queueBotInvitation(id);
       }
     }
-    const results = await Promise.all(
-      profiles.map(({ id }) =>
-        remote
-          ? readRemoteBotProfile(client, id)
-          : readProfile(client, id, lastReadAtByBotId.get(id) ?? null),
-      ),
-    );
+    const results = [];
+    for (const { id } of profiles) {
+      owner.assertCurrent();
+      results.push(await (remote
+        ? readRemoteBotProfile(client, id)
+        : readProfile(client, id, lastReadAtByBotId.get(id) ?? null)));
+    }
+    owner.assertCurrent();
     return results.filter((profile) => profile !== null);
   });
 

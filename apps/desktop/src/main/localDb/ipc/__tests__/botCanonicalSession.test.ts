@@ -1,3 +1,5 @@
+import { createDrizzleProxy } from '../../client/drizzleProxy';
+import type { DbTransport } from '../../client/DbTransport';
 import { getSelectedNewMakerRoute, setNewMakerDraftCache } from '../../../maker-host/newMakerDefaultsCache';
 import { setModelVisibilityMirror } from '../../../maker-host/model-visibility-mirror';
 import { setMainLocale } from '../../../i18n';
@@ -5700,4 +5702,66 @@ describe('Teammate model selection shares profile persistence and route reconcil
       expect(await invoke('local-db:bots:get', 'bot-1')).toEqual(before);
       expect(getSelectedNewMakerRoute(h.ownerScopeKey)).toEqual(appDefault);
     });
+});
+
+
+/** Delay real SQL replies to expose fan-out hidden by the synchronous fixture. */
+function observeBotReadConcurrency() {
+  let active = 0;
+  let peak = 0;
+  const transport: DbTransport = {
+    async send<R>(op: string, args: unknown): Promise<R> {
+      if (op !== 'rawAll') throw new Error(`unexpected read operation: ${op}`);
+      const { sql, params } = args as { sql: string; params: unknown[] };
+      peak = Math.max(peak, ++active);
+      try {
+        const rows = h.sqlite!.prepare(sql).raw().all(...params);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        return rows as R;
+      } finally { active--; }
+    },
+    on() {}, onTerminated() {}, async close() {},
+  };
+  h.db = createDrizzleProxy(transport);
+  return () => peak;
+}
+
+it.each(['local', 'remote', 'resources'])('bounds %s companion roster reads without dropping profiles', async (entry) => {
+  const [profile] = await h.db!.select().from(botProfiles);
+  const [version] = await h.db!.select().from(botProfileVersions);
+  for (let i = 2; i <= 20; i++) {
+    const id = `roster-${i}`;
+    await h.db!.insert(botProfiles).values({ ...profile, id, displayName: id });
+    await h.db!.insert(botProfileVersions).values({ ...version, id: `${id}-version`, botId: id });
+  }
+  const peak = observeBotReadConcurrency();
+  const rows = entry === 'resources' ? await listBotRemoteResourceSources()
+    : entry === 'remote' ? await runDeviceLinkInvokeContext(
+      { controllerDeviceId: 'mobile-roster', channel: 'local-db:bots:list' },
+      () => invoke('local-db:bots:list', undefined),
+    ) : await invoke('local-db:bots:list', undefined);
+  expect(rows).toHaveLength(20);
+  expect(new Set(rows.map((row: { id: string }) => row.id)).size).toBe(20);
+  expect(peak()).toBe(1);
+});
+
+it('reads long companion history snapshots sequentially and keeps every latest snapshot', async () => {
+  const created = await invoke('local-db:bots:create-canonical-session', {
+    botId: 'bot-1', expectedCanonicalSessionId: null, expectedProfileVersion: 1,
+  });
+  const [session] = await h.db!.select().from(sessions);
+  for (let i = 1; i <= 40; i++) {
+    const id = `history-${i}`;
+    await h.db!.insert(sessions).values({ ...session, id });
+    await h.db!.insert(botSessionLinks).values({ id, botId: 'bot-1', sessionId: id, role: 'history', profileVersion: 1, createdAt: i });
+    h.sqlite!.prepare(`INSERT INTO bot_runtime_snapshots
+      (id, bot_id, session_id, profile_version, agent_kind, working_dir, status, prepared_at, configured_json)
+      VALUES (?, 'bot-1', ?, 1, 'pi', '/workspace', 'prepared', ?, '{}')`).run(id, id, i);
+  }
+  const peak = observeBotReadConcurrency();
+  const profile = await invoke('local-db:bots:get', 'bot-1');
+  expect(profile.sessions).toHaveLength(41);
+  expect(profile.sessions.filter((row: { runtimeSnapshot?: unknown }) => row.runtimeSnapshot)).toHaveLength(40);
+  expect(profile.sessions.some((row: { id: string }) => row.id === created.session.id)).toBe(true);
+  expect(peak()).toBe(1);
 });
