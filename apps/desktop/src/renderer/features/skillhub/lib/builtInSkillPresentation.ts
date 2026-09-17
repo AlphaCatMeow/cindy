@@ -1,9 +1,4 @@
-const SKILL_CREATOR_NAME = 'skill-creator';
-const SKILL_CREATOR_SOURCE_DESCRIPTIONS = new Set([
-  'Create or update a Cindy Skill',
-  'Create or update a skill',
-  'Create or update a Cindy Skill with appropriately scoped instructions and any needed supporting resources.',
-]);
+import { isCindyBuiltInSkillMetadata } from '../../../../shared/cindyBuiltInSkills';
 
 export const SKILL_CREATOR_DESCRIPTION_KEY = 'skillhub.builtIn.skillCreator.description' as const;
 
@@ -19,11 +14,5 @@ export function builtInSkillDescriptionKey(
     scope?: string;
   },
 ): typeof SKILL_CREATOR_DESCRIPTION_KEY | undefined {
-  if (skill.name !== SKILL_CREATOR_NAME) return undefined;
-  if (skill.builtIn === true || skill.scope === 'system') {
-    return SKILL_CREATOR_DESCRIPTION_KEY;
-  }
-  return skill.description && SKILL_CREATOR_SOURCE_DESCRIPTIONS.has(skill.description.trim())
-    ? SKILL_CREATOR_DESCRIPTION_KEY
-    : undefined;
+  return isCindyBuiltInSkillMetadata(skill) ? SKILL_CREATOR_DESCRIPTION_KEY : undefined;
 }

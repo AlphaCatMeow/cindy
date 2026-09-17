@@ -19,6 +19,7 @@
 import type { UnifiedCommand, AgentKind } from '@cindy/maker-core';
 import { leadingSlashInvocation } from '@cindy/maker-shared';
 import type { PiPackageCommandRuntimeStatus } from '@/../shared/piPackages';
+import { isCindyBuiltInSkillMetadata } from '@/../shared/cindyBuiltInSkills';
 
 export { leadingSlashInvocation };
 
@@ -272,17 +273,21 @@ export function filterSlashCommands(
   limit = 25,
 ): UnifiedCommand[] {
   const q = query.trim().toLowerCase();
-  const filtered = q
-    ? commands
-        .map((command, index) => {
-          const name = command.name.toLowerCase();
-          const rank = name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : -1;
-          return { command, index, rank };
-        })
-        .filter((entry) => entry.rank >= 0)
-        .sort((a, b) => a.rank - b.rank || a.index - b.index)
-        .map((entry) => entry.command)
-    : commands;
+  const filtered = commands
+    .map((command, index) => {
+      const name = command.name.toLowerCase();
+      const rank = q ? (name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : -1) : 0;
+      const officialPriority = command.kind === 'agent-skill'
+        && isCindyBuiltInSkillMetadata(command) ? 0 : 1;
+      return { command, index, rank, officialPriority };
+    })
+    .filter((entry) => entry.rank >= 0)
+    .sort((a, b) => (
+      a.rank - b.rank
+      || a.officialPriority - b.officialPriority
+      || a.index - b.index
+    ))
+    .map((entry) => entry.command);
   return filtered.length > limit ? filtered.slice(0, limit) : filtered;
 }
 

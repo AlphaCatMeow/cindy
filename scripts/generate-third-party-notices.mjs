@@ -705,7 +705,7 @@ function buildDesktopCommonEntries(apacheText, sharpPackageNames) {
     }),
   );
 
-  // Cindy adapts and ships Codex's skill-creator source as a built-in Skill.
+  // Cindy adapts Codex's skill-creator source and ships it as cindy-skill-creator.
   entries.push(
     bundledComponent({
       name: "OpenAI Codex skill-creator (adapted)",
@@ -713,7 +713,7 @@ function buildDesktopCommonEntries(apacheText, sharpPackageNames) {
       license: "Apache-2.0",
       url: "https://github.com/openai/codex/tree/977193486dfe7a88c4dab24abeafe9b754f5b13f/codex-rs/skills/src/assets/samples/skill-creator",
       licenseText: readBundledLicense(
-        "apps/desktop/resources/system-skills/skill-creator/license.txt",
+        "apps/desktop/resources/system-skills/cindy-skill-creator/license.txt",
       ),
     }),
   );

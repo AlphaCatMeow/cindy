@@ -1,5 +1,5 @@
 ---
-name: skill-creator
+name: cindy-skill-creator
 description: Create or update a Cindy Skill with appropriately scoped instructions and any needed supporting resources.
 metadata:
   short-description: Create or update a skill

@@ -26,6 +26,8 @@ import {
   type UnifiedCommand,
 } from '@/lib/slashCommands';
 import { builtInSkillDescriptionKey } from '@/features/skillhub/lib/builtInSkillPresentation';
+import { OfficialSkillBadge } from '@/features/skillhub/components/OfficialSkillBadge';
+import { isCindyBuiltInSkillMetadata } from '@/../shared/cindyBuiltInSkills';
 
 const TOOLTIP_W = 280;
 const TOOLTIP_GAP = 8;
@@ -247,6 +249,7 @@ export function SlashCommandPalette({
           filtered.map((cmd, idx) => {
             const focused = idx === focusedIndex;
             const unavailable = isSlashCommandUnavailable(cmd);
+            const official = cmd.kind === 'agent-skill' && isCindyBuiltInSkillMetadata(cmd);
             return (
               <button
                 key={cmd.name}
@@ -274,7 +277,9 @@ export function SlashCommandPalette({
                 )}
               >
                 <span className="truncate">{cmd.name}</span>
-                {metaLabel(cmd) && (
+                {official ? (
+                  <OfficialSkillBadge />
+                ) : metaLabel(cmd) && (
                   <span className="shrink-0 text-12 font-normal text-[var(--cmd-palette-item-meta)]">
                     {metaLabel(cmd)}
                   </span>

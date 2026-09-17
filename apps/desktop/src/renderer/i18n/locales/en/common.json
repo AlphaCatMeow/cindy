@@ -11135,6 +11135,8 @@
       "importFailed": "Failed to import skill"
     },
     "builtIn": {
+      "official": "Official",
+      "officialDetail": "Included and maintained by Cindy.",
       "skillCreator": {
         "description": "Create or update a Cindy Skill with clear instructions and supporting resources."
       }

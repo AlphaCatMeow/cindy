@@ -54,7 +54,6 @@ describe('Skill activation preferences', () => {
     expect(prefs.readDisabledSkillPaths()).toEqual(expect.arrayContaining([
       prefs.skillActivationKey(descriptor.absolutePath),
       descriptor.nativeClaudePath,
-      descriptor.nativeCodexPath,
     ]));
     await prefs.setCindySkillEnabled(descriptor.absolutePath, true);
   });

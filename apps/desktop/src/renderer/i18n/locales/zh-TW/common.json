@@ -11119,6 +11119,8 @@
       "importFailed": "匯入技能失敗"
     },
     "builtIn": {
+      "official": "官方",
+      "officialDetail": "由 Cindy 隨應用程式提供並維護。",
       "skillCreator": {
         "description": "建立或更新 Cindy 技能，並編寫清楚的說明與所需支援資源。"
       }

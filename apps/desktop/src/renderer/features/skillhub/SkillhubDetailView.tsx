@@ -1,4 +1,5 @@
 import { LocalSkillControls } from './components/LocalSkillControls';
+import { OfficialSkillBadge } from './components/OfficialSkillBadge';
 /**
  * SkillhubDetailView — route for /skillhub/{kind}/{global|project}/[hash]/:name.
  *
@@ -1880,11 +1881,7 @@ export function SkillhubDetailView() {
             <h2 className="min-w-0 truncate text-lg font-medium leading-none text-[var(--msg-assistant-text)]">
               {(entry.frontmatter?.displayName as string) || (entry.frontmatter?.name as string) || entry.name}
             </h2>
-            {entry.builtIn && (
-              <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--surface-chip)] px-2 text-11 font-medium leading-none text-[var(--text-primary)]">
-                {t('skillhub.home.sourceBuiltIn')}
-              </span>
-            )}
+            {entry.builtIn && <OfficialSkillBadge />}
             <KindChip kind={entry.kind} />
             <ScopeChip scope={entry.scope} />
             {entry.linkedEngines.map(le => {

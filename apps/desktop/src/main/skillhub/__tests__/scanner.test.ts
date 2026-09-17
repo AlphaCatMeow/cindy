@@ -85,17 +85,17 @@ describe('scanAllSkills', () => {
   it('always projects the bundled Skill as non-uninstallable and keeps a user same-name copy distinct', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-built-in-'));
     tempRoots.push(root);
-    const builtIn = path.join(root, 'user-data', 'system-skills', 'skill-creator');
-    const userSkill = path.join(root, 'home', '.agents', 'skills', 'skill-creator');
+    const builtIn = path.join(root, 'user-data', 'system-skills', 'cindy-skill-creator');
+    const userSkill = path.join(root, 'home', '.agents', 'skills', 'cindy-skill-creator');
     for (const [skillPath, description] of [[builtIn, 'Cindy copy'], [userSkill, 'User copy']] as const) {
       fs.mkdirSync(skillPath, { recursive: true });
-      fs.writeFileSync(path.join(skillPath, 'SKILL.md'), `---\nname: skill-creator\ndescription: ${description}\n---\nBody\n`);
+      fs.writeFileSync(path.join(skillPath, 'SKILL.md'), `---\nname: cindy-skill-creator\ndescription: ${description}\n---\nBody\n`);
     }
     const maker = { listCustomizations: vi.fn(async () => ({ errors: [], items: [{
       engine: 'codex' as const,
       kind: 'skill',
       scope: 'user',
-      name: 'skill-creator',
+      name: 'cindy-skill-creator',
       description: 'User copy',
       absolutePath: userSkill,
       mdPath: path.join(userSkill, 'SKILL.md'),
@@ -103,15 +103,14 @@ describe('scanAllSkills', () => {
     }] })) } as unknown as Maker;
 
     const result = await scanAllSkills({}, maker, [], [{
-      name: 'skill-creator',
+      name: 'cindy-skill-creator',
       absolutePath: builtIn,
-      nativeClaudePath: path.join(root, 'user-data', 'claude-home', 'skills', 'skill-creator'),
-      nativeCodexPath: path.join(root, 'user-data', 'codex-home', 'skills', '.system', 'skill-creator'),
+      nativeClaudePath: path.join(root, 'user-data', 'claude-home', 'skills', 'cindy-skill-creator'),
     }]);
 
     expect(result.skills).toHaveLength(2);
     expect(result.skills.find((skill) => skill.builtIn)).toMatchObject({
-      name: 'skill-creator',
+      name: 'cindy-skill-creator',
       description: 'Cindy copy',
       builtIn: true,
       canUninstall: false,

@@ -52,11 +52,11 @@ export function readDisabledSkillPaths(): readonly string[] {
     }),
   ]);
   // Cindy's bundled copy normally wins through ~/.agents/skills. Claude uses an
-  // isolated config directory in Desktop dev, while Codex can expose its own
-  // embedded system copy. Mirror the same user preference to both runtime paths.
+  // isolated config directory in Desktop dev, so mirror the same user preference
+  // to that runtime projection. Codex's own /skill-creator remains independent.
   for (const descriptor of builtInSkillDescriptors(app.getPath('userData'))) {
     if (value.disabledPaths.includes(skillActivationKey(descriptor.absolutePath))) {
-      paths.push(descriptor.nativeClaudePath, descriptor.nativeCodexPath);
+      paths.push(descriptor.nativeClaudePath);
     }
   }
   return [...new Set(paths)];

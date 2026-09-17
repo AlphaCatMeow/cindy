@@ -11119,6 +11119,8 @@
       "importFailed": "스킬 가져오기 실패"
     },
     "builtIn": {
+      "official": "공식",
+      "officialDetail": "Cindy가 앱에 포함하고 관리합니다.",
       "skillCreator": {
         "description": "명확한 지침과 필요한 지원 리소스를 갖춘 Cindy 스킬을 만들거나 업데이트합니다."
       }

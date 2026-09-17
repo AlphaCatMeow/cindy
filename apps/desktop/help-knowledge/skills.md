@@ -30,10 +30,10 @@ Skills are reusable agent capabilities you package as a folder and load into you
 
 **Creating a Skill from the composer:**
 
-- Cindy includes `/skill-creator`. Invoke it with a description of the Skill you want, such as `/skill-creator Create a Skill that checks release notes`. Invoking it without a description asks what you want to create.
+- Cindy includes `/cindy-skill-creator`. Invoke it with a description of the Skill you want, such as `/cindy-skill-creator Create a Skill that checks release notes`. Invoking it without a description asks what you want to create.
 - The current Agent creates or updates the Skill directly with its normal file tools. It does not use the `/learn` staging flow.
 - Unless you request another location, new Skills go to `~/.agents/skills/<name>/`. Ask for a project-specific Skill to create it under `<working-dir>/.agents/skills/<name>/`.
-- The built-in `skill-creator` appears in the local Skill list. You can disable or enable it there; because it ships with Cindy, it cannot be uninstalled. The setting applies to new or restarted Agent sessions.
+- The built-in `cindy-skill-creator` appears in the local Skill list. You can disable or enable it there; because it ships with Cindy, it cannot be uninstalled. The setting applies to new or restarted Agent sessions.
 
 **Disabling or uninstalling a local skill (Desktop):**
 

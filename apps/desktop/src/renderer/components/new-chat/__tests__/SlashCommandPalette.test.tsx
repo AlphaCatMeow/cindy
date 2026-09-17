@@ -153,7 +153,7 @@ describe('SlashCommandPalette project Skill rows', () => {
   it('localizes the built-in Skill Creator description in the input palette', () => {
     const skillCreator: UnifiedCommand = {
       kind: 'agent-skill',
-      name: 'skill-creator',
+      name: 'cindy-skill-creator',
       description: 'Create or update a Cindy Skill',
       source: 'skill',
       scope: 'user',
@@ -171,13 +171,14 @@ describe('SlashCommandPalette project Skill rows', () => {
     );
 
     expect(screen.getByText('skillhub.builtIn.skillCreator.description')).toBeTruthy();
+    expect(screen.getByText('skillhub.builtIn.official')).toBeTruthy();
     expect(screen.queryByText(skillCreator.description!)).toBeNull();
   });
 
   it('keeps a user-owned Skill Creator description unchanged', () => {
     const userSkillCreator: UnifiedCommand = {
       kind: 'agent-skill',
-      name: 'skill-creator',
+      name: 'cindy-skill-creator',
       description: 'Create Skills for my private workflow',
       source: 'skill',
       scope: 'user',
@@ -196,5 +197,6 @@ describe('SlashCommandPalette project Skill rows', () => {
 
     expect(screen.getByText(userSkillCreator.description!)).toBeTruthy();
     expect(screen.queryByText('skillhub.builtIn.skillCreator.description')).toBeNull();
+    expect(screen.queryByText('skillhub.builtIn.official')).toBeNull();
   });
 });

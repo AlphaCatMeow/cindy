@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { CINDY_SKILL_CREATOR_NAME } from '../../shared/cindyBuiltInSkills';
 import { atomicWriteFileSync } from '../utils/atomicWriteFile';
 
-export const BUILT_IN_SKILL_CREATOR_NAME = 'skill-creator';
+export const BUILT_IN_SKILL_CREATOR_NAME = CINDY_SKILL_CREATOR_NAME;
 
 const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME] as const;
 const MANIFEST_FILE = '.cindy-system-skills.json';
@@ -14,7 +15,6 @@ export interface BuiltInSkillDescriptor {
   name: string;
   absolutePath: string;
   nativeClaudePath: string;
-  nativeCodexPath: string;
 }
 
 export interface PrepareBuiltInSkillsOptions {
@@ -54,7 +54,6 @@ export function builtInSkillDescriptors(userDataDir: string): BuiltInSkillDescri
     name,
     absolutePath: path.join(root, name),
     nativeClaudePath: path.join(userDataDir, 'claude-home', 'skills', name),
-    nativeCodexPath: path.join(userDataDir, 'codex-home', 'skills', '.system', name),
   }));
 }
 
@@ -139,6 +138,7 @@ async function materializeSkill(
 async function ensureSkillEntry(
   descriptor: BuiltInSkillDescriptor,
   linkPath: string,
+  replaceStaleCindyLink = false,
 ): Promise<{ changed: boolean; warning?: string }> {
   await fsp.mkdir(path.dirname(linkPath), { recursive: true });
 
@@ -151,7 +151,20 @@ async function ensureSkillEntry(
   }
 
   try {
-    await fsp.lstat(linkPath);
+    const stat = await fsp.lstat(linkPath);
+    if (
+      replaceStaleCindyLink &&
+      stat.isSymbolicLink() &&
+      await isCindyManagedSystemSkillTarget(linkPath, descriptor.name)
+    ) {
+      await fsp.unlink(linkPath);
+      await fsp.symlink(
+        descriptor.absolutePath,
+        linkPath,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      return { changed: true };
+    }
     return {
       changed: false,
       warning: `built-in Skill ${descriptor.name} was not linked because ${linkPath} is already owned by the user`,
@@ -168,6 +181,26 @@ async function ensureSkillEntry(
   return { changed: true };
 }
 
+async function isCindyManagedSystemSkillTarget(
+  linkPath: string,
+  skillName: string,
+): Promise<boolean> {
+  try {
+    const target = await fsp.realpath(linkPath);
+    const targetRoot = path.dirname(target);
+    if (path.basename(target) !== skillName || path.basename(targetRoot) !== 'system-skills') {
+      return false;
+    }
+    const parsed = JSON.parse(
+      await fsp.readFile(path.join(targetRoot, MANIFEST_FILE), 'utf8'),
+    ) as Partial<MaterializationManifest>;
+    return parsed.schemaVersion === 1 &&
+      typeof parsed.fingerprints?.[skillName] === 'string';
+  } catch {
+    return false;
+  }
+}
+
 async function ensureSharedEntry(
   descriptor: BuiltInSkillDescriptor,
   homeDir: string,
@@ -175,6 +208,7 @@ async function ensureSharedEntry(
   return ensureSkillEntry(
     descriptor,
     path.join(homeDir, '.agents', 'skills', descriptor.name),
+    true,
   );
 }
 
@@ -223,7 +257,7 @@ export async function prepareBuiltInSkills(
     }
 
     try {
-      const linked = await ensureSkillEntry(descriptor, descriptor.nativeClaudePath);
+      const linked = await ensureSkillEntry(descriptor, descriptor.nativeClaudePath, true);
       changed = linked.changed || changed;
       if (linked.warning) warnings.push(linked.warning);
     } catch (error) {

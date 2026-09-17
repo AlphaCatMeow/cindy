@@ -53,6 +53,7 @@ import { InstallTargetPicker, type InstallTargetSkill } from './components/Insta
 import { SkillCategoryFilterBar } from './components/SkillCategoryFilterBar';
 import { HomeMarketCard } from './components/HomeMarketCard';
 import { SkillIcon } from './components/SkillIcon';
+import { OfficialSkillBadge } from './components/OfficialSkillBadge';
 import { SkillhubMarketPreviewPanel } from './SkillhubMarketPreviewPanel';
 import { useSkillhubIdentityPolicy } from './hooks/useSkillhubIdentityPolicy';
 
@@ -604,13 +605,15 @@ function LocalGroup({
                   <span className="min-w-0 flex-1 truncate text-13 font-medium text-[var(--text-primary)]">
                     {s.name}
                   </span>
-                  <span className="shrink-0 text-10 text-[var(--text-tertiary)]">
-                    {s.builtIn
-                      ? t('skillhub.home.sourceBuiltIn')
-                      : source === 'skillhub'
-                      ? t('skillhub.home.sourceSkillhub')
-                      : t('skillhub.home.sourceLocal')}
-                  </span>
+                  {s.builtIn ? (
+                    <OfficialSkillBadge />
+                  ) : (
+                    <span className="shrink-0 text-10 text-[var(--text-tertiary)]">
+                      {source === 'skillhub'
+                        ? t('skillhub.home.sourceSkillhub')
+                        : t('skillhub.home.sourceLocal')}
+                    </span>
+                  )}
                 </span>
                 {displayDescription && (
                   <span className="line-clamp-1 text-12 leading-4 text-[var(--text-secondary)]">

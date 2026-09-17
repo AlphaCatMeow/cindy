@@ -291,7 +291,7 @@ test("all shipped desktop notices contain the complete pinned OpenCodex license"
 
 test("all shipped desktop notices inventory the bundled skill creator", () => {
   const license = read(
-    "apps/desktop/resources/system-skills/skill-creator/license.txt",
+    "apps/desktop/resources/system-skills/cindy-skill-creator/license.txt",
   ).replace(/\r\n/g, "\n").trim();
   for (const artifact of ["desktop-win", "desktop-macos", "desktop-linux"]) {
     const notice = read(`docs/legal/notices/${artifact}.txt`).replace(/\r\n/g, "\n");

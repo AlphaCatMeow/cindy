@@ -218,7 +218,7 @@ describe('registerSkillhubIpc usage handlers', () => {
   });
 
   it('blocks publishing a Cindy built-in Skill at the Main boundary', async () => {
-    const builtInRoot = path.join(fixtureRoot, 'system-skills', 'skill-creator');
+    const builtInRoot = path.join(fixtureRoot, 'system-skills', 'cindy-skill-creator');
     const builtInFile = path.join(builtInRoot, 'SKILL.md');
     fs.mkdirSync(builtInRoot, { recursive: true });
     fs.writeFileSync(builtInFile, '# Built in\n');
@@ -230,10 +230,9 @@ describe('registerSkillhubIpc usage handlers', () => {
       getMaker: () => ({ listAgentSkills }) as never,
       getManagedSkillRoots,
       getBuiltInSkills: () => [{
-        name: 'skill-creator',
+        name: 'cindy-skill-creator',
         absolutePath: builtInRoot,
-        nativeClaudePath: '/tmp/claude-home/skills/skill-creator',
-        nativeCodexPath: '/tmp/codex-home/skills/.system/skill-creator',
+        nativeClaudePath: '/tmp/claude-home/skills/cindy-skill-creator',
       }],
       getAllowedProjectRoots,
       marketService: marketService as never,
