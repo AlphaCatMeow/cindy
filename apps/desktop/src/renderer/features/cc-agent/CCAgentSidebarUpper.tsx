@@ -42,7 +42,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useNavigate, useMatch } from 'react-router-dom';
+import { useNavigate, useMatch, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { projectDraftSessionTitle } from '@cindy/maker-shared/session-title';
 
@@ -284,6 +284,7 @@ import {
 } from '@/features/scheduler/hooks/useDeleteScheduleWithSessions';
 import { resolveDialogueDeviceTarget, type DialogueDeviceTarget } from './lib/dialogueCreateTarget';
 import { makeDialogueNewMakerRouteState } from './lib/newMakerRouteState';
+import { makeGenericNewMakerRouteState } from './lib/genericNewMakerRouteState';
 
 const log = createLogger('CCAgentSidebarUpper');
 // perf-baseline(与 MessageStream 的 perf/session-switch 探针同通道):
@@ -826,6 +827,7 @@ function ExpandedView({
   persistentLocalProjects,
 }: ExpandedProps) {
   const { t, i18n } = useTranslation();
+  const location = useLocation();
   const localPlatform = window.electronAPI.platform;
   const { sessions, refreshSessions, patchLocal, effectiveIncludeArchived } = sessionsHook;
   const {
@@ -2257,13 +2259,13 @@ function ExpandedView({
       const target = pickAdjacentSessionId(visibleIds, activeId, direction);
       if (!target) return;
       if (target.kind === 'new-task') {
-        navigate('/cc-agent/new');
+        navigate('/cc-agent/new', { state: makeGenericNewMakerRouteState(location.pathname) });
         return;
       }
       // 同样复用行点击唯一入口,继承清通知 / 同对话去重 / Orca 角色路由。
       void handleSessionClick(target.sessionId);
     });
-  }, [handleSessionClick, navigate, sessionSwitchEnabled]);
+  }, [handleSessionClick, location.pathname, navigate, sessionSwitchEnabled]);
 
   useAppShortcut('switch-session-1', () => handleSwitchSessionSlot(0), {
     enabled: sessionSwitchEnabled,
@@ -3807,6 +3809,7 @@ function CollapsedView({
   manualPinnedOrder,
   onReorderPinned,
 }: CollapsedProps) {
+  const location = useLocation();
   const isCollapsed = useSidebarCollapsedState();
   const projectFilterRequest = useConversationSearchRequest();
   const selectedMachineId = useEffectiveSelectedMachineId();
@@ -3827,13 +3830,10 @@ function CollapsedView({
   // 让"失败的定时任务"落到默认绿色 done tone(否则和 SessionItem 不一致,
   // 折叠视图会把失败误传成"完成了")。
   const urgentSet = useSessionAttentionUrgencySet();
-  // delayed-create:与 ExpandedView 同——单按钮 navigate transient draft 单例。
-  // 与展开态 SidebarTopNav 的通用「新建」同口径:只 navigate,不清空 newMakerDraft,
-  // 保留用户上次在草稿页选好的「对话或选择项目」(切走再回来不重置);清空语义只属于
-  // 「新建对话」等显式入口(handleCreateDialogue)。
+  // 与展开态同口径：继承当前任务的电脑，同机保留草稿项目。
   const handleNewCCS = useCallback(() => {
-    navigate('/cc-agent/new', { state: makeNewMakerRouteState('generic') });
-  }, [navigate]);
+    navigate('/cc-agent/new', { state: makeGenericNewMakerRouteState(location.pathname) });
+  }, [location.pathname, navigate]);
   const handleNavScheduled = useCallback(() => {
     navigate('/cc-agent/scheduled');
   }, [navigate]);
