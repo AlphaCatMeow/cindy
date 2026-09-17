@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   owner: { dataOwnerId: 'owner-a', ownerGeneration: 1 },
   query: vi.fn(),
+  botLinks: [] as Array<{ botId: string }>,
   workers: [] as Array<{ sessionId: string }>,
   running: new Set<string>(),
   attached: false,
@@ -18,12 +19,13 @@ vi.mock('../../appSessionState.js', () => ({
   getActiveDataOwnerPushStamp: () => ({ ...h.owner }),
   isAppSessionBoundaryPending: () => false,
 }));
-vi.mock('../../localDb/client/current.js', () => {
+vi.mock('../../localDb/client/current.js', async () => {
+  const { botSessionLinks } = await import('../../localDb/schema.js');
   const client = {
     drizzle: {
       select: () => ({
-        from: () => ({
-          where: () => ({ limit: h.query }),
+        from: (table: unknown) => ({
+          where: () => ({ limit: table === botSessionLinks ? async () => h.botLinks : h.query }),
           innerJoin: () => ({ where: async () => h.workers }),
         }),
       }),
@@ -55,6 +57,7 @@ describe('moveSession host', () => {
     h.owner = { dataOwnerId: 'owner-a', ownerGeneration: 1 };
     h.running = new Set();
     h.workers = [];
+    h.botLinks = [];
     h.attached = false;
     h.enterLock.mockImplementation(() => undefined);
     h.query.mockResolvedValue([
@@ -144,6 +147,26 @@ describe('moveSession host', () => {
     expect(await run(null)).toMatchObject({ errorCode: 'PRECONDITION_FAILED' });
     expect(h.saved).not.toHaveBeenCalled();
   });
+  it.each([false, true])(
+    'keeps Bot-owned tasks in their managed workspace (project=%s)',
+    async (project) => {
+      const workingDir = project ? directory : null;
+      // Source-only records and legacy linked records share the same restriction.
+      h.query
+        .mockResolvedValueOnce([{ id: 'caller' }])
+        .mockResolvedValueOnce([{ id: 'target', status: 'active', source: 'bot' }]);
+      expect(await run(workingDir)).toMatchObject({ errorCode: 'UNSUPPORTED_CAPABILITY' });
+      h.enterLock.mockImplementationOnce(() => {
+        h.botLinks = [{ botId: 'bot' }];
+      });
+      expect(await run(workingDir)).toMatchObject({ errorCode: 'UNSUPPORTED_CAPABILITY' });
+      expect(h.saved).not.toHaveBeenCalled();
+      // A normal delegated task is not a Bot-owned task; parent linkage does not restrict moving it.
+      h.botLinks = [];
+      h.query.mockResolvedValue([{ id: 'target', status: 'active', parentSessionId: 'bot-task' }]);
+      expect(await run(workingDir)).toMatchObject({ ok: true });
+    },
+  );
   it('rejects missing directories, files, and relative paths without writing', async () => {
     expect(await run(path.join(directory, 'missing'))).toMatchObject({ errorCode: 'NOT_FOUND' });
     await writeFile(path.join(directory, 'file'), 'keep');
