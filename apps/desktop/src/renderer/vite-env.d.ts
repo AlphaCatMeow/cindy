@@ -6801,6 +6801,7 @@ interface SkillhubSkill {
   cindyEnabled?: boolean;
   canUninstall?: boolean;
   managedByPlugin?: boolean;
+  builtIn?: boolean;
   uninstallLinkOnly?: boolean;
   discoveryPaths?: string[];
   id: string;

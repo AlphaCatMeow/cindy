@@ -7,6 +7,7 @@ import { tryAcquireSkillInstallLock } from './installLock';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { Maker } from '@cindy/maker-core';
+import type { BuiltInSkillDescriptor } from '../maker-host/built-in-skills';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { getCurrentDataOwnerId } from '../authManager';
 import { activeOwnerScopeKey, getActiveDataOwnerPushStamp, isAppSessionBoundaryPending } from '../appSessionState';
@@ -96,6 +97,7 @@ function assertReviewOwnerCurrent(ownerScope: string): void {
 export interface RegisterSkillhubIpcOptions {
   getMaker: () => Maker;
   getManagedSkillRoots: () => readonly string[];
+  getBuiltInSkills?: () => readonly BuiltInSkillDescriptor[];
   getAllowedProjectRoots: () => Promise<readonly string[]>;
   marketService?: SkillhubMarketService;
   publishService?: SkillPublishService;
@@ -310,6 +312,11 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     success: false as const,
     error: 'path was not granted by this renderer\'s latest SkillHub scan',
   });
+  const isBuiltInSkillPath = (targetPath: string): boolean => (
+    (options.getBuiltInSkills?.() ?? []).some((skill) => (
+      isExistingSkillPathGranted(targetPath, new Set([skill.absolutePath]))
+    ))
+  );
 
   const sweepLocalImportGrants = () => {
     const now = Date.now();
@@ -432,7 +439,12 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
           params?.projects,
           options.getAllowedProjectRoots,
         );
-        const result = await scanAllSkills({ projects }, options.getMaker(), options.getManagedSkillRoots());
+        const result = await scanAllSkills(
+          { projects },
+          options.getMaker(),
+          options.getManagedSkillRoots(),
+          options.getBuiltInSkills?.() ?? [],
+        );
         if (
           scanGenerationBySender.get(event.sender.id) === scanGeneration
           && !isAppSessionBoundaryPending()
@@ -504,6 +516,9 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     'skillhub:write-file',
     async (event, params: { filePath: string; content: string }) => {
       if (!await hasScannedSkillGrant(event, params.filePath)) return scanGrantDenied();
+      if (isBuiltInSkillPath(params.filePath)) {
+        return { success: false, error: 'Cindy built-in Skills are read-only' };
+      }
       return writeSkillFile(params);
     },
   );
@@ -529,6 +544,9 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
       const ownerScope = activeOwnerScopeKey();
       const canMutate = () => ownerScope === activeOwnerScopeKey() && !isAppSessionBoundaryPending();
       if (!await hasScannedSkillGrant(event, params.absolutePath)) return scanGrantDenied();
+      if (isBuiltInSkillPath(params.absolutePath)) {
+        return { success: false, error: 'Cindy built-in Skills are read-only' };
+      }
       if (!canMutate()) return { success: false, error: 'Skill mutation context changed' };
       const result = await renameLocalSkill(params, canMutate);
       if (result.success) broadcastLocalChange();
@@ -892,7 +910,10 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
   ipcMain.handle(
     'skillhub:publish',
     async (event, params: PublishParams) => {
-      void event;
+      assertTrustedAppRendererEvent(event);
+      if (isBuiltInSkillPath(params.absolutePath)) {
+        return { success: false as const, errorCode: 'INTERNAL' as const, message: 'Cindy built-in Skills cannot be published' };
+      }
       return publishService.publish(params);
     },
   );
@@ -1057,7 +1078,7 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     'skillhub:uninstall',
     async (event, { absolutePath, skillId }: { absolutePath: string; skillId?: string }) => {
       const { target, skill } = await requireLocalSkill(event, absolutePath, skillId);
-      if (!target || !isLocalSkillTargetCurrent(target) || isPluginManagedSkillPath(target.sourcePath, options.getManagedSkillRoots())) {
+      if (skill.builtIn || !target || !isLocalSkillTargetCurrent(target) || isPluginManagedSkillPath(target.sourcePath, options.getManagedSkillRoots())) {
         throwIpcError('PRECONDITION_FAILED', 'Skill cannot be uninstalled; refresh and retry');
       }
       const ownerId = getCurrentDataOwnerId();

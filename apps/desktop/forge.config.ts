@@ -808,6 +808,8 @@ function extraResourcesForTarget(targetPlatform: string): string[] {
     // Input bytes for upgrading retired preset avatars to ordinary managed images.
     'resources/legacy-teammate-avatars',
     'resources/teammate-portrait-gallery.png',
+    // Cindy-owned Agent Skills are materialized under userData on startup.
+    'resources/system-skills',
     'resources/tools',
     'drizzle',
     'resources/cc-manager',

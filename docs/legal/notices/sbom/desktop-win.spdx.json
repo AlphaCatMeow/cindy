@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "cindy-desktop-win",
-  "documentNamespace": "https://cindy.app/spdx/desktop-win/bd303f92c7516f986d25d2b0e8d1678fce0593db824497b4c2462f2f2e1933a4",
+  "documentNamespace": "https://cindy.app/spdx/desktop-win/6b35d887512f64f1da9d732a59f04bd5bb5b2fa905492544e7fd3154b89900af",
   "creationInfo": {
-    "created": "2026-09-16T04:54:18Z",
+    "created": "2026-09-16T15:04:26Z",
     "creators": [
       "Tool: scripts/generate-third-party-notices.mjs"
     ]
@@ -86,6 +86,16 @@
       "SPDXID": "SPDXRef-Package-4f22132a77577bcb",
       "versionInfo": "0.145.0",
       "downloadLocation": "https://github.com/openai/codex",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "name": "OpenAI Codex skill-creator (adapted)",
+      "SPDXID": "SPDXRef-Package-670f3c5f091a0b1c",
+      "versionInfo": "977193486dfe7a88c4dab24abeafe9b754f5b13f",
+      "downloadLocation": "https://github.com/openai/codex/tree/977193486dfe7a88c4dab24abeafe9b754f5b13f/codex-rs/skills/src/assets/samples/skill-creator",
       "filesAnalyzed": false,
       "licenseConcluded": "Apache-2.0",
       "licenseDeclared": "Apache-2.0",
@@ -20527,6 +20537,11 @@
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
       "relatedSpdxElement": "SPDXRef-Package-4f22132a77577bcb"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-670f3c5f091a0b1c"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",

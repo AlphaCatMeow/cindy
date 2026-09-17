@@ -577,6 +577,12 @@ import { listAllowedSkillhubProjectRoots } from './skillhub/allowedProjectRoots'
 import { SkillhubMarketService } from './skillhub/marketService';
 import { skillhubAutoSyncService } from './skillhub/autoSyncService';
 import { rehydrateCloseSuppression } from './maker-host/rehydrateCloseSuppression.js';
+import {
+  builtInSkillDescriptors,
+  prepareBuiltInSkills,
+  resolveBundledSystemSkillsRoot,
+} from './maker-host/built-in-skills.js';
+import { prepareSharedGlobalSkillLinks } from './maker-host/shared-global-skills.js';
 // Maker Core 一阶段重构（新链路）—— 静态 import 避免 dynamic import 触发 vite chunking
 // 让 imageProtocol 等需要 app.ready 前注册的模块跑在错误时机。getMaker() 是 lazy 的，
 // 静态 import 不会触发 Maker / Agent 的实例化。
@@ -6709,6 +6715,7 @@ const registerIpcHandlers = () => {
   registerSkillhubIpc({
     getMaker: getMakerCore,
     getManagedSkillRoots: () => getGhostManager().managedRootDirs(),
+    getBuiltInSkills: () => builtInSkillDescriptors(app.getPath('userData')),
     getAllowedProjectRoots: listAllowedSkillhubProjectRoots,
   });
   disposeSkillhubAutoSyncAuthListener = authManager.onAuthStateChange((state) => {
@@ -8572,6 +8579,32 @@ app.on('ready', async () => {
   }
 
   await ensureMainAppPresence('app-ready');
+
+  // Cindy-owned Skills are packaged as immutable resources and copied into a
+  // stable userData path. The shared projection never replaces a user-owned
+  // ~/.agents/skills/<name>, so a same-name user Skill keeps precedence.
+  try {
+    const prepared = await prepareBuiltInSkills({
+      bundledRoot: resolveBundledSystemSkillsRoot({
+        isPackaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+      }),
+      userDataDir: app.getPath('userData'),
+    });
+    for (const warning of prepared.warnings) {
+      createLogger('built-in-skills').warn('built-in Skill preparation warning', { warning });
+    }
+    const shared = await prepareSharedGlobalSkillLinks();
+    for (const warning of shared.warnings) {
+      createLogger('built-in-skills').warn('shared Skill projection warning', { warning });
+    }
+  } catch (error) {
+    // A broken optional Skill must not block the desktop from starting.
+    createLogger('built-in-skills').warn('built-in Skill preparation failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // macOS App Translocation fix: when the user launches the app without
   // dragging it to /Applications first, macOS runs it from a read-only

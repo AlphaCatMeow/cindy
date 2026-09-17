@@ -288,3 +288,23 @@ test("all shipped desktop notices contain the complete pinned OpenCodex license"
     assert.ok(notice.includes(`${upstream.repository}/tree/${upstream.commit}`));
   }
 });
+
+test("all shipped desktop notices inventory the bundled skill creator", () => {
+  const license = read(
+    "apps/desktop/resources/system-skills/skill-creator/license.txt",
+  ).replace(/\r\n/g, "\n").trim();
+  for (const artifact of ["desktop-win", "desktop-macos", "desktop-linux"]) {
+    const notice = read(`docs/legal/notices/${artifact}.txt`).replace(/\r\n/g, "\n");
+    assert.ok(notice.includes(license), `${artifact} includes the Apache text`);
+    const sbom = JSON.parse(read(`docs/legal/notices/sbom/${artifact}.spdx.json`));
+    const component = sbom.packages.find(pkg => pkg.name === "OpenAI Codex skill-creator (adapted)");
+    assert.ok(component, `${artifact} inventories skill-creator`);
+    assert.equal(component.versionInfo, "977193486dfe7a88c4dab24abeafe9b754f5b13f");
+    assert.equal(component.licenseDeclared, "Apache-2.0");
+  }
+  for (const file of ["apps/desktop/resources/THIRD-PARTY-NOTICES.txt", "docs/legal/notices/THIRD-PARTY-NOTICES.txt"]) {
+    const notice = read(file).replace(/\r\n/g, "\n");
+    assert.ok(notice.includes(license), `${file} includes the Apache text`);
+    assert.match(notice, /OpenAI Codex skill-creator \(adapted\)/);
+  }
+});

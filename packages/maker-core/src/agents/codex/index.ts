@@ -1068,13 +1068,33 @@ function skillDescription(skill: SkillMetadata): string | undefined {
 }
 
 function isPaletteVisibleCodexSkill(skill: SkillMetadata): boolean {
-  if (!skill.enabled || skill.scope === 'system' || skill.scope === 'admin') return false;
+  if (!skill.enabled || skill.scope === 'admin') return false;
+
+  if (skill.scope === 'system') {
+    const normalizedPath = skill.path.replace(/\\/g, '/').replace(/\/$/, '');
+    return skill.name.toLowerCase() === 'skill-creator'
+      && /\/skills\/\.system\/skill-creator(?:\/skill\.md)?$/i.test(normalizedPath);
+  }
 
   // Codex plugins can contribute internal skills and currently report them as scope=user.
   // They remain available to Codex's own dispatch, but Cindy's slash palette should only
   // expose installed user/repo skills instead of every plugin implementation detail.
   const normalizedPath = skill.path.replace(/\\/g, '/');
   return !/\/plugins\/cache\/[^/]+\/[^/]+\/[^/]+\/skills\//i.test(normalizedPath);
+}
+
+function paletteVisibleCodexSkills(skills: readonly SkillMetadata[]): SkillMetadata[] {
+  const visible = skills.filter(isPaletteVisibleCodexSkill);
+  const installedNames = new Set(visible
+    .filter((skill) => skill.scope !== 'system')
+    .map((skill) => skill.name.toLowerCase()));
+  return visible.filter((skill) => skill.scope !== 'system' || !installedNames.has(skill.name.toLowerCase()));
+}
+
+function selectInvocableCodexSkill(skills: readonly SkillMetadata[], name: string): SkillMetadata | undefined {
+  const matching = skills.filter((skill) => skill.enabled && skill.name.toLowerCase() === name.toLowerCase());
+  return matching.find((skill) => skill.scope !== 'system' && skill.scope !== 'admin')
+    ?? matching.find(isPaletteVisibleCodexSkill);
 }
 
 function parseLeadingSlashToken(text: string): { name: string; rest: string } | null {
@@ -1962,8 +1982,7 @@ export class CodexAgent extends BaseAgent {
         opts.remoteHostId,
       );
       const out: ListAgentSkillsResult = {
-        skills: skills
-          .filter(isPaletteVisibleCodexSkill)
+        skills: paletteVisibleCodexSkills(skills)
           .map((skill) => ({
             kind: 'agent-skill' as const,
             name: skill.name,
@@ -6068,9 +6087,7 @@ export class CodexAgent extends BaseAgent {
 
       try {
         const { skills } = await this.listSkillsForCwd(opts.workingDir, false);
-        const skill = skills.find(
-          (item) => item.enabled && item.name.toLowerCase() === slash.name.toLowerCase(),
-        );
+        const skill = selectInvocableCodexSkill(skills, slash.name);
         if (!skill) return toAppServerInput(content, opts.workingDir);
 
         const inputs: UserInput[] = [{ type: 'skill', name: skill.name, path: skill.path }];

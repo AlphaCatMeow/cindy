@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
 import { createLogger } from '../logger';
 import { createOverrideSettingsFile } from '../maker-host/override-settings-file';
+import { builtInSkillDescriptors } from '../maker-host/built-in-skills';
 
 /** Device/profile-local user intent; independent of cloud installs and account changes. */
 interface SkillActivationPreferences {
@@ -44,12 +45,21 @@ const store = createOverrideSettingsFile<SkillActivationPreferences>({
 export function readDisabledSkillPaths(): readonly string[] {
   store.invalidateIfChanged();
   const value = store.read();
-  return [...new Set(value.disabledPaths.flatMap((source) => [source,
+  const paths = value.disabledPaths.flatMap((source) => [source,
     ...(value.discoveryPaths?.[source] ?? []).filter((alias) => {
       try { return fs.existsSync(alias) && skillActivationKey(alias) === source; }
       catch { return false; }
     }),
-  ]))];
+  ]);
+  // Cindy's bundled copy normally wins through ~/.agents/skills. If that
+  // projection is unavailable, Codex can still expose its own embedded system
+  // copy. Mirror the same user preference to that fallback path.
+  for (const descriptor of builtInSkillDescriptors(app.getPath('userData'))) {
+    if (value.disabledPaths.includes(skillActivationKey(descriptor.absolutePath))) {
+      paths.push(descriptor.nativeCodexPath);
+    }
+  }
+  return [...new Set(paths)];
 }
 
 export function isCindySkillEnabled(source: string): boolean {

@@ -1305,10 +1305,10 @@ export function SkillhubDetailView() {
       registryEntry,
       localFolderHash,
       publishedStatus,
-      identityPolicy.canWrite,
+      identityPolicy.canWrite && entry?.builtIn !== true,
       publishDetailState,
     ),
-    [detailState, registryEntry, localFolderHash, publishedStatus, identityPolicy.canWrite, publishDetailState],
+    [detailState, registryEntry, localFolderHash, publishedStatus, identityPolicy.canWrite, entry?.builtIn, publishDetailState],
   );
   const detailAction = detailActionState?.status ?? null;
   const isOutdated = detailActionState?.isOutdated ?? false;
@@ -1351,7 +1351,7 @@ export function SkillhubDetailView() {
   const { confirm } = useConfirmDialog();
 
   const openPublish = useCallback(async () => {
-    if (entry?.kind !== 'skill' || !identityPolicy.canWrite) return;
+    if (entry?.kind !== 'skill' || entry.builtIn || !identityPolicy.canWrite) return;
 
     if (isPublishedReviewing) {
       const shouldProceed = await confirm({
@@ -1701,6 +1701,9 @@ export function SkillhubDetailView() {
     if (entry.kind === 'agent') {
       return { hidden: true, disabled: true, tip: '' };
     }
+    if (entry.builtIn) {
+      return { hidden: true, disabled: true, tip: '' };
+    }
     // 装的别人技能不允许编辑
     if (detailState?.isMine === false && detailState.origin === 'installed') {
       return { hidden: true, disabled: true, tip: '' };
@@ -1870,6 +1873,11 @@ export function SkillhubDetailView() {
             <h2 className="min-w-0 truncate text-lg font-medium leading-none text-[var(--msg-assistant-text)]">
               {(entry.frontmatter?.displayName as string) || (entry.frontmatter?.name as string) || entry.name}
             </h2>
+            {entry.builtIn && (
+              <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--surface-chip)] px-2 text-11 font-medium leading-none text-[var(--text-primary)]">
+                {t('skillhub.home.sourceBuiltIn')}
+              </span>
+            )}
             <KindChip kind={entry.kind} />
             <ScopeChip scope={entry.scope} />
             {entry.linkedEngines.map(le => {

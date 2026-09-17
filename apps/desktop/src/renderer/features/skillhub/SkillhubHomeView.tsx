@@ -596,7 +596,9 @@ function LocalGroup({
                     {s.name}
                   </span>
                   <span className="shrink-0 text-10 text-[var(--text-tertiary)]">
-                    {source === 'skillhub'
+                    {s.builtIn
+                      ? t('skillhub.home.sourceBuiltIn')
+                      : source === 'skillhub'
                       ? t('skillhub.home.sourceSkillhub')
                       : t('skillhub.home.sourceLocal')}
                   </span>

@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import matter from 'gray-matter';
 import type { AgentCustomization, Maker, PiRuntimeCapabilityStatus } from '@cindy/maker-core';
+import type { BuiltInSkillDescriptor } from '../maker-host/built-in-skills';
 import { registryService, type StoredInstall } from './registry';
 import { reconcileScannedInstall } from './registryReconciliation';
 import { isIgnoredSkillPackagePath } from './packageIgnore';
@@ -47,6 +48,7 @@ export interface Skill {
   cindyEnabled?: boolean;
   canUninstall?: boolean;
   managedByPlugin?: boolean;
+  builtIn?: boolean;
   uninstallLinkOnly?: boolean;
   /** All lexical discovery aliases; Main owns their validation. */
   discoveryPaths?: string[];
@@ -197,10 +199,43 @@ function filterSkillPackageFileEntries(rootDir: string, entries: SkillFileEntry[
   });
 }
 
+function readBuiltInCustomization(descriptor: BuiltInSkillDescriptor): AgentCustomization {
+  const skillFile = path.join(descriptor.absolutePath, 'SKILL.md');
+  const raw = fs.readFileSync(skillFile, 'utf8');
+  let frontmatter: Record<string, unknown> | undefined;
+  let description: string | undefined;
+  let parseError: string | undefined;
+  try {
+    const parsed = matter(raw);
+    frontmatter = parsed.data;
+    if (typeof parsed.data.description === 'string') {
+      description = parsed.data.description.trim().slice(0, 500) || undefined;
+    }
+  } catch (error) {
+    parseError = error instanceof Error ? error.message : String(error);
+  }
+  const files = fs.readdirSync(descriptor.absolutePath, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((entry) => ({ name: entry.name, kind: entry.isDirectory() ? 'dir' as const : 'file' as const }));
+  return {
+    engine: 'claude-code',
+    kind: 'skill',
+    scope: 'global',
+    name: descriptor.name,
+    description,
+    absolutePath: descriptor.absolutePath,
+    mdPath: skillFile,
+    files,
+    frontmatter,
+    parseError,
+  };
+}
+
 export async function scanAllSkills(
   params: { projects?: ProjectInput[] },
   maker: Maker,
   managedSkillRoots: readonly string[] = [],
+  builtInSkills: readonly BuiltInSkillDescriptor[] = [],
 ): Promise<ScanResult> {
   const projects = params.projects ?? [];
   const projectByWorkingDir = new Map<string, ProjectInput>();
@@ -233,6 +268,20 @@ export async function scanAllSkills(
   } catch (err) {
     log.error('maker.listCustomizations failed', err);
     listed = { items: [], errors: [{ message: err instanceof Error ? err.message : String(err) }] };
+  }
+  const builtInRealPaths = new Set<string>();
+  for (const descriptor of builtInSkills) {
+    try {
+      const customization = readBuiltInCustomization(descriptor);
+      const realPath = realPathOrNormalized(customization.absolutePath);
+      builtInRealPaths.add(realPath);
+      listed.items.push(customization);
+    } catch (error) {
+      listed.errors.push({
+        path: descriptor.absolutePath,
+        message: `Could not read built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   }
 
   // ── 过滤 + 跨引擎去重 ──────────────────────────────────────────────────────
@@ -297,6 +346,7 @@ export async function scanAllSkills(
     scope,
     urlKey,
   }) => {
+    const builtIn = builtInRealPaths.has(realPath);
     const hasIdentityCollision = (identityCounts.get(`${engine}:${urlKey}`) ?? 0) > 1;
     // Pi entries are new to this SkillHub projection. Give them a path-derived
     // identity even when currently unique, so adding/removing a same-name source
@@ -317,7 +367,13 @@ export async function scanAllSkills(
         });
       }
     }
-    const linkedEngines = Array.from(engineSet.values());
+    const linkedEngines = builtIn
+      ? [
+          { engine: 'claude-code' as const, label: 'Claude' },
+          { engine: 'codex' as const, label: 'Codex' },
+          { engine: 'pi' as const, label: 'Pi' },
+        ]
+      : Array.from(engineSet.values());
 
     const skill: Skill = {
       id,
@@ -340,11 +396,12 @@ export async function scanAllSkills(
       parseError: c.parseError,
       registryEntry: null,            // 下面 join 阶段填
       ...(c.kind === 'skill' ? (() => {
-        const discoveryPaths = all.map((item) => item.absolutePath);
+        const discoveryPaths = [...new Set(all.map((item) => item.absolutePath))];
         const target = inspectLocalSkillTarget(realPath, discoveryPaths, managedSkillRoots);
         return { cindyEnabled: isCindySkillEnabled(realPath), discoveryPaths,
+          ...(builtIn ? { builtIn: true } : {}),
           managedByPlugin: isPluginManagedSkillPath(realPath, managedSkillRoots),
-          canUninstall: target !== null, uninstallLinkOnly: target?.linkOnly ?? false };
+          canUninstall: !builtIn && target !== null, uninstallLinkOnly: target?.linkOnly ?? false };
       })() : {}),
       ...(project ? { projectRoot: project.projectRoot } : {}),
       ...(projectHash ? { projectHash } : {}),

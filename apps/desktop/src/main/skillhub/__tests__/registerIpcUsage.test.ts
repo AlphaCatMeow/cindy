@@ -217,6 +217,36 @@ describe('registerSkillhubIpc usage handlers', () => {
     vi.mocked(BrowserWindow.getAllWindows).mockReset().mockReturnValue([]);
   });
 
+  it('blocks publishing a Cindy built-in Skill at the Main boundary', async () => {
+    const builtInRoot = path.join(fixtureRoot, 'system-skills', 'skill-creator');
+    const builtInFile = path.join(builtInRoot, 'SKILL.md');
+    fs.mkdirSync(builtInRoot, { recursive: true });
+    fs.writeFileSync(builtInFile, '# Built in\n');
+    isExistingSkillPathGranted.mockImplementation((candidate: string, roots: Set<string>) => (
+      roots.has(builtInRoot) && candidate === builtInFile
+    ));
+    const { registerSkillhubIpc } = await import('../registerIpc');
+    registerSkillhubIpc({
+      getMaker: () => ({ listAgentSkills }) as never,
+      getManagedSkillRoots,
+      getBuiltInSkills: () => [{
+        name: 'skill-creator',
+        absolutePath: builtInRoot,
+        nativeCodexPath: '/tmp/codex-home/skills/.system/skill-creator',
+      }],
+      getAllowedProjectRoots,
+      marketService: marketService as never,
+      publishService: { publish, cancel } as never,
+    });
+    const event = { sender: { id: 12 } };
+
+    await expect(handlers.get('skillhub:publish')!(event, {
+      absolutePath: builtInFile,
+    })).resolves.toMatchObject({ success: false, message: expect.stringContaining('cannot be published') });
+    expect(assertTrustedAppRendererEvent).toHaveBeenCalledWith(event);
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   describe.each([
     { channel: 'skillhub:get-scan-status', field: 'slug', method: 'getScanStatus' },
     { channel: 'skillhub:list-published-versions', field: 'name', method: 'listPublishedVersions' },

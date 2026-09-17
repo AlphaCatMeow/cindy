@@ -82,6 +82,51 @@ function createSymlinkedSkill() {
 }
 
 describe('scanAllSkills', () => {
+  it('always projects the bundled Skill as non-uninstallable and keeps a user same-name copy distinct', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-built-in-'));
+    tempRoots.push(root);
+    const builtIn = path.join(root, 'user-data', 'system-skills', 'skill-creator');
+    const userSkill = path.join(root, 'home', '.agents', 'skills', 'skill-creator');
+    for (const [skillPath, description] of [[builtIn, 'Cindy copy'], [userSkill, 'User copy']] as const) {
+      fs.mkdirSync(skillPath, { recursive: true });
+      fs.writeFileSync(path.join(skillPath, 'SKILL.md'), `---\nname: skill-creator\ndescription: ${description}\n---\nBody\n`);
+    }
+    const maker = { listCustomizations: vi.fn(async () => ({ errors: [], items: [{
+      engine: 'codex' as const,
+      kind: 'skill',
+      scope: 'user',
+      name: 'skill-creator',
+      description: 'User copy',
+      absolutePath: userSkill,
+      mdPath: path.join(userSkill, 'SKILL.md'),
+      files: [],
+    }] })) } as unknown as Maker;
+
+    const result = await scanAllSkills({}, maker, [], [{
+      name: 'skill-creator',
+      absolutePath: builtIn,
+      nativeCodexPath: path.join(root, 'user-data', 'codex-home', 'skills', '.system', 'skill-creator'),
+    }]);
+
+    expect(result.skills).toHaveLength(2);
+    expect(result.skills.find((skill) => skill.builtIn)).toMatchObject({
+      name: 'skill-creator',
+      description: 'Cindy copy',
+      builtIn: true,
+      canUninstall: false,
+      cindyEnabled: true,
+      linkedEngines: [
+        { engine: 'claude-code', label: 'Claude' },
+        { engine: 'codex', label: 'Codex' },
+        { engine: 'pi', label: 'Pi' },
+      ],
+    });
+    expect(result.skills.find((skill) => !skill.builtIn)).toMatchObject({
+      description: 'User copy',
+      canUninstall: true,
+    });
+  });
+
   it('projects the registry slug joined by physical path without replacing native directory names', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-registry-slug-'));
     tempRoots.push(root);
