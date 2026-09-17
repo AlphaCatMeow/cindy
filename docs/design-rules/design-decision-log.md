@@ -732,6 +732,13 @@ BORDER_BG → border-default，TEXT_PRIMARY/SECONDARY/TERTIARY → 对应 text �
 接管前 globals.css 已明确：默认代码字体使用系统等宽字体（macOS 的 SF Mono 不以该字体名暴露给网页，实际命中 Menlo；Windows 命中 Consolas），CJK 显式回退 PingFang / 微软雅黑。JetBrains Mono 已降级为可选预设、不再是默认。DS-8 将这条依据保存在 reference/foundations.json 的 app-font-code-default.$description，字体家族、顺序和用户选字体逻辑均不变。DESIGN.md §3 的 JetBrains Mono 排版样本是历史设计样本，不能据此把默认代码字体改回 JetBrains Mono；当前默认来源为该 DTCG token，运行期字体选择仍由原适配器负责。
 
 
+## 2026-09-16 · Settings placeholder and Cindy Make task list
+
+- 用户指出设置中的 placeholder 看起来与普通文字相同，要求降低其显著程度。CINDY Light/Dark
+  的 `text-placeholder` 改为沿用 DESIGN §4 的空输入色阶（Light `#C4C4C4` / Dark `#525252`），
+  不再复用三级文字；修改 DTCG 正本并生成内置主题，同时更新独立预期。其它文字色阶不变。
+- 这是根据用户反馈完成的实现决定，不代表用户已经对最终视觉签字验收。
+
 ## 2026-09-11 · DS-9 Desktop 范围与授权呈现
 
 - **决定人：用户/设计师。** 用户将本期余项合为 DS-9（桌面聊天、跨入口、桌面授权）与 DS-10（成熟保护、维护、最终验收），Mobile 以后独立做；内部工序不另编号或拆批。
