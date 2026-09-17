@@ -65,6 +65,7 @@
     "showDesktop": "桌面",
     "allWindows": "所有視窗",
     "reconnecting": "正在重新連線…",
+    "connectionTimeout": "連線逾時。請檢查網路及電腦是否在線，然後重新連線。",
     "connectionBusy": "已有其他裝置連線至此遠端桌面。請先在該裝置上退出遠端桌面，再嘗試連線。",
     "takeoverConnection": "接管連線",
     "connectionBusyTakeover": "已有其他裝置連線至此遠端桌面。接管連線後，上一台裝置會中斷。",

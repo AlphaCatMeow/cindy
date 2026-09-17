@@ -65,6 +65,7 @@
     "showDesktop": "桌面",
     "allWindows": "所有窗口",
     "reconnecting": "正在重新连接…",
+    "connectionTimeout": "连接超时。请检查网络和电脑是否在线，然后重新连接。",
     "connectionBusy": "已有其他设备连接此远程桌面。请先在那台设备上退出远程桌面，再尝试连接。",
     "takeoverConnection": "接管连接",
     "connectionBusyTakeover": "已有其他设备连接此远程桌面。接管连接后，上一台设备会断开。",

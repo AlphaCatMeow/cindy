@@ -65,6 +65,7 @@
     "showDesktop": "Desktop",
     "allWindows": "All windows",
     "reconnecting": "Reconnecting…",
+    "connectionTimeout": "Connection timed out. Check your network and that the computer is online, then reconnect.",
     "connectionBusy": "Another device is connected to this remote desktop. Exit remote desktop on that device, then try connecting again.",
     "takeoverConnection": "Take over connection",
     "connectionBusyTakeover": "Another device is connected to this desktop. Taking over will disconnect that device.",
