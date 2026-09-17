@@ -1430,6 +1430,11 @@ describe("remote desktop controls", () => {
           nativeEvent: { data: JSON.stringify({ type: "orientation", angle }) },
         });
       });
+      expect(
+        sent()
+          .filter((message) => message.type === "mouseButtons")
+          .at(-1),
+      ).toMatchObject({ topInset: fixture.safe.top });
       if (!landscape) {
         const style = Object.assign(
           {},
@@ -1454,6 +1459,23 @@ describe("remote desktop controls", () => {
     expect(
       host.querySelector('[data-testid="remoteDesktop.toolbarPosition"]'),
     ).not.toBe(firstToolbar);
+  });
+  it("restores the portrait top inset while the native safe area still reports landscape", async () => {
+    await connect();
+    const topInset = () =>
+      sent()
+        .filter((message) => message.type === "mouseButtons")
+        .at(-1)?.topInset;
+    expect(topInset()).toBe(59);
+
+    fixture.size = { width: 874, height: 402 };
+    fixture.safe = { top: 0, bottom: 21, left: 62, right: 62 };
+    act(() => root.render(<RemoteDesktopScreen />));
+    expect(topInset()).toBe(0);
+
+    fixture.size = { width: 402, height: 874 };
+    act(() => root.render(<RemoteDesktopScreen />));
+    expect(topInset()).toBe(59);
   });
   it("overlays landscape keyboards and includes their measured occlusion", async () => {
     fixture.size = { width: 844, height: 390 };
