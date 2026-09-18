@@ -38,7 +38,6 @@ import {
 import {
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
-  setAudioModeAsync,
 } from 'expo-audio';
 import {
   addScreenshotListener,
@@ -4959,7 +4958,6 @@ export default function SessionScreen() {
     let permissionRequestSeq: number | null = null;
     let permissionRequestAbortController: AbortController | null = null;
     let startupSeq: number | null = null;
-    let audioModeEnabled = false;
     // The controller THIS startup created. Stale-teardown paths must only touch
     // this one: by the time a superseded continuation resumes, the shared ref
     // may already point at a newer session's live recording. Read through the
@@ -5027,11 +5025,8 @@ export default function SessionScreen() {
       startupSeq = voiceStartupSeqRef.current + 1;
       voiceStartupSeqRef.current = startupSeq;
       voiceStartupInFlightRef.current = true;
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-      });
-      audioModeEnabled = true;
+      // The capture backend owns audio-session configuration and teardown.
+      // Screen-level Expo mode changes also affect remote desktop PiP.
       // Open the device link in the background: voice dictation writes into the
       // local composer via the cloud ASR proxy and does not need the mobile↔desktop
       // link (only submitting the composed message later does). Awaiting it used
@@ -5064,21 +5059,8 @@ export default function SessionScreen() {
           CINDY_MANAGED_REFINER_PROVIDER,
         );
       if (voiceStartupSeqRef.current !== startupSeq) {
-        // The startup was superseded while we awaited: close the claimed
-        // connection instead of opening a mic for a dead run. Session switches
-        // supersede IN PLACE here (the cleanup effect keys on [sessionId], no
-        // unmount), so a NEWER voice run may already be starting or live — and
-        // audio mode is app-global. Only undo the recording mode this startup
-        // enabled when no newer run is active, otherwise the reset could land
-        // after the new run's native capture started and silently kill it.
+        // This run never opened the microphone; release only its claimed ASR.
         void prewarmedVoice?.asr.stop().catch(() => undefined);
-        if (
-          !voiceControllerSessionRef.current
-          && !voiceStartupInFlightRef.current
-          && !voiceRecordingActiveRef.current
-        ) {
-          await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-        }
         return;
       }
       const startController = async () => {
@@ -5146,7 +5128,6 @@ export default function SessionScreen() {
             voiceControllerSessionRef.current = null;
             voiceRecordingActiveRef.current = false;
             voiceStopInFlightRef.current = false;
-            await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
           }
           await created.cancel().catch(() => undefined);
         }
@@ -5177,14 +5158,6 @@ export default function SessionScreen() {
           }
           await created.cancel().catch(() => undefined);
         }
-        if (
-          audioModeEnabled
-          && !voiceControllerSessionRef.current
-          && !voiceStartupInFlightRef.current
-          && !voiceRecordingActiveRef.current
-        ) {
-          await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-        }
         return;
       }
       const controller = voiceControllerSessionRef.current;
@@ -5197,7 +5170,6 @@ export default function SessionScreen() {
       voiceStopAfterStartRef.current = false;
       setVoiceState('error');
       setVoiceError(formatRemoteError(err));
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     }
   }, [deviceId, openLink, renderItems, t, voiceIsProcessing, voiceState, writeVoiceDraft]);
 
@@ -5229,7 +5201,6 @@ export default function SessionScreen() {
     setVoiceError(null);
     discardPendingPrewarm();
     if (controller) void controller.cancel().catch(() => undefined);
-    void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
   }, [setVoiceState]);
 
   useEffect(() => {
@@ -5280,7 +5251,6 @@ export default function SessionScreen() {
       setComposerVoiceHoldArmed(false);
       if (controller) void controller.cancel().catch(() => undefined);
       discardPendingPrewarm();
-      void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     };
   }, [sessionId]);
 
@@ -5305,7 +5275,6 @@ export default function SessionScreen() {
       const documentBeforeStop = composerDocumentRef.current;
       const inputBeforeStop = composerInputRef.current;
       const latestDraft = await controller.stop();
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       setVoiceState('done');
       // chat-text-quote:纯引用(无转写文字、无附件)也要发出去——发送按钮在
       // quote-only 时可见,漏了引用会变成「点发送只停了录音、消息没发」。
@@ -5329,7 +5298,6 @@ export default function SessionScreen() {
       voiceRecordingActiveRef.current = false;
       setVoiceState('error');
       setVoiceError(formatRemoteError(err));
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     } finally {
       voiceStopInFlightRef.current = false;
     }
