@@ -39,7 +39,10 @@ import { prepareCodexGlobalRulesCopy } from './codex-global-rules.js';
 import { prepareCodexGlobalPluginsBridge } from './codex-global-plugins.js';
 import { DESKTOP_CAPABILITY_ROUTING_POLICY } from './capability-routing.js';
 import { prepareSharedGlobalSkillLinks } from './shared-global-skills.js';
-import { refreshBuiltInClaudeSkillLinks } from './built-in-skills.js';
+import {
+  refreshBuiltInClaudeSkillLinks,
+  refreshBuiltInSharedSkillLinks,
+} from './built-in-skills.js';
 import {
   copyCodexAuthSnapshot,
   inspectCodexAuthLink,
@@ -601,6 +604,10 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     try {
       const ownerId = getActiveAppSession().dataOwnerId;
       const result = await withSharedGlobalSkillProjectionMutation(ownerId, async () => {
+        const builtInSharedProjection = await refreshBuiltInSharedSkillLinks({
+          userDataDir: app.getPath('userData'),
+          appDataDir: app.getPath('appData'),
+        });
         const sharedProjection = await prepareSharedGlobalSkillLinks({
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
         });
@@ -610,6 +617,7 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
         });
         return {
           warnings: [
+            ...builtInSharedProjection.warnings,
             ...sharedProjection.warnings,
             ...isolatedClaudeProjection.warnings,
           ],

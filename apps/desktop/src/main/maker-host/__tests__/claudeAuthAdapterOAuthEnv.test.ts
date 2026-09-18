@@ -110,6 +110,7 @@ vi.mock('../shared-global-skills.js', () => ({
 }));
 
 vi.mock('../built-in-skills.js', () => ({
+  refreshBuiltInSharedSkillLinks: async () => ({ warnings: [] }),
   refreshBuiltInClaudeSkillLinks: async () => ({ warnings: [] }),
 }));
 

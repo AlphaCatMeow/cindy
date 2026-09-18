@@ -8586,8 +8586,9 @@ app.on('ready', async () => {
   await ensureMainAppPresence('app-ready');
 
   // Cindy-owned Skills are packaged as immutable resources and copied into a
-  // stable profile-independent path. The shared projection never replaces a user-owned
-  // ~/.agents/skills/<name>, so a same-name user Skill keeps precedence.
+  // stable profile-independent path. Home-level projections happen only through
+  // ensureSharedGlobalSkills(), whose stable-owner boundary rejects passive instances;
+  // they never replace a same-name user Skill.
   try {
     const prepared = await prepareBuiltInSkills({
       bundledRoot: resolveBundledSystemSkillsRoot({

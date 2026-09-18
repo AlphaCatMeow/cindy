@@ -18,7 +18,7 @@ const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_
 const MANIFEST_FILE = '.cindy-system-skills.json';
 const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
 /** Increment whenever shipped built-in Skill bytes change between releases. */
-export const BUILT_IN_SKILLS_BUNDLE_VERSION = 2;
+export const BUILT_IN_SKILLS_BUNDLE_VERSION = 3;
 
 export interface BuiltInSkillDescriptor {
   name: string;
@@ -30,7 +30,6 @@ export interface PrepareBuiltInSkillsOptions {
   bundledRoot: string;
   userDataDir: string;
   appDataDir?: string;
-  homeDir?: string;
   bundleVersion?: number;
   withSharedMutation?: typeof withSkillMutation;
 }
@@ -49,10 +48,20 @@ export interface RefreshBuiltInClaudeSkillLinksOptions {
   withSharedMutation?: typeof withSkillMutation;
 }
 
+export interface RefreshBuiltInSharedSkillLinksOptions {
+  userDataDir: string;
+  appDataDir?: string;
+  homeDir?: string;
+  descriptors?: readonly BuiltInSkillDescriptor[];
+  withSharedMutation?: typeof withSkillMutation;
+}
+
 export interface RefreshBuiltInClaudeSkillLinksResult {
   changed: boolean;
   warnings: string[];
 }
+
+export type RefreshBuiltInSharedSkillLinksResult = RefreshBuiltInClaudeSkillLinksResult;
 
 interface MaterializationManifest {
   schemaVersion: 2;
@@ -310,6 +319,53 @@ async function ensureSharedEntry(
   );
 }
 
+async function refreshBuiltInSharedSkillLinksUnlocked(
+  options: Omit<RefreshBuiltInSharedSkillLinksOptions, 'withSharedMutation'>,
+): Promise<RefreshBuiltInSharedSkillLinksResult> {
+  const descriptors = options.descriptors
+    ?? builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+  const homeDir = options.homeDir ?? os.homedir();
+  const warnings: string[] = [];
+  let changed = false;
+
+  for (const descriptor of descriptors) {
+    try {
+      const linked = await ensureSharedEntry(
+        descriptor,
+        homeDir,
+        options.userDataDir,
+        options.appDataDir,
+      );
+      changed = linked.changed || changed;
+      if (linked.warning) warnings.push(linked.warning);
+    } catch (error) {
+      warnings.push(
+        `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { changed, warnings };
+}
+
+/** Refresh the home-level shared projection. Call only inside the stable owner boundary. */
+export async function refreshBuiltInSharedSkillLinks(
+  options: RefreshBuiltInSharedSkillLinksOptions,
+): Promise<RefreshBuiltInSharedSkillLinksResult> {
+  const descriptors = options.descriptors
+    ?? builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+  const mutate = options.withSharedMutation ?? withSkillMutation;
+  const refreshed = await mutate(
+    descriptors.map((descriptor) => descriptor.name),
+    () => refreshBuiltInSharedSkillLinksUnlocked({ ...options, descriptors }),
+    { waitMs: BUILT_IN_SKILL_MUTATION_WAIT_MS },
+  );
+  return refreshed ?? {
+    changed: false,
+    warnings: ['could not expose built-in Skills because another Skill mutation is in progress'],
+  };
+}
+
 function realPathOrNormalized(value: string): string {
   try { return normalizeForCompare(fs.realpathSync.native(value)); }
   catch { return normalizeForCompare(value); }
@@ -419,9 +475,8 @@ export async function refreshBuiltInClaudeSkillLinks(
 }
 
 /**
- * Materialize Cindy-owned Skill bytes under a profile-independent appData path, then expose
- * them through the shared ~/.agents discovery root and Cindy's isolated Claude
- * config directory without replacing user data.
+ * Materialize Cindy-owned Skill bytes under a profile-independent appData path.
+ * Home-level discovery links are refreshed separately inside the stable owner boundary.
  */
 export async function prepareBuiltInSkills(
   options: PrepareBuiltInSkillsOptions,
@@ -479,30 +534,7 @@ export async function prepareBuiltInSkills(
         continue;
       }
 
-      try {
-        const linked = await ensureSharedEntry(
-          descriptor,
-          options.homeDir ?? os.homedir(),
-          options.userDataDir,
-          options.appDataDir,
-        );
-        changed = linked.changed || changed;
-        if (linked.warning) warnings.push(linked.warning);
-      } catch (error) {
-        warnings.push(
-          `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
     }
-
-    const claudeProjection = await refreshBuiltInClaudeSkillLinksUnlocked({
-      userDataDir: options.userDataDir,
-      appDataDir: options.appDataDir,
-      homeDir: options.homeDir,
-      descriptors,
-    });
-    changed = claudeProjection.changed || changed;
-    warnings.push(...claudeProjection.warnings);
 
     if (!newerBundleIsInstalled) {
       if (bundleReady) manifest.bundleVersion = bundleVersion;

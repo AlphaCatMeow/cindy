@@ -16,6 +16,33 @@ TOP_LEVEL_FIELD_RE = re.compile(r"^([A-Za-z0-9_-]+)[ \t]*:[ \t]*(.*)$")
 BLOCK_SCALAR_RE = re.compile(
     r"^([|>])(?:(?:[+-]([1-9])?)|(?:([1-9])[+-]?))?(?:[ \t]+#.*|[ \t]*)$"
 )
+YAML_INTEGER_RE = re.compile(
+    r"^[-+]?(?:"
+    r"0|"
+    r"0b[01_]*[01]|"
+    r"0x[0-9a-fA-F_]*[0-9a-fA-F]|"
+    r"0[0-7_]*[0-7]|"
+    r"[1-9](?:[0-9_]*[0-9])?|"
+    r"[1-9][0-9_]*(?::[0-5]?[0-9])+"
+    r")$"
+)
+YAML_FLOAT_RE = re.compile(
+    r"^(?:"
+    r"[-+]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?|"
+    r"\.[0-9_]+(?:[eE][-+]?[0-9]+)?|"
+    r"[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|"
+    r"[-+]?\.(?:inf|Inf|INF)|"
+    r"\.(?:nan|NaN|NAN)"
+    r")$"
+)
+YAML_TIMESTAMP_RE = re.compile(
+    r"^(?:"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}|"
+    r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)"
+    r"[0-9]{1,2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?"
+    r")$"
+)
 
 
 def _block_indent_indicator(match):
@@ -204,10 +231,18 @@ def _parse_scalar(raw, in_flow=False):
         return None
     if lowered in {"true", "false"}:
         return lowered == "true"
-    if re.fullmatch(r"[-+]?(?:0|[1-9][0-9]*)", value):
-        return int(value)
-    if re.fullmatch(r"[-+]?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)", value):
-        return float(value)
+    # gray-matter currently uses js-yaml's default YAML 1.1 schema. Mirror its
+    # implicit numeric and timestamp resolvers so this dependency-free checker
+    # never certifies a plain name/description that the app later sees as a
+    # non-string. Quoting any of these spellings keeps it textual.
+    if YAML_INTEGER_RE.fullmatch(value):
+        return 0
+    if YAML_FLOAT_RE.fullmatch(value) and not value.endswith("_"):
+        return 0.0
+    if YAML_TIMESTAMP_RE.fullmatch(value):
+        raise FrontmatterError(
+            "Plain scalar resolves to a YAML timestamp and must be quoted"
+        )
     if value.startswith(("[", "{")):
         # The bundled tools only inspect scalar name/description values. Keep
         # flow collection contents opaque while preserving the collection type,
