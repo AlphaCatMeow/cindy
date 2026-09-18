@@ -1094,7 +1094,7 @@ function paletteVisibleCodexSkills(skills: readonly SkillMetadata[]): SkillMetad
 function selectInvocableCodexSkill(skills: readonly SkillMetadata[], name: string): SkillMetadata | undefined {
   const matching = skills.filter((skill) => skill.enabled && skill.name.toLowerCase() === name.toLowerCase());
   return matching.find((skill) => skill.scope !== 'system' && skill.scope !== 'admin')
-    ?? matching.find(isPaletteVisibleCodexSkill);
+    ?? matching[0];
 }
 
 function parseLeadingSlashToken(text: string): { name: string; rest: string } | null {

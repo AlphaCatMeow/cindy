@@ -6470,6 +6470,51 @@ describe('CodexAgent MCP thread context hooks', () => {
     await handle.close();
   });
 
+  it.each(['system', 'admin'] as const)(
+    'keeps a palette-hidden %s Skill directly invocable',
+    async (scope) => {
+      const skillPath = path.join(os.homedir(), '.codex', 'skills', `.${scope}`, 'slides', 'SKILL.md');
+      const agent = new CodexAgent(createDeps());
+      const host = installFakeHost(agent, (method, params) => {
+        if (method === Method.SkillsList) {
+          const { cwds = ['/repo'] } = params as { cwds?: string[] };
+          return {
+            data: cwds.map((cwd) => ({
+              cwd,
+              skills: [{
+                name: 'slides',
+                description: 'Create slides',
+                path: skillPath,
+                scope,
+                enabled: true,
+              }],
+              errors: [],
+            })),
+          };
+        }
+        if (method === Method.TurnStart) return { turn: { id: `turn-${scope}-slides` } };
+        return undefined;
+      });
+      const handle = await agent.startSession({
+        sessionId: `session-${scope}-slides`,
+        model: 'gpt-5.4',
+        workingDir: '/repo',
+      });
+
+      await handle.send({ type: 'user', content: '/slides Build a quarterly update' });
+
+      const turnStart = host.request.mock.calls.find(
+        ([method]) => method === Method.TurnStart,
+      )?.[1] as { input?: unknown[] };
+      expect(turnStart.input).toEqual([
+        { type: 'skill', name: 'slides', path: skillPath },
+        { type: 'text', text: 'Build a quarterly update' },
+      ]);
+
+      await handle.close();
+    },
+  );
+
   it('lists remote skills through the target remote app-server host', async () => {
     const remoteWorkingDir = '/srv/project';
     MockCodexTransport.onCreate = (transport) => {
