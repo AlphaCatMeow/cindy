@@ -728,6 +728,9 @@ export const INVOKE_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
   // 10min,压缩恰好到预算上限时会先 INVOKE_TIMEOUT,被误判为「设备无响应」并
   // 可能触发 peer-link 恢复(codex P2)——同 desktop-cmd:run 模式加 1min 余量。
   'maker:compact-session': 11 * 60_000,
+  // Persist drain + credentials refresh + 12s model request + return delivery.
+  // Shared by desktop/mobile; only this invoke gets the longer wait, no peer reset.
+  'maker:predict-prompt': 45_000,
   // 被控端先等 Lead history 最多 30s，再 resume/queue Worker；默认 30s 会与服务端
   // deadline 对撞，把边沿成功误报成 DEVICE_LINK_TIMEOUT。留出派发和回程余量。
   'maker:worker:dispatch-ui-assignment': 65_000,

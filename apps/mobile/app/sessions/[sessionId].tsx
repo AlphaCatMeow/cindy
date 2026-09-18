@@ -1074,11 +1074,6 @@ export default function SessionScreen() {
   const remoteSessionRunning = useSessionRunning(sessionId);
   const makerTurnRunning = useSessionMakerTurnRunning(sessionId);
   const recommendationSession = sessions.find((item) => item.id === sessionId);
-  const { prompt: promptRecommendation, dismiss: dismissPromptRecommendation } = usePromptRecommendation({
-    ownerId: auth.user?.id, deviceId, sessionId, maker,
-    agentKind: recommendationSession ? agentKindForSession(recommendationSession) : null,
-    revision: recommendationSession?.lastTurnEndedAt, running: remoteSessionRunning,
-  });
   const remoteSessionRunStatus = useSessionRunStatus(sessionId);
   const taskUpdates = useSessionTaskUpdates(sessionId);
   const activeComposerDraftScopeKey = composerDraftScopeKey(sessionId, routeDraft);
@@ -1359,6 +1354,14 @@ export default function SessionScreen() {
       setContextSheetOpen(false);
       requestAnimationFrame(() => composerInputRef.current?.focus());
     },
+  });
+  const { prompt: promptRecommendation, dismiss: dismissPromptRecommendation } = usePromptRecommendation({
+    ownerId: auth.user?.id, deviceId, sessionId, maker,
+    agentKind: recommendationSession ? agentKindForSession(recommendationSession) : null,
+    revision: recommendationSession?.lastTurnEndedAt, running: remoteSessionRunning,
+    composerSource: composerDraftSource,
+    hasAttachments: attachments.length > 0 || pendingUploads.length > 0 || pastePlaceholderCount > 0,
+    hasTerminalError: remoteSessionRunStatus.hasTerminalError === true,
   });
   // 换会话与退屏的 outbox 回收:未派发条目的文字合并回草稿库(用户已「发出」的文字
   // 不能静默蒸发,回来时出现在输入框里),在途上传任务丢弃(与托盘退出语义一致,

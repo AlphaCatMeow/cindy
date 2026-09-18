@@ -3,6 +3,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { usePromptRecommendation } from '@/session/usePromptRecommendation';
+import { createComposerDraftSource } from '@/session/composerDraftSource';
+import { textComposerDocument } from '@/session/composerDocument';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root;
@@ -81,4 +83,60 @@ it('old hosts without the channel fail silently', async () => {
   request.mockRejectedValue(new Error('CHANNEL_NOT_ALLOWED'));
   await render(); await advance();
   expect(value.prompt).toBeNull();
+});
+
+it('consumes terminal failures without predicting, but permits the next successful turn', async () => {
+  await render({ running: true });
+  await render({ running: false, revision: 20, hasTerminalError: true });
+  await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ hasTerminalError: false }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ running: true });
+  await render({ running: false, revision: 30 }); await advance();
+  expect(value.prompt).toBe('Suggested next step');
+});
+
+it('consumes an occupied completion and does not resurrect it when the draft is cleared', async () => {
+  const composerSource = createComposerDraftSource(textComposerDocument('My next question'));
+  await render({ running: true, composerSource });
+  await render({ running: false, revision: 20 }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await act(async () => composerSource.setDocument(textComposerDocument('')));
+  await advance();
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('does not charge for attachment-only input, and rejects results arriving after input is added', async () => {
+  await render({ hasAttachments: true }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ hasAttachments: false, running: true });
+  let resolve!: (result: { prompt: string }) => void;
+  request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await render({ running: false, revision: 20 }); await advance();
+  await render({ hasAttachments: true });
+  await act(async () => resolve({ prompt: 'Stale suggestion' }));
+  await render({ hasAttachments: false }); await advance();
+  expect(value.prompt).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it('retries a cache miss without promoting navigation to a paid request', async () => {
+  request.mockResolvedValueOnce({ prompt: null });
+  await render(); await advance();
+  await act(async () => vi.advanceTimersByTimeAsync(1_000));
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.every(([args]) => args.cacheOnly === true)).toBe(true);
+  expect(value.prompt).toBe('Suggested next step');
+});
+
+it('bounds cache retries and cancels them on dismissal', async () => {
+  request.mockResolvedValue({ prompt: null });
+  await render(); await advance();
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(request).toHaveBeenCalledTimes(4);
+  await render({ sessionId: props.sessionId + '-other' }); await advance();
+  await act(async () => value.dismiss());
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(request).toHaveBeenCalledTimes(5);
 });
