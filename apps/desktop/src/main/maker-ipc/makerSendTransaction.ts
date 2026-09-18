@@ -1407,7 +1407,11 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
           directPreDispatchHookStarted = true;
         }
         let cindyLearnInvocation: CindyLearnInvocationGrant | null = null;
-        if (persistUserMessage && deps.captureCindyLearnInvocation) {
+        // Only runtimes with an exact-path dispatch contract may mint the paid
+        // Learn grant. Claude's SDK resolves slash commands by name and exposes
+        // no path-level invocation or provenance, so it must stay fail-closed.
+        const supportsPinnedSkillDispatch = sess.agentKind === 'codex' || sess.agentKind === 'pi';
+        if (persistUserMessage && supportsPinnedSkillDispatch && deps.captureCindyLearnInvocation) {
           try {
             // Capture before Session.send: onAccepted persists this exact snapshot,
             // and the provider cannot start until that durable write completes.

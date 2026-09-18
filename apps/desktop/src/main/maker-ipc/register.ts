@@ -12272,6 +12272,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       prepareUserMessageForAgent(sessionId, message, 'send'),
     materializeDirectSendOssAttachments,
     captureCindyLearnInvocation: async (session, persistedContent, dispatchedText) => {
+      // Codex accepts an exact Skill path in turn/start. Pi exposes the exact
+      // loaded command provenance and validates it again at prompt dispatch.
+      // Claude's SDK offers name-only slash dispatch, so it cannot mint this grant.
+      if (session.agentKind !== 'codex' && session.agentKind !== 'pi') return null;
       const invocationText = visibleMessageTextForConversationSearch(
         'user',
         typeof persistedContent === 'string' ? persistedContent : JSON.stringify(persistedContent),
@@ -12296,20 +12300,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const learnDescriptor = descriptors.find((descriptor) => descriptor.name === 'learn');
       if (!learnDescriptor || !isCindySkillEnabled(learnDescriptor.absolutePath)) return null;
 
-      const result = session.agentKind === 'claude-code'
-        ? await maker.listAgentRuntimeSkills(session.agentKind, {
-          workingDir: session.workDir,
-          sessionId: session.id,
-          runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || (
-            process.env.XDT_USER_DATA_DIR && !app.isPackaged
-              ? path.join(app.getPath('userData'), 'claude-home')
-              : path.join(os.homedir(), '.claude')
-          ),
-        })
-        : await maker.listAgentSkills(session.agentKind, {
-          workingDir: session.workDir,
-          sessionId: session.id,
-        });
+      const result = await maker.listAgentSkills(session.agentKind, {
+        workingDir: session.workDir,
+        sessionId: session.id,
+      });
       if (result.errors?.length || maker.getSession(session.id) !== session) return null;
       const learnCandidates = activeCindyBuiltInAgentSkills(
         result.skills,

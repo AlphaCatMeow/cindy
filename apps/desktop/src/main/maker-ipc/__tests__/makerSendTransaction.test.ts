@@ -295,6 +295,43 @@ describe('maker SEND transaction', () => {
     );
   });
 
+  it('does not request a Learn grant from a runtime without exact-path dispatch', async () => {
+    const grant = {
+      version: 1 as const,
+      sessionInstanceId: 'session-instance-1',
+      resolvedSkillPath: '/system-skills/v10/learn/SKILL.md',
+    };
+    const captureCindyLearnInvocation = vi.fn(async () => grant);
+    const claudeSession = createSession({ agentKind: 'claude-code' });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => claudeSession),
+      captureCindyLearnInvocation,
+    });
+
+    await createMakerSendTransaction(deps).sendToAgentAccepted(
+      'session-1',
+      { type: 'user', content: '/learn release flow' },
+      undefined,
+      {
+        persistUserMessage: {
+          clientId: 'claude-learn-1',
+          content: '/learn release flow',
+        },
+      },
+    );
+
+    expect(captureCindyLearnInvocation).not.toHaveBeenCalled();
+    const sendOptions = vi.mocked(claudeSession.send).mock.calls[0]?.[1];
+    expect(sendOptions?.[PINNED_SKILL_INVOCATION]).toBeUndefined();
+    expect(deps.createDbMessage).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        agentMeta: expect.not.objectContaining({ cindyLearnInvocation: expect.anything() }),
+      }),
+      undefined,
+    );
+  });
+
   it('restamps a trusted local queue edit for the existing Desktop command route', async () => {
     const { deps, session } = createDeps();
     const transaction = createMakerSendTransaction(deps);
