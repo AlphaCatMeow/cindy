@@ -32,6 +32,7 @@ import { buildLocalSkillRoute, findLocalSkillByPath } from './lib/localRoutes';
 import {
   builtInSkillDescriptionKey,
   isBuiltInLearnSkillEnabled,
+  prioritizeCindyBuiltInSkills,
 } from './lib/builtInSkillPresentation';
 import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
 import {
@@ -146,18 +147,20 @@ export function SkillhubHomeView({
   // 本地技能:global 一组 + 每个 project 一组(displayName 取自 store.projects,兜底 basename)。
   const globalSkills = useMemo(
     () =>
-      skills.filter(
-        (skill) => {
-          const descriptionKey = builtInSkillDescriptionKey(skill);
-          const displayDescription = descriptionKey ? t(descriptionKey) : skill.description;
-          return (
-            skill.scope === 'global' &&
-            includesSkillQuery(
-              [skill.name, displayDescription, skill.description, skill.kind, skill.engine],
-              normalizedQuery,
-            )
-          );
-        },
+      prioritizeCindyBuiltInSkills(
+        skills.filter(
+          (skill) => {
+            const descriptionKey = builtInSkillDescriptionKey(skill);
+            const displayDescription = descriptionKey ? t(descriptionKey) : skill.description;
+            return (
+              skill.scope === 'global' &&
+              includesSkillQuery(
+                [skill.name, displayDescription, skill.description, skill.kind, skill.engine],
+                normalizedQuery,
+              )
+            );
+          },
+        ),
       ),
     [normalizedQuery, skills, t],
   );
