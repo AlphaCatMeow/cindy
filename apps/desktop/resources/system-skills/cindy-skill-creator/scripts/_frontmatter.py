@@ -261,7 +261,7 @@ def _parse_scalar(raw, in_flow=False):
 def _block_value(lines, start, style, indent_indicator=None):
     cursor = start
     captured = []
-    minimum_indent = None
+    content_indent = indent_indicator
     while cursor < len(lines):
         line = lines[cursor]
         if line.strip() and not line[:1].isspace():
@@ -270,14 +270,18 @@ def _block_value(lines, start, style, indent_indicator=None):
             indent = len(line) - len(line.lstrip(" "))
             if indent == 0 or line.startswith("\t"):
                 raise FrontmatterError("Block scalars must use space indentation")
-            if indent_indicator is not None and indent < indent_indicator:
+            if content_indent is None:
+                # YAML fixes an implicit block scalar's indentation from its
+                # first non-empty content line; later lines may be deeper but
+                # never shallower.
+                content_indent = indent
+            elif indent < content_indent:
                 raise FrontmatterError(
-                    f"Block scalar content must be indented at least {indent_indicator} spaces"
+                    f"Block scalar content must be indented at least {content_indent} spaces"
                 )
-            minimum_indent = indent if minimum_indent is None else min(minimum_indent, indent)
         captured.append(line)
         cursor += 1
-    indent = indent_indicator if indent_indicator is not None else minimum_indent or 0
+    indent = content_indent or 0
     values = [line[indent:] if line.strip() else "" for line in captured]
     if style == "|":
         return "\n".join(values).rstrip("\n"), cursor

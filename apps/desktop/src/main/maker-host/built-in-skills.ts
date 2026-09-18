@@ -9,7 +9,7 @@ import {
   CINDY_SKILL_CREATOR_NAME,
 } from '../../shared/cindyBuiltInSkills';
 import { withSkillMutation } from '../skillhub/sharedMutationLease';
-import { atomicWriteFileSync } from '../utils/atomicWriteFile';
+import { atomicWriteFileSync, readAtomicFileSync } from '../utils/atomicWriteFile';
 
 export const BUILT_IN_SKILL_CREATOR_NAME = CINDY_SKILL_CREATOR_NAME;
 export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
@@ -18,7 +18,7 @@ const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_
 const MANIFEST_FILE = '.cindy-system-skills.json';
 const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
 /** Increment whenever shipped built-in Skill bytes change between releases. */
-export const BUILT_IN_SKILLS_BUNDLE_VERSION = 3;
+export const BUILT_IN_SKILLS_BUNDLE_VERSION = 4;
 
 export interface BuiltInSkillDescriptor {
   name: string;
@@ -120,17 +120,56 @@ async function hashDirectory(root: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function readManifest(root: string): Promise<MaterializationManifest> {
+function emptyManifest(): MaterializationManifest {
+  return { schemaVersion: 2, bundleVersion: 0, fingerprints: {} };
+}
+
+async function hasExistingMaterializedSkill(
+  descriptors: readonly BuiltInSkillDescriptor[],
+): Promise<boolean> {
+  for (const descriptor of descriptors) {
+    try {
+      await fsp.lstat(descriptor.absolutePath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return false;
+}
+
+async function readManifest(
+  root: string,
+  descriptors: readonly BuiltInSkillDescriptor[],
+): Promise<MaterializationManifest> {
+  const manifestPath = path.join(root, MANIFEST_FILE);
+  const hasInstalledSkills = await hasExistingMaterializedSkill(descriptors);
+  let raw: string | null;
   try {
-    const parsed = JSON.parse(
-      await fsp.readFile(path.join(root, MANIFEST_FILE), 'utf8'),
-    ) as Partial<MaterializationManifest>;
+    raw = readAtomicFileSync(manifestPath);
+  } catch (error) {
+    throw new Error(
+      `could not read built-in Skill manifest without risking a downgrade: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (raw === null) {
+    if (hasInstalledSkills) {
+      throw new Error('built-in Skill manifest is missing while materialized Skills still exist');
+    }
+    return emptyManifest();
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<MaterializationManifest>;
     if (
       parsed.schemaVersion === 2 &&
       Number.isSafeInteger(parsed.bundleVersion) &&
       (parsed.bundleVersion ?? 0) >= 0 &&
       parsed.fingerprints &&
-      typeof parsed.fingerprints === 'object'
+      typeof parsed.fingerprints === 'object' &&
+      !Array.isArray(parsed.fingerprints) &&
+      Object.values(parsed.fingerprints).every((value) => typeof value === 'string')
     ) {
       return {
         schemaVersion: 2,
@@ -138,10 +177,21 @@ async function readManifest(root: string): Promise<MaterializationManifest> {
         fingerprints: parsed.fingerprints,
       };
     }
-  } catch {
-    // Missing or unreadable app-owned metadata is repaired from bundled bytes.
+  } catch (error) {
+    if (hasInstalledSkills) {
+      throw new Error(
+        `built-in Skill manifest is invalid while materialized Skills still exist: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    return emptyManifest();
   }
-  return { schemaVersion: 2, bundleVersion: 0, fingerprints: {} };
+  if (hasInstalledSkills) {
+    throw new Error(
+      'built-in Skill manifest has an invalid shape while materialized Skills still exist',
+    );
+  }
+  return emptyManifest();
 }
 
 async function writeManifest(root: string, manifest: MaterializationManifest): Promise<void> {
@@ -494,55 +544,99 @@ export async function prepareBuiltInSkills(
   const mutate = options.withSharedMutation ?? withSkillMutation;
   const locked = await mutate(BUILT_IN_SKILL_NAMES, async () => {
     await fsp.mkdir(root, { recursive: true });
-    const manifest = await readManifest(root);
+    let manifest: MaterializationManifest;
+    try {
+      manifest = await readManifest(root, descriptors);
+    } catch (error) {
+      warnings.push(
+        `kept existing built-in Skills because their manifest is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return true;
+    }
     const newerBundleIsInstalled = manifest.bundleVersion > bundleVersion;
-    let bundleReady = true;
     if (newerBundleIsInstalled) {
       warnings.push(
         `kept built-in Skill bundle ${manifest.bundleVersion}; this build only carries older bundle ${bundleVersion}`,
       );
+      return true;
     }
 
+    const plans: Array<{
+      descriptor: BuiltInSkillDescriptor;
+      source: string;
+      fingerprint: string;
+      installedFingerprint: string | null;
+    }> = [];
     for (const descriptor of descriptors) {
       const source = path.join(options.bundledRoot, descriptor.name);
       try {
+        if (!(await fsp.stat(path.join(source, 'SKILL.md')).catch(() => null))?.isFile()) {
+          throw new Error(`bundled Skill is missing SKILL.md: ${source}`);
+        }
         const fingerprint = await hashDirectory(source);
-        const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(() => null);
+        const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(
+          () => null,
+        );
         const recordedFingerprint = manifest.fingerprints[descriptor.name];
-        const sameVersionConflict = (
+        const sameVersionConflict =
           manifest.bundleVersion === bundleVersion &&
           recordedFingerprint !== undefined &&
-          recordedFingerprint !== fingerprint
-        );
+          recordedFingerprint !== fingerprint;
         if (sameVersionConflict) {
-          bundleReady = false;
           warnings.push(
             `kept built-in Skill ${descriptor.name} because bundle version ${bundleVersion} was reused for different bytes`,
           );
-        } else if (
-          !newerBundleIsInstalled &&
-          (installedFingerprint !== fingerprint || recordedFingerprint !== fingerprint)
-        ) {
-          changed = (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
-          manifest.fingerprints[descriptor.name] = fingerprint;
+          continue;
         }
+        plans.push({ descriptor, source, fingerprint, installedFingerprint });
       } catch (error) {
-        bundleReady = false;
         warnings.push(
           `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
         );
-        continue;
       }
-
     }
 
-    if (!newerBundleIsInstalled) {
-      if (bundleReady) manifest.bundleVersion = bundleVersion;
+    if (plans.length !== descriptors.length) return true;
+
+    const nextManifest: MaterializationManifest = {
+      schemaVersion: 2,
+      bundleVersion,
+      fingerprints: Object.fromEntries(
+        plans.map(({ descriptor, fingerprint }) => [descriptor.name, fingerprint]),
+      ),
+    };
+    const manifestNeedsUpdate =
+      manifest.bundleVersion !== bundleVersion ||
+      plans.some(
+        ({ descriptor, fingerprint }) => manifest.fingerprints[descriptor.name] !== fingerprint,
+      );
+    if (manifestNeedsUpdate) {
       try {
-        await writeManifest(root, manifest);
+        // Commit the version/fingerprints before swapping any directories. If a
+        // later materialization is interrupted, old builds see the newer version
+        // and cannot downgrade the bytes; this build repairs them on its next run.
+        await writeManifest(root, nextManifest);
+        manifest = nextManifest;
+        changed = true;
       } catch (error) {
         warnings.push(
           `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return true;
+      }
+    }
+
+    for (const { descriptor, source, fingerprint, installedFingerprint } of plans) {
+      if (
+        installedFingerprint === fingerprint &&
+        manifest.fingerprints[descriptor.name] === fingerprint
+      ) continue;
+      try {
+        changed =
+          (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
+      } catch (error) {
+        warnings.push(
+          `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }

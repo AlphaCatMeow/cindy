@@ -105,7 +105,7 @@ describe('built-in Skills', () => {
     );
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
-    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 4 });
+    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 5 });
     expect(updated.changed).toBe(true);
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       'Updated',
@@ -133,6 +133,69 @@ describe('built-in Skills', () => {
     expect(conflicting.warnings.join('\n')).toContain('bundle version 2 was reused');
   });
 
+  it('fails closed when an existing bundle manifest is corrupt', async () => {
+    const input = fixture();
+    const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
+    const descriptor = newer.descriptors[0]!;
+    const manifestPath = path.join(
+      path.dirname(descriptor.absolutePath),
+      '.cindy-system-skills.json',
+    );
+    const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
+    fs.writeFileSync(manifestPath, '{ invalid json');
+    fs.writeFileSync(
+      path.join(input.source, 'SKILL.md'),
+      '---\nname: cindy-skill-creator\ndescription: Old bundle\n---\n\n# Old\n',
+    );
+
+    const older = await prepareBuiltInSkills({ ...input, bundleVersion: 4 });
+
+    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
+    expect(older.changed).toBe(false);
+    expect(older.warnings.join('\n')).toContain('manifest is unavailable');
+  });
+
+  it('does not infer a first install when the manifest is missing beside existing Skills', async () => {
+    const input = fixture();
+    const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
+    const descriptor = newer.descriptors[0]!;
+    const manifestPath = path.join(
+      path.dirname(descriptor.absolutePath),
+      '.cindy-system-skills.json',
+    );
+    const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
+    fs.unlinkSync(manifestPath);
+
+    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 4 });
+
+    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
+    expect(retried.changed).toBe(false);
+    expect(retried.warnings.join('\n')).toContain('manifest is unavailable');
+  });
+
+  it('restores the atomic manifest backup before applying version ordering', async () => {
+    const input = fixture();
+    const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
+    const descriptor = newer.descriptors[0]!;
+    const manifestPath = path.join(
+      path.dirname(descriptor.absolutePath),
+      '.cindy-system-skills.json',
+    );
+    const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
+    fs.renameSync(manifestPath, `${manifestPath}.bak`);
+    fs.writeFileSync(
+      path.join(input.source, 'SKILL.md'),
+      '---\nname: cindy-skill-creator\ndescription: Old bundle\n---\n\n# Old\n',
+    );
+
+    const older = await prepareBuiltInSkills({ ...input, bundleVersion: 4 });
+
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    expect(fs.existsSync(`${manifestPath}.bak`)).toBe(false);
+    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
+    expect(older.warnings.join('\n')).toContain('only carries older bundle 4');
+  });
+
   it('advances the bundle version only after every Skill is ready and retries partial upgrades', async () => {
     const input = fixture();
     await prepareBuiltInSkills(input);
@@ -143,25 +206,33 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
     );
 
-    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 4 });
+    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
     const manifestPath = path.join(
       path.dirname(partial.descriptors[0]!.absolutePath),
       '.cindy-system-skills.json',
     );
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(3);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(4);
     expect(partial.warnings.join('\n')).toContain('missing SKILL.md');
+    expect(
+      fs.readFileSync(path.join(partial.descriptors[0]!.absolutePath, 'SKILL.md'), 'utf8'),
+    ).not.toContain('Creator v2');
 
     fs.renameSync(
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
       path.join(input.bundledRoot, 'learn', 'SKILL.md'),
     );
-    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 4 });
+    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
     expect(retried.warnings).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(4);
-    expect(fs.readFileSync(path.join(
-      retried.descriptors.find((descriptor) => descriptor.name === 'learn')!.absolutePath,
-      'SKILL.md',
-    ), 'utf8')).toBe('Learn v2\n');
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(5);
+    expect(
+      fs.readFileSync(
+        path.join(
+          retried.descriptors.find((descriptor) => descriptor.name === 'learn')!.absolutePath,
+          'SKILL.md',
+        ),
+        'utf8',
+      ),
+    ).toBe('Learn v2\n');
   });
 
   it('keeps a user-owned same-name Skill while retaining the Cindy copy', async () => {
