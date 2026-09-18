@@ -19,7 +19,7 @@ __all__ = ['Reader', 'ReaderError']
 
 from .error import YAMLError, Mark
 
-import codecs, re
+import codecs
 
 class ReaderError(YAMLError):
 
@@ -134,14 +134,17 @@ class Reader(object):
                 self.encoding = 'utf-8'
         self.update(1)
 
-    NON_PRINTABLE = re.compile('[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\U00010000-\U0010ffff]')
     def check_printable(self, data):
-        match = self.NON_PRINTABLE.search(data)
-        if match:
-            character = match.group()
-            position = self.index+(len(self.buffer)-self.pointer)+match.start()
-            raise ReaderError(self.name, position, ord(character),
-                    'unicode', "special characters are not allowed")
+        for offset, character in enumerate(data):
+            codepoint = ord(character)
+            if not (codepoint in (0x09, 0x0A, 0x0D, 0x85)
+                    or 0x20 <= codepoint <= 0x7E
+                    or 0xA0 <= codepoint <= 0xD7FF
+                    or 0xE000 <= codepoint <= 0xFFFD
+                    or 0x10000 <= codepoint <= 0x10FFFF):
+                position = self.index+(len(self.buffer)-self.pointer)+offset
+                raise ReaderError(self.name, position, codepoint,
+                        'unicode', "special characters are not allowed")
 
     def update(self, length):
         if self.raw_buffer is None:

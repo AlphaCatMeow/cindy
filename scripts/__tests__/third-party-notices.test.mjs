@@ -352,6 +352,14 @@ test("the bundled Skill validator accepts standard multiline YAML without extern
 
   const skillDir = fs.mkdtempSync(path.join(os.tmpdir(), "cindy-skill-validator-"));
   try {
+    const printableBoundaries = String.fromCodePoint(
+      0xa0,
+      0xd7ff,
+      0xe000,
+      0xfffd,
+      0x10000,
+      0x10ffff,
+    );
     fs.writeFileSync(
       path.join(skillDir, "SKILL.md"),
       `---
@@ -362,6 +370,7 @@ metadata:
   owner: "Cindy
     team"
   labels: [creator, validation]
+  printable-boundaries: "${printableBoundaries}"
 ---
 # YAML regression
 `,
@@ -376,6 +385,16 @@ metadata:
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stdout, /Skill is valid!/);
+
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: yaml-regression\ndescription: invalid\0value\n---\n",
+    );
+    const rejected = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stdout, /special characters are not allowed/);
   } finally {
     fs.rmSync(skillDir, { recursive: true, force: true });
   }
