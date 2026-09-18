@@ -7,9 +7,10 @@ Usage:
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
+
+from _frontmatter import FrontmatterError, parse_frontmatter, split_frontmatter
 
 ACRONYMS = {
     "GH",
@@ -107,17 +108,10 @@ def read_frontmatter_name(skill_dir):
         print(f"[ERROR] SKILL.md not found in {skill_dir}")
         return None
     content = skill_md.read_text()
-    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-    if not match:
-        print("[ERROR] Invalid SKILL.md frontmatter format.")
-        return None
-    frontmatter_text = match.group(1)
-
-    import yaml
-
     try:
-        frontmatter = yaml.safe_load(frontmatter_text)
-    except yaml.YAMLError as exc:
+        frontmatter_text, _body_start = split_frontmatter(content)
+        frontmatter = parse_frontmatter(frontmatter_text)
+    except FrontmatterError as exc:
         print(f"[ERROR] Invalid YAML frontmatter: {exc}")
         return None
     if not isinstance(frontmatter, dict):
@@ -156,7 +150,7 @@ def parse_interface_overrides(raw_overrides):
     return overrides, optional_order
 
 
-def write_openai_yaml(skill_dir, skill_name, raw_overrides):
+def render_openai_yaml(skill_name, raw_overrides):
     overrides, optional_order = parse_interface_overrides(raw_overrides)
     if overrides is None:
         return None
@@ -184,10 +178,18 @@ def write_openai_yaml(skill_dir, skill_name, raw_overrides):
         if value is not None:
             interface_lines.append(f"  {key}: {yaml_quote(value)}")
 
+    return "\n".join(interface_lines) + "\n"
+
+
+def write_openai_yaml(skill_dir, skill_name, raw_overrides):
+    content = render_openai_yaml(skill_name, raw_overrides)
+    if content is None:
+        return None
+
     agents_dir = Path(skill_dir) / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     output_path = agents_dir / "openai.yaml"
-    output_path.write_text("\n".join(interface_lines) + "\n")
+    output_path.write_text(content)
     print(f"[OK] Created agents/openai.yaml")
     return output_path
 

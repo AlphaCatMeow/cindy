@@ -391,6 +391,10 @@ import {
   readClaudeApiKey,
 } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
+import {
+  builtInSkillDescriptors,
+  markCindyBuiltInAgentSkills,
+} from '../maker-host/built-in-skills.js';
 import { ensurePiManagerInstalled } from '../maker-host/pi-manager-client.js';
 import {
   setRemoteCodexLiveTurnChecker,
@@ -6016,7 +6020,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();
         }
         const result = await maker.listAgentSkills(kind, skillParams);
-        return { success: true, ...result };
+        return {
+          success: true,
+          ...result,
+          skills: markCindyBuiltInAgentSkills(
+            result.skills,
+            builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),
+          ),
+        };
       } catch (err) {
         return toAgentSkillListFailure(err, {
           reportError: (error) => {

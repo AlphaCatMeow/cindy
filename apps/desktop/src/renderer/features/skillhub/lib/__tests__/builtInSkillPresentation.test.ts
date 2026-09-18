@@ -13,6 +13,7 @@ describe('prioritizeCindyBuiltInSkills', () => {
     const builtInLearn = {
       name: 'learn',
       description: CINDY_LEARN_SOURCE_DESCRIPTION,
+      builtIn: true,
       scope: 'global',
     };
     const localB = { name: 'local-b', description: 'B', scope: 'global' };
@@ -51,12 +52,14 @@ describe('isBuiltInLearnSkillEnabled', () => {
     expect(isBuiltInLearnSkillEnabled([{
       name: 'learn',
       description: CINDY_LEARN_SOURCE_DESCRIPTION,
+      builtIn: true,
       scope: 'global',
       cindyEnabled: false,
     }], true)).toBe(false);
     expect(isBuiltInLearnSkillEnabled([{
       name: 'learn',
       description: CINDY_LEARN_SOURCE_DESCRIPTION,
+      builtIn: true,
       scope: 'global',
       cindyEnabled: true,
     }], true)).toBe(true);

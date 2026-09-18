@@ -100,10 +100,13 @@ policy:
 
 This keeps the Skill available when explicitly invoked in Cindy as `/skill-name` without adding it to the model context automatically. Preserve unrelated existing UI, policy, and dependency fields when updating `agents/openai.yaml`.
 
-The initializer creates this file automatically. For new or interface-only metadata, generate it with:
+The initializer creates this file automatically. Choose a Python 3 launcher for the current platform: use `python3` on macOS/Linux; on Windows use `py -3`, or `python` only after confirming it runs Python 3. For new or interface-only metadata, generate it with:
 
 ```bash
+# macOS/Linux
 python3 scripts/generate_openai_yaml.py <path/to/skill-folder> --interface key=value
+# Windows
+py -3 scripts/generate_openai_yaml.py <path/to/skill-folder> --interface key=value
 ```
 
 The generator replaces the entire file. If an existing file contains `policy` or `dependencies`, update only the intended fields in place instead of regenerating it.
@@ -174,14 +177,21 @@ Create those resources only when their concrete benefit justifies them. If the u
 For a new skill, use the bundled initializer when it helps create the required files consistently:
 
 ```bash
+# macOS/Linux
 python3 scripts/init_skill.py <skill-name> --path <output-directory> [--resources scripts,references,assets] [--examples]
+# Windows
+py -3 scripts/init_skill.py <skill-name> --path <output-directory> [--resources scripts,references,assets] [--examples]
 ```
 
 For example:
 
 ```bash
+# macOS/Linux
 python3 scripts/init_skill.py my-skill --path "$HOME/.agents/skills"
 python3 scripts/init_skill.py my-skill --path "$HOME/.agents/skills" --resources references
+# Windows PowerShell
+py -3 scripts/init_skill.py my-skill --path "$HOME\.agents\skills"
+py -3 scripts/init_skill.py my-skill --path "$HOME\.agents\skills" --resources references
 ```
 
 Request only the resource directories the skill needs. Use `--examples` only when concrete placeholders would help, and replace or remove them before finishing. Do not initialize an existing skill again.
@@ -207,7 +217,10 @@ Write only the instructions needed for another Agent to perform the task well. S
 Validate the completed skill with:
 
 ```bash
+# macOS/Linux
 python3 scripts/quick_validate.py <path/to/skill-folder>
+# Windows
+py -3 scripts/quick_validate.py <path/to/skill-folder>
 ```
 
 The validator checks frontmatter, naming, and unfinished scaffold placeholders; it does not prove that the skill makes good decisions. Also check that descriptions remain discriminating, instructions preserve user intent, references are discoverable, and any added scripts actually work.

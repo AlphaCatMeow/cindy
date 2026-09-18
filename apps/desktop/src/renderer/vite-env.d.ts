@@ -5511,6 +5511,7 @@ interface ElectronAPI {
         kind: 'agent-skill';
         name: string;
         description?: string;
+        builtIn?: boolean;
         source: 'user' | 'skill';
         path?: string;
         scope?: string;

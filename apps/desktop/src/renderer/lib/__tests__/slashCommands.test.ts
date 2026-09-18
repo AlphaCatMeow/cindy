@@ -125,12 +125,14 @@ describe('filterSlashCommands', () => {
         kind: 'agent-skill' as const,
         name: 'cindy-skill-creator',
         description: 'Create or update a Cindy Skill',
+        builtIn: true,
         source: 'skill' as const,
       },
       {
         kind: 'agent-skill' as const,
         name: 'learn',
         description: CINDY_LEARN_SOURCE_DESCRIPTION,
+        builtIn: true,
         source: 'skill' as const,
       },
       { kind: 'agent-skill' as const, name: 'release-notes', source: 'skill' as const },
@@ -154,18 +156,20 @@ describe('filterSlashCommands', () => {
       kind: 'agent-skill',
       name: 'learn',
       description: CINDY_LEARN_SOURCE_DESCRIPTION,
+      builtIn: true,
       source: 'skill',
     })).toBe(true);
     expect(isCindyOfficialSlashCommand({
       kind: 'agent-skill',
       name: 'learn',
       description: 'Distill a reusable Skill with Cindy',
+      builtIn: true,
       source: 'skill',
     })).toBe(true);
     expect(isCindyOfficialSlashCommand({
       kind: 'agent-skill',
       name: 'learn',
-      description: 'My Learn workflow',
+      description: CINDY_LEARN_SOURCE_DESCRIPTION,
       source: 'skill',
     })).toBe(false);
   });

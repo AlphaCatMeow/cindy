@@ -6714,7 +6714,10 @@ const registerIpcHandlers = () => {
   registerSkillhubIpc({
     getMaker: getMakerCore,
     getManagedSkillRoots: () => getGhostManager().managedRootDirs(),
-    getBuiltInSkills: () => builtInSkillDescriptors(app.getPath('userData')),
+    getBuiltInSkills: () => builtInSkillDescriptors(
+      app.getPath('userData'),
+      app.getPath('appData'),
+    ),
     getAllowedProjectRoots: listAllowedSkillhubProjectRoots,
   });
   disposeSkillhubAutoSyncAuthListener = authManager.onAuthStateChange((state) => {
@@ -8580,7 +8583,7 @@ app.on('ready', async () => {
   await ensureMainAppPresence('app-ready');
 
   // Cindy-owned Skills are packaged as immutable resources and copied into a
-  // stable userData path. The shared projection never replaces a user-owned
+  // stable profile-independent path. The shared projection never replaces a user-owned
   // ~/.agents/skills/<name>, so a same-name user Skill keeps precedence.
   try {
     const prepared = await prepareBuiltInSkills({
@@ -8590,6 +8593,7 @@ app.on('ready', async () => {
         resourcesPath: process.resourcesPath,
       }),
       userDataDir: app.getPath('userData'),
+      appDataDir: app.getPath('appData'),
     });
     for (const warning of prepared.warnings) {
       createLogger('built-in-skills').warn('built-in Skill preparation warning', { warning });

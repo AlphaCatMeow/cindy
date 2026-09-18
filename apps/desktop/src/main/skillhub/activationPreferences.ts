@@ -54,9 +54,19 @@ export function readDisabledSkillPaths(): readonly string[] {
   // Cindy's bundled copy normally wins through ~/.agents/skills. Claude uses an
   // isolated config directory in Desktop dev, so mirror the same user preference
   // to that runtime projection. Codex's own /skill-creator remains independent.
-  for (const descriptor of builtInSkillDescriptors(app.getPath('userData'))) {
+  for (const descriptor of builtInSkillDescriptors(
+    app.getPath('userData'),
+    app.getPath('appData'),
+  )) {
     if (value.disabledPaths.includes(skillActivationKey(descriptor.absolutePath))) {
-      paths.push(descriptor.nativeClaudePath);
+      try {
+        if (
+          skillActivationKey(descriptor.nativeClaudePath) ===
+          skillActivationKey(descriptor.absolutePath)
+        ) paths.push(descriptor.nativeClaudePath);
+      } catch {
+        // A missing or user-owned projection must not disable a same-name user Skill.
+      }
     }
   }
   return [...new Set(paths)];

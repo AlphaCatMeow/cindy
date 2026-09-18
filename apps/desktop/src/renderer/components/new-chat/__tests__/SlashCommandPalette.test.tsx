@@ -156,6 +156,7 @@ describe('SlashCommandPalette project Skill rows', () => {
       kind: 'agent-skill',
       name: 'cindy-skill-creator',
       description: 'Create or update a Cindy Skill',
+      builtIn: true,
       source: 'skill',
       scope: 'user',
     };
@@ -209,6 +210,7 @@ describe('SlashCommandPalette project Skill rows', () => {
           kind: 'agent-skill',
           name: 'learn',
           description: CINDY_LEARN_SOURCE_DESCRIPTION,
+          builtIn: true,
           source: 'skill',
           scope: 'user',
         }]}

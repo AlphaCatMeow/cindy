@@ -83,6 +83,7 @@
 | 可丢弃的临时数据 | `app.getPath('temp')` 或 `os.tmpdir()` 下的任务专属目录 |
 | 测试生成物 | `os.tmpdir()` 下通过 `mkdtemp` 创建的独立目录，并在测试结束时清理 |
 | Skill 卸载清理回执 | `app.getPath('userData')/skillhub/uninstall-cleanups/<token>.json`，记录操作 owner、旧文件/注册/偏好身份与完成阶段；跨窗口和重启保留，当前 owner 重试完成后删除，不作为授权凭据 |
+| 跨 profile 的 Cindy 内置 Skill 副本 | `app.getPath('appData')/Cindy/shared-system-skills`，只保存随应用发布、可由 bundle 重建的官方 Skill；Global、China、dev 与 isolated profile 共用稳定物理路径，更新和共享发现链接必须持有下述互斥锁 |
 | 跨 profile 的共享 Skill 文件互斥 | `app.getPath('appData')/Cindy/shared-skill-mutation-locks`，仅存文件锁及未完成操作的 token/名称哈希，保证正式版/dev/isolated 共用；短期锁复用既有崩溃回收，持久屏障必须等对应清理完成后删除，读取损坏只阻止相关名称 |
 | 用户明确导出的文件 | 用户选择或任务明确指定的目标路径 |
 

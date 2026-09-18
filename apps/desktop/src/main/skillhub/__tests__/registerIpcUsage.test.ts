@@ -222,9 +222,9 @@ describe('registerSkillhubIpc usage handlers', () => {
     const builtInFile = path.join(builtInRoot, 'SKILL.md');
     fs.mkdirSync(builtInRoot, { recursive: true });
     fs.writeFileSync(builtInFile, '# Built in\n');
-    isExistingSkillPathGranted.mockImplementation((candidate: string, roots: Set<string>) => (
-      roots.has(builtInRoot) && candidate === builtInFile
-    ));
+    // Built-in protection compares the Main-owned physical root directly; it
+    // must not depend on generic discovery-root grant heuristics.
+    isExistingSkillPathGranted.mockReturnValue(false);
     const { registerSkillhubIpc } = await import('../registerIpc');
     registerSkillhubIpc({
       getMaker: () => ({ listAgentSkills }) as never,

@@ -3,10 +3,12 @@ import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { AgentSkillCommand } from '@cindy/maker-core';
 import {
   CINDY_LEARN_NAME,
   CINDY_SKILL_CREATOR_NAME,
 } from '../../shared/cindyBuiltInSkills';
+import { withSkillMutation } from '../skillhub/sharedMutationLease';
 import { atomicWriteFileSync } from '../utils/atomicWriteFile';
 
 export const BUILT_IN_SKILL_CREATOR_NAME = CINDY_SKILL_CREATOR_NAME;
@@ -24,7 +26,9 @@ export interface BuiltInSkillDescriptor {
 export interface PrepareBuiltInSkillsOptions {
   bundledRoot: string;
   userDataDir: string;
+  appDataDir?: string;
   homeDir?: string;
+  withSharedMutation?: typeof withSkillMutation;
 }
 
 export interface PrepareBuiltInSkillsResult {
@@ -52,8 +56,18 @@ export function builtInSkillsRoot(userDataDir: string): string {
   return path.join(userDataDir, 'system-skills');
 }
 
-export function builtInSkillDescriptors(userDataDir: string): BuiltInSkillDescriptor[] {
-  const root = builtInSkillsRoot(userDataDir);
+/** Profile-independent storage shared by Global, China, dev, and isolated profiles. */
+export function sharedBuiltInSkillsRoot(appDataDir: string): string {
+  return path.join(appDataDir, 'Cindy', 'shared-system-skills');
+}
+
+export function builtInSkillDescriptors(
+  userDataDir: string,
+  appDataDir?: string,
+): BuiltInSkillDescriptor[] {
+  const root = appDataDir
+    ? sharedBuiltInSkillsRoot(appDataDir)
+    : builtInSkillsRoot(userDataDir);
   return BUILT_IN_SKILL_NAMES.map((name) => ({
     name,
     absolutePath: path.join(root, name),
@@ -143,13 +157,17 @@ async function ensureSkillEntry(
   descriptor: BuiltInSkillDescriptor,
   linkPath: string,
   replaceStaleCindyLink = false,
-): Promise<{ changed: boolean; warning?: string }> {
+  legacyUserDataDir?: string,
+  appDataDir?: string,
+): Promise<{ changed: boolean; warning?: string; targetPath?: string }> {
   await fsp.mkdir(path.dirname(linkPath), { recursive: true });
 
+  let currentTarget: string | undefined;
   try {
     const current = await fsp.realpath(linkPath);
+    currentTarget = current;
     const expected = await fsp.realpath(descriptor.absolutePath);
-    if (current === expected) return { changed: false };
+    if (samePath(current, expected)) return { changed: false };
   } catch {
     // Inspect the lexical entry below; a missing entry may be created.
   }
@@ -159,7 +177,12 @@ async function ensureSkillEntry(
     if (
       replaceStaleCindyLink &&
       stat.isSymbolicLink() &&
-      await isCindyManagedSystemSkillTarget(linkPath, descriptor.name)
+      await isCindyManagedSystemSkillTarget(
+        linkPath,
+        descriptor,
+        legacyUserDataDir,
+        appDataDir,
+      )
     ) {
       await fsp.unlink(linkPath);
       await fsp.symlink(
@@ -172,6 +195,7 @@ async function ensureSkillEntry(
     return {
       changed: false,
       warning: `built-in Skill ${descriptor.name} was not linked because ${linkPath} is already owned by the user`,
+      ...(currentTarget ? { targetPath: currentTarget } : {}),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -182,101 +206,198 @@ async function ensureSkillEntry(
     linkPath,
     process.platform === 'win32' ? 'junction' : 'dir',
   );
-  return { changed: true };
+  return { changed: true, targetPath: descriptor.absolutePath };
 }
 
 async function isCindyManagedSystemSkillTarget(
   linkPath: string,
-  skillName: string,
+  descriptor: BuiltInSkillDescriptor,
+  legacyUserDataDir?: string,
+  appDataDir?: string,
 ): Promise<boolean> {
   try {
-    const target = await fsp.realpath(linkPath);
+    const rawTarget = await fsp.readlink(linkPath);
+    const target = path.isAbsolute(rawTarget)
+      ? rawTarget
+      : path.resolve(path.dirname(linkPath), rawTarget);
+    if (samePath(target, descriptor.absolutePath)) return true;
+    if (
+      legacyUserDataDir &&
+      samePath(target, path.join(builtInSkillsRoot(legacyUserDataDir), descriptor.name))
+    ) return true;
+
     const targetRoot = path.dirname(target);
-    if (path.basename(target) !== skillName || path.basename(targetRoot) !== 'system-skills') {
+    if (
+      path.basename(target) !== descriptor.name ||
+      path.basename(targetRoot) !== 'system-skills'
+    ) {
       return false;
     }
-    const parsed = JSON.parse(
-      await fsp.readFile(path.join(targetRoot, MANIFEST_FILE), 'utf8'),
-    ) as Partial<MaterializationManifest>;
-    return parsed.schemaVersion === 1 &&
-      typeof parsed.fingerprints?.[skillName] === 'string';
+
+    // Migrate links created by the first implementation even after their old
+    // profile directory was deleted. The exact appData child + Cindy profile
+    // shape is deliberately narrower than an arbitrary `system-skills` link.
+    if (appDataDir) {
+      const profileDir = path.dirname(targetRoot);
+      const profileName = path.basename(profileDir);
+      if (
+        samePath(path.dirname(profileDir), appDataDir) &&
+        /^Cindy(?:Global|Dev)?(?:[-.][A-Za-z0-9._-]+)?$/.test(profileName)
+      ) return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
 }
 
+function normalizeForCompare(value: string): string {
+  const withoutWindowsNamespace = process.platform === 'win32'
+    ? value.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '')
+    : value;
+  const resolved = path.resolve(withoutWindowsNamespace);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function samePath(left: string, right: string): boolean {
+  return normalizeForCompare(left) === normalizeForCompare(right);
+}
+
 async function ensureSharedEntry(
   descriptor: BuiltInSkillDescriptor,
   homeDir: string,
-): Promise<{ changed: boolean; warning?: string }> {
+  legacyUserDataDir: string,
+  appDataDir?: string,
+): Promise<{ changed: boolean; warning?: string; targetPath?: string }> {
   return ensureSkillEntry(
     descriptor,
     path.join(homeDir, '.agents', 'skills', descriptor.name),
     true,
+    legacyUserDataDir,
+    appDataDir,
   );
 }
 
+function realPathOrNormalized(value: string): string {
+  try { return normalizeForCompare(fs.realpathSync.native(value)); }
+  catch { return normalizeForCompare(value); }
+}
+
+/** Main-owned attestation used by the renderer; names and descriptions are not trusted. */
+export function markCindyBuiltInAgentSkills(
+  skills: readonly AgentSkillCommand[],
+  descriptors: readonly BuiltInSkillDescriptor[],
+): AgentSkillCommand[] {
+  const trustedSkillFiles = new Map(descriptors.map((descriptor) => [
+    descriptor.name,
+    realPathOrNormalized(path.join(descriptor.absolutePath, 'SKILL.md')),
+  ]));
+  return skills.map((skill) => {
+    const trustedPath = trustedSkillFiles.get(skill.name);
+    const builtIn = Boolean(skill.path && trustedPath && realPathOrNormalized(skill.path) === trustedPath);
+    if (builtIn) return { ...skill, builtIn: true };
+    if (skill.builtIn === undefined) return skill;
+    const { builtIn: _untrusted, ...rest } = skill;
+    return rest;
+  });
+}
+
 /**
- * Materialize Cindy-owned Skill bytes under a stable userData path, then expose
+ * Materialize Cindy-owned Skill bytes under a profile-independent appData path, then expose
  * them through the shared ~/.agents discovery root and Cindy's isolated Claude
  * config directory without replacing user data.
  */
 export async function prepareBuiltInSkills(
   options: PrepareBuiltInSkillsOptions,
 ): Promise<PrepareBuiltInSkillsResult> {
-  const root = builtInSkillsRoot(options.userDataDir);
-  const descriptors = builtInSkillDescriptors(options.userDataDir);
+  const root = options.appDataDir
+    ? sharedBuiltInSkillsRoot(options.appDataDir)
+    : builtInSkillsRoot(options.userDataDir);
+  const descriptors = builtInSkillDescriptors(options.userDataDir, options.appDataDir);
   const warnings: string[] = [];
   let changed = false;
-  await fsp.mkdir(root, { recursive: true });
-  const manifest = await readManifest(root);
+  const mutate = options.withSharedMutation ?? withSkillMutation;
+  const locked = await mutate(BUILT_IN_SKILL_NAMES, async () => {
+    await fsp.mkdir(root, { recursive: true });
+    const manifest = await readManifest(root);
 
-  for (const descriptor of descriptors) {
-    const source = path.join(options.bundledRoot, descriptor.name);
-    try {
-      const fingerprint = await hashDirectory(source);
-      const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(() => null);
-      if (
-        installedFingerprint !== fingerprint ||
-        manifest.fingerprints[descriptor.name] !== fingerprint
-      ) {
-        changed = (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
-        manifest.fingerprints[descriptor.name] = fingerprint;
+    for (const descriptor of descriptors) {
+      const source = path.join(options.bundledRoot, descriptor.name);
+      try {
+        const fingerprint = await hashDirectory(source);
+        const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(() => null);
+        if (
+          installedFingerprint !== fingerprint ||
+          manifest.fingerprints[descriptor.name] !== fingerprint
+        ) {
+          changed = (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
+          manifest.fingerprints[descriptor.name] = fingerprint;
+        }
+      } catch (error) {
+        warnings.push(
+          `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
       }
-    } catch (error) {
-      warnings.push(
-        `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+
+      const sharedPath = path.join(
+        options.homeDir ?? os.homedir(),
+        '.agents',
+        'skills',
+        descriptor.name,
       );
-      continue;
+      let sharedTarget: string | undefined;
+      try {
+        const linked = await ensureSharedEntry(
+          descriptor,
+          options.homeDir ?? os.homedir(),
+          options.userDataDir,
+          options.appDataDir,
+        );
+        changed = linked.changed || changed;
+        sharedTarget = linked.targetPath ?? await fsp.realpath(sharedPath).catch(() => undefined);
+        if (linked.warning) warnings.push(linked.warning);
+      } catch (error) {
+        warnings.push(
+          `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      if (!sharedTarget) {
+        warnings.push(`could not expose built-in Skill ${descriptor.name} to Claude because the shared entry is unavailable`);
+        continue;
+      }
+      try {
+        // Point at the shared name instead of a profile copy. If a user owns
+        // that name, Claude, Codex, and Pi all execute the same winner.
+        const linked = await ensureSkillEntry(
+          { ...descriptor, absolutePath: sharedPath },
+          descriptor.nativeClaudePath,
+          true,
+          options.userDataDir,
+          options.appDataDir,
+        );
+        changed = linked.changed || changed;
+        if (linked.warning) warnings.push(linked.warning);
+      } catch (error) {
+        warnings.push(
+          `could not expose built-in Skill ${descriptor.name} to Claude: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     try {
-      const linked = await ensureSharedEntry(descriptor, options.homeDir ?? os.homedir());
-      changed = linked.changed || changed;
-      if (linked.warning) warnings.push(linked.warning);
+      await writeManifest(root, manifest);
     } catch (error) {
       warnings.push(
-        `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
+        `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-
-    try {
-      const linked = await ensureSkillEntry(descriptor, descriptor.nativeClaudePath, true);
-      changed = linked.changed || changed;
-      if (linked.warning) warnings.push(linked.warning);
-    } catch (error) {
-      warnings.push(
-        `could not expose built-in Skill ${descriptor.name} to Claude: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
-  try {
-    await writeManifest(root, manifest);
-  } catch (error) {
-    warnings.push(
-      `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    return true;
+  });
+  if (locked === undefined) {
+    warnings.push('could not prepare built-in Skills because another Skill mutation is in progress');
   }
 
   return { descriptors, changed, warnings };

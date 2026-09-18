@@ -15,10 +15,11 @@ Examples:
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 
-from generate_openai_yaml import write_openai_yaml
+from generate_openai_yaml import render_openai_yaml
 
 MAX_SKILL_NAME_LENGTH = 64
 ALLOWED_RESOURCES = {"scripts", "references", "assets"}
@@ -171,51 +172,48 @@ def init_skill(skill_name, path, resources, include_examples, interface_override
     # Determine skill directory path
     skill_dir = Path(path).resolve() / skill_name
 
+    # Validate every fallible user-supplied interface field before creating a
+    # directory, so invalid input cannot leave a half-created Skill behind.
+    interface_content = render_openai_yaml(skill_name, interface_overrides)
+    if interface_content is None:
+        return None
+
     # Check if directory already exists
     if skill_dir.exists():
         print(f"[ERROR] Skill directory already exists: {skill_dir}")
         return None
 
-    # Create skill directory
+    created = False
     try:
         skill_dir.mkdir(parents=True, exist_ok=False)
+        created = True
         print(f"[OK] Created skill directory: {skill_dir}")
-    except Exception as e:
-        print(f"[ERROR] Error creating directory: {e}")
-        return None
 
-    # Create SKILL.md from template
-    skill_title = title_case_skill_name(skill_name)
-    skill_content = SKILL_TEMPLATE.format(
-        skill_name=skill_name, skill_title=skill_title
-    )
-
-    skill_md_path = skill_dir / "SKILL.md"
-    try:
+        skill_title = title_case_skill_name(skill_name)
+        skill_content = SKILL_TEMPLATE.format(
+            skill_name=skill_name, skill_title=skill_title
+        )
+        skill_md_path = skill_dir / "SKILL.md"
         skill_md_path.write_text(skill_content)
         print("[OK] Created SKILL.md")
-    except Exception as e:
-        print(f"[ERROR] Error creating SKILL.md: {e}")
-        return None
 
-    # Create agents/openai.yaml
-    try:
-        result = write_openai_yaml(skill_dir, skill_name, interface_overrides)
-        if not result:
-            return None
-    except Exception as e:
-        print(f"[ERROR] Error creating agents/openai.yaml: {e}")
-        return None
+        agents_dir = skill_dir / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        (agents_dir / "openai.yaml").write_text(interface_content)
+        print("[OK] Created agents/openai.yaml")
 
-    # Create resource directories if requested
-    if resources:
-        try:
+        if resources:
             create_resource_dirs(
                 skill_dir, skill_name, skill_title, resources, include_examples
             )
-        except Exception as e:
-            print(f"[ERROR] Error creating resource directories: {e}")
-            return None
+    except Exception as e:
+        if created:
+            try:
+                shutil.rmtree(skill_dir)
+            except Exception as cleanup_error:
+                print(f"[ERROR] Could not roll back incomplete Skill: {cleanup_error}")
+        print(f"[ERROR] Could not initialize Skill: {e}")
+        return None
 
     # Print next steps
     print(f"\n[OK] Skill '{skill_name}' initialized successfully at {skill_dir}")

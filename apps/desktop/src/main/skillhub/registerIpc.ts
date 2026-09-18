@@ -312,10 +312,31 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     success: false as const,
     error: 'path was not granted by this renderer\'s latest SkillHub scan',
   });
+  const normalizePathForCompare = (value: string): string => {
+    const withoutWindowsNamespace = process.platform === 'win32'
+      ? value.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '')
+      : value;
+    const normalized = path.resolve(withoutWindowsNamespace);
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  };
+  const realPathOrResolved = (value: string): string => {
+    try { return normalizePathForCompare(fs.realpathSync.native(value)); }
+    catch { return normalizePathForCompare(value); }
+  };
+  const isSameOrInside = (candidate: string, root: string): boolean => {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (
+      relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative)
+    );
+  };
   const isBuiltInSkillPath = (targetPath: string): boolean => (
-    (options.getBuiltInSkills?.() ?? []).some((skill) => (
-      isExistingSkillPathGranted(targetPath, new Set([skill.absolutePath]))
-    ))
+    (options.getBuiltInSkills?.() ?? []).some((skill) => {
+      const root = realPathOrResolved(skill.absolutePath);
+      return isSameOrInside(normalizePathForCompare(targetPath), normalizePathForCompare(skill.absolutePath))
+        || isSameOrInside(realPathOrResolved(targetPath), root);
+    })
   );
 
   const sweepLocalImportGrants = () => {

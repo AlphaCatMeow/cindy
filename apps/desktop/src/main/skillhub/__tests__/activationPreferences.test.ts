@@ -47,14 +47,40 @@ describe('Skill activation preferences', () => {
   });
   it('also disables native runtime projections when the Cindy built-in Skill is disabled', async () => {
     const prefs = await import('../activationPreferences');
-    const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root)[0]!;
+    const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root)[0]!;
     fs.mkdirSync(descriptor.absolutePath, { recursive: true });
     fs.writeFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), '# Built in\n');
+    fs.mkdirSync(path.dirname(descriptor.nativeClaudePath), { recursive: true });
+    fs.symlinkSync(
+      descriptor.absolutePath,
+      descriptor.nativeClaudePath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     await prefs.setCindySkillEnabled(descriptor.absolutePath, false);
     expect(prefs.readDisabledSkillPaths()).toEqual(expect.arrayContaining([
       prefs.skillActivationKey(descriptor.absolutePath),
       descriptor.nativeClaudePath,
     ]));
+    await prefs.setCindySkillEnabled(descriptor.absolutePath, true);
+  });
+  it('does not disable a user-owned native projection with the built-in toggle', async () => {
+    const prefs = await import('../activationPreferences');
+    const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root)[0]!;
+    const userSkill = path.join(root, 'user-owned-cindy-skill-creator');
+    fs.mkdirSync(descriptor.absolutePath, { recursive: true });
+    fs.mkdirSync(userSkill, { recursive: true });
+    fs.writeFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), '# Built in\n');
+    fs.writeFileSync(path.join(userSkill, 'SKILL.md'), '# User owned\n');
+    fs.rmSync(descriptor.nativeClaudePath, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(descriptor.nativeClaudePath), { recursive: true });
+    fs.symlinkSync(
+      userSkill,
+      descriptor.nativeClaudePath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    await prefs.setCindySkillEnabled(descriptor.absolutePath, false);
+    expect(prefs.readDisabledSkillPaths()).not.toContain(descriptor.nativeClaudePath);
     await prefs.setCindySkillEnabled(descriptor.absolutePath, true);
   });
   it('persists lexical aliases across restart, bypasses wide Pi scans, and drops retargeted aliases', async () => {
