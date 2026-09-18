@@ -618,19 +618,23 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
           userDataDir: app.getPath('userData'),
           appDataDir: app.getPath('appData'),
         });
-        const builtInSharedProjection = await refreshBuiltInSharedSkillLinks({
-          userDataDir: app.getPath('userData'),
-          appDataDir: app.getPath('appData'),
-          descriptors: preparedBuiltIns.descriptors,
-        });
+        const builtInSharedProjection = preparedBuiltIns.projectionSafe
+          ? await refreshBuiltInSharedSkillLinks({
+              userDataDir: app.getPath('userData'),
+              appDataDir: app.getPath('appData'),
+              descriptors: preparedBuiltIns.descriptors,
+            })
+          : { warnings: ['skipped built-in Skill projection because the active bundle could not be verified'] };
         const sharedProjection = await prepareSharedGlobalSkillLinks({
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
         });
-        const isolatedClaudeProjection = await refreshBuiltInClaudeSkillLinks({
-          userDataDir: app.getPath('userData'),
-          appDataDir: app.getPath('appData'),
-          descriptors: preparedBuiltIns.descriptors,
-        });
+        const isolatedClaudeProjection = preparedBuiltIns.projectionSafe
+          ? await refreshBuiltInClaudeSkillLinks({
+              userDataDir: app.getPath('userData'),
+              appDataDir: app.getPath('appData'),
+              descriptors: preparedBuiltIns.descriptors,
+            })
+          : { warnings: [] };
         return {
           warnings: [
             ...preparedBuiltIns.warnings,

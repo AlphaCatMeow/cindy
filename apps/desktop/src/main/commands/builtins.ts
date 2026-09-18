@@ -699,7 +699,10 @@ export function registerBuiltinDesktopCommands(
     name: 'learn',
     description:
       'Distill a reusable skill from anything you describe (a workflow, a repo, a URL, how you usually do X) — grounded in your usage history and profile, reviewed as a diff before saving. Bare /learn distills the current conversation; /learn hub:<slug> learns from a SkillHub skill. Usage: /learn [hub:<slug>] [what to learn]',
-    isVisible: deps.isLearnEnabled,
+    // Remote visibility cannot be inferred from this controller's local
+    // preference. Keep the compatibility route and let remote learn:start
+    // enforce the controlled host's effective setting.
+    isVisible: (ctx) => Boolean(ctx?.deviceId) || deps.isLearnEnabled(),
     execute: async (ctx) => {
       const arg = (ctx.args ?? '').trim();
       if (!arg && !ctx.sessionId) {

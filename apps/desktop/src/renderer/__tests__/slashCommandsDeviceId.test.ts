@@ -142,7 +142,7 @@ describe('loadAllCommands deviceId', () => {
       'dev-1',
     );
     // desktop 始终本地
-    expect(s.listDesktopCommands).toHaveBeenCalled();
+    expect(s.listDesktopCommands).toHaveBeenCalledWith({ deviceId: 'dev-1' });
     // agent-builtin / agent-skill 不走本地、走隧道
     expect(s.listAgentCommands).not.toHaveBeenCalled();
     expect(s.listAgentSkills).not.toHaveBeenCalled();

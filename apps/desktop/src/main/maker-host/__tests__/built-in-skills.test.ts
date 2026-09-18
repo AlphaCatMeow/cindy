@@ -46,20 +46,24 @@ async function prepareAndProjectBuiltInSkills(
   input: ReturnType<typeof fixture> & { bundleVersion?: number },
 ) {
   const prepared = await prepareBuiltInSkills(input);
-  const shared = await refreshBuiltInSharedSkillLinks({
-    userDataDir: input.userDataDir,
-    appDataDir: input.appDataDir,
-    homeDir: input.homeDir,
-    descriptors: prepared.descriptors,
-    withSharedMutation: input.withSharedMutation,
-  });
-  const claude = await refreshBuiltInClaudeSkillLinks({
-    userDataDir: input.userDataDir,
-    appDataDir: input.appDataDir,
-    homeDir: input.homeDir,
-    descriptors: prepared.descriptors,
-    withSharedMutation: input.withSharedMutation,
-  });
+  const shared = prepared.projectionSafe
+    ? await refreshBuiltInSharedSkillLinks({
+        userDataDir: input.userDataDir,
+        appDataDir: input.appDataDir,
+        homeDir: input.homeDir,
+        descriptors: prepared.descriptors,
+        withSharedMutation: input.withSharedMutation,
+      })
+    : { changed: false, warnings: [] };
+  const claude = prepared.projectionSafe
+    ? await refreshBuiltInClaudeSkillLinks({
+        userDataDir: input.userDataDir,
+        appDataDir: input.appDataDir,
+        homeDir: input.homeDir,
+        descriptors: prepared.descriptors,
+        withSharedMutation: input.withSharedMutation,
+      })
+    : { changed: false, warnings: [] };
   return {
     ...prepared,
     changed: prepared.changed || shared.changed || claude.changed,
@@ -166,7 +170,36 @@ describe('built-in Skills', () => {
 
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
     expect(older.changed).toBe(false);
+    expect(older.projectionSafe).toBe(false);
     expect(older.warnings.join('\n')).toContain('manifest is unavailable');
+  });
+
+  it('preserves existing projections when a manifest has a corrupt shape', async () => {
+    const input = fixture();
+    await prepareAndProjectBuiltInSkills(input);
+    const sharedLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    const claudeLink = path.join(input.userDataDir, 'claude-home', 'skills', 'cindy-skill-creator');
+    const sharedTarget = fs.realpathSync(sharedLink);
+    const claudeTarget = fs.realpathSync(claudeLink);
+    const manifestPath = path.join(
+      input.appDataDir,
+      'Cindy',
+      'shared-system-skills',
+      '.cindy-system-skills.json',
+    );
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      schemaVersion: 3,
+      bundleVersion: 7,
+      fingerprints: {},
+      activeBundle: 'damaged',
+    }));
+
+    const failed = await prepareAndProjectBuiltInSkills(input);
+
+    expect(failed.projectionSafe).toBe(false);
+    expect(failed.warnings.join('\n')).toContain('manifest is unavailable');
+    expect(fs.realpathSync(sharedLink)).toBe(sharedTarget);
+    expect(fs.realpathSync(claudeLink)).toBe(claudeTarget);
   });
 
   it('does not infer a first install when the manifest is missing beside existing Skills', async () => {

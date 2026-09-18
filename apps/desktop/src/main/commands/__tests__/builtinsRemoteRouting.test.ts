@@ -101,6 +101,29 @@ describe('/learn SSH fallback', () => {
       'unknown command "/learn"',
     );
   });
+
+  it('keeps the remote fallback when only the controlling host disabled Learn', async () => {
+    const { registry, learnController, remoteInvoke } = makeHarness({
+      isLearnEnabled: () => false,
+      remoteInvoke: async () => ({ runId: 'remote-run' }),
+    });
+
+    expect(registry.list({ deviceId: 'dev-1' })).toContainEqual(
+      expect.objectContaining({ name: 'learn' }),
+    );
+    await registry.execute('learn', {
+      sessionId: 'remote-session',
+      deviceId: 'dev-1',
+      args: '学习远程流程',
+    });
+
+    expect(remoteInvoke).toHaveBeenCalledWith('dev-1', 'learn:start', [{
+      input: '学习远程流程',
+      sourceKind: 'freetext',
+      originSessionId: 'remote-session',
+    }]);
+    expect(learnController.startLearn).not.toHaveBeenCalled();
+  });
 });
 
 describe('/goal 远程路由', () => {

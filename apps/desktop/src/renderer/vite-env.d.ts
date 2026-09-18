@@ -5462,7 +5462,7 @@ interface ElectronAPI {
     endSessionDragPreview: (dragEndAtMs?: number) => void;
 
     // ── Palette `/` 命令三源 (palette refactor) ───────────────────────
-    listDesktopCommands: () => Promise<{
+    listDesktopCommands: (ctx?: { deviceId?: string }) => Promise<{
       success: boolean;
       error?: string;
       commands?: Array<{ kind: 'desktop'; name: string; description: string }>;

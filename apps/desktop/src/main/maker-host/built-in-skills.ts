@@ -37,6 +37,8 @@ export interface PrepareBuiltInSkillsOptions {
 
 export interface PrepareBuiltInSkillsResult {
   descriptors: BuiltInSkillDescriptor[];
+  /** True only when every descriptor is backed by the active manifest's recorded bytes. */
+  projectionSafe: boolean;
   changed: boolean;
   warnings: string[];
 }
@@ -636,6 +638,7 @@ export async function prepareBuiltInSkills(
     : builtInSkillsRoot(options.userDataDir);
   const warnings: string[] = [];
   let changed = false;
+  let projectionSafe = false;
   const bundleVersion = options.bundleVersion ?? BUILT_IN_SKILLS_BUNDLE_VERSION;
   if (!Number.isSafeInteger(bundleVersion) || bundleVersion < 1) {
     throw new Error(`invalid built-in Skill bundle version: ${bundleVersion}`);
@@ -659,6 +662,17 @@ export async function prepareBuiltInSkills(
       );
       return true;
     }
+    const installedFingerprints = new Map<string, string | null>();
+    for (const descriptor of descriptors) {
+      installedFingerprints.set(
+        descriptor.name,
+        await hashDirectory(descriptor.absolutePath).catch(() => null),
+      );
+    }
+    projectionSafe = !isEmptyManifest(manifest) && descriptors.every((descriptor) => (
+      typeof manifest.fingerprints[descriptor.name] === 'string'
+      && installedFingerprints.get(descriptor.name) === manifest.fingerprints[descriptor.name]
+    ));
     const newerBundleIsInstalled = manifest.bundleVersion > bundleVersion;
     if (newerBundleIsInstalled) {
       warnings.push(
@@ -680,9 +694,7 @@ export async function prepareBuiltInSkills(
           throw new Error(`bundled Skill is missing SKILL.md: ${source}`);
         }
         const fingerprint = await hashDirectory(source);
-        const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(
-          () => null,
-        );
+        const installedFingerprint = installedFingerprints.get(descriptor.name) ?? null;
         const recordedFingerprint = manifest.fingerprints[descriptor.name];
         const sameVersionConflict =
           manifest.bundleVersion === bundleVersion &&
@@ -741,6 +753,7 @@ export async function prepareBuiltInSkills(
       publishedDirectory = true;
       await writeManifest(root, nextManifest);
       changed = true;
+      projectionSafe = true;
     } catch (error) {
       await fsp.rm(pending, { recursive: true, force: true }).catch(() => undefined);
       if (publishedDirectory) {
@@ -758,6 +771,7 @@ export async function prepareBuiltInSkills(
 
   return {
     descriptors: builtInSkillDescriptors(options.userDataDir, options.appDataDir),
+    projectionSafe,
     changed,
     warnings,
   };

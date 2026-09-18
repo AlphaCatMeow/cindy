@@ -344,7 +344,9 @@ export async function loadAllCommands(
   // device-link「以被控端为准」:agent-builtin / agent-skill 是被控端**该会话**的能力,远程时经隧道
   // 从被控端读(channel 已 allowlist,workingDir 是被控端路径,扫描在被控端跑正确)。
   // desktop 命令**始终本地** —— 它是控制端 app 的 UI 动作(execute-desktop-command 不可隧道,见 D2)。
-  const desktopP: Promise<CmdRes> = api.listDesktopCommands().catch(() => ({ success: false }));
+  const desktopP: Promise<CmdRes> = api.listDesktopCommands(
+    deviceId ? { deviceId } : undefined,
+  ).catch(() => ({ success: false }));
   const builtinP: Promise<CmdRes> = (
     deviceId
       ? (window.electronAPI.deviceLink.invoke(deviceId, 'maker:list-agent-commands', [
