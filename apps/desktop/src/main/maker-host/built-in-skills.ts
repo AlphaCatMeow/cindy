@@ -337,6 +337,7 @@ export async function prepareBuiltInSkills(
     await fsp.mkdir(root, { recursive: true });
     const manifest = await readManifest(root);
     const newerBundleIsInstalled = manifest.bundleVersion > bundleVersion;
+    let bundleReady = true;
     if (newerBundleIsInstalled) {
       warnings.push(
         `kept built-in Skill bundle ${manifest.bundleVersion}; this build only carries older bundle ${bundleVersion}`,
@@ -355,6 +356,7 @@ export async function prepareBuiltInSkills(
           recordedFingerprint !== fingerprint
         );
         if (sameVersionConflict) {
+          bundleReady = false;
           warnings.push(
             `kept built-in Skill ${descriptor.name} because bundle version ${bundleVersion} was reused for different bytes`,
           );
@@ -366,6 +368,7 @@ export async function prepareBuiltInSkills(
           manifest.fingerprints[descriptor.name] = fingerprint;
         }
       } catch (error) {
+        bundleReady = false;
         warnings.push(
           `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -419,7 +422,7 @@ export async function prepareBuiltInSkills(
     }
 
     if (!newerBundleIsInstalled) {
-      manifest.bundleVersion = bundleVersion;
+      if (bundleReady) manifest.bundleVersion = bundleVersion;
       try {
         await writeManifest(root, manifest);
       } catch (error) {

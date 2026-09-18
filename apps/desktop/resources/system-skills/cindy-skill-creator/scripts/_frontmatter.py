@@ -114,6 +114,10 @@ def _parse_scalar(raw):
         # so valid YAML bare scalars such as [Read, Grep] and {owner: me} do not
         # require PyYAML or JSON syntax.
         return _parse_flow_collection(value)
+    if re.match(r"^(?:[-?:](?:[ \t]|$)|[,\]\}#&*!|>'\"%@`])", value):
+        raise FrontmatterError("Invalid leading indicator in plain scalar")
+    if re.search(r":[ \t]|:$", value):
+        raise FrontmatterError("Plain scalar contains ': ' and must be quoted")
     return value
 
 
