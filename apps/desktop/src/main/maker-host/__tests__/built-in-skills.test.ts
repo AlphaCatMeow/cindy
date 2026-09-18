@@ -239,6 +239,26 @@ describe('built-in Skills', () => {
     expect(result.warnings.join('\n')).toContain('already owned by the user');
   });
 
+  it('keeps the isolated Claude runtime aligned with the user-owned palette winner', async () => {
+    const input = fixture();
+    const first = await prepareBuiltInSkills(input);
+    const descriptor = first.descriptors.find((item) => item.name === 'learn')!;
+    const sharedSkill = path.join(input.homeDir, '.agents', 'skills', 'learn');
+    expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(fs.realpathSync(sharedSkill));
+
+    const claudePaletteSkill = path.join(input.homeDir, '.claude', 'skills', 'learn');
+    fs.mkdirSync(claudePaletteSkill, { recursive: true });
+    fs.writeFileSync(path.join(claudePaletteSkill, 'SKILL.md'), '# User Claude Learn\n');
+
+    const updated = await prepareBuiltInSkills(input);
+
+    expect(updated.warnings).toEqual([]);
+    expect(fs.realpathSync(sharedSkill)).toBe(fs.realpathSync(descriptor.absolutePath));
+    expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(
+      fs.realpathSync(claudePaletteSkill),
+    );
+  });
+
   it('attests only commands backed by the materialized Cindy copy', async () => {
     const input = fixture();
     const { descriptors } = await prepareBuiltInSkills(input);

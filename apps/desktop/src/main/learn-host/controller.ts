@@ -329,6 +329,16 @@ export class LearnController {
     if (req.sourceKind === 'session' && !req.originSessionId) {
       throw new LearnError('INVALID_PARAMS', 'session source requires the origin session');
     }
+    if (
+      req.sourceKind === 'session'
+      && req.originSessionId
+      && !(await this.deps.getConversationBlock(req.originSessionId))
+    ) {
+      throw new LearnError(
+        'INVALID_PARAMS',
+        'the origin conversation has no distillable content',
+      );
+    }
     if (req.sourceKind === 'hub' && !req.hubSlug) {
       throw new LearnError('INVALID_PARAMS', 'hubSlug is required for hub source');
     }

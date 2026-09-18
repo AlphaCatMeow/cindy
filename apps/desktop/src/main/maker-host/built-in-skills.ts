@@ -170,6 +170,8 @@ async function ensureSkillEntry(
   replaceStaleCindyLink = false,
   legacyUserDataDir?: string,
   appDataDir?: string,
+  desiredTarget = descriptor.absolutePath,
+  additionalManagedTargets: readonly string[] = [],
 ): Promise<{ changed: boolean; warning?: string; targetPath?: string }> {
   await fsp.mkdir(path.dirname(linkPath), { recursive: true });
 
@@ -177,7 +179,7 @@ async function ensureSkillEntry(
   try {
     const current = await fsp.realpath(linkPath);
     currentTarget = current;
-    const expected = await fsp.realpath(descriptor.absolutePath);
+    const expected = await fsp.realpath(desiredTarget);
     if (samePath(current, expected)) return { changed: false };
   } catch {
     // Inspect the lexical entry below; a missing entry may be created.
@@ -193,11 +195,12 @@ async function ensureSkillEntry(
         descriptor,
         legacyUserDataDir,
         appDataDir,
+        additionalManagedTargets,
       )
     ) {
       await fsp.unlink(linkPath);
       await fsp.symlink(
-        descriptor.absolutePath,
+        desiredTarget,
         linkPath,
         process.platform === 'win32' ? 'junction' : 'dir',
       );
@@ -213,11 +216,11 @@ async function ensureSkillEntry(
   }
 
   await fsp.symlink(
-    descriptor.absolutePath,
+    desiredTarget,
     linkPath,
     process.platform === 'win32' ? 'junction' : 'dir',
   );
-  return { changed: true, targetPath: descriptor.absolutePath };
+  return { changed: true, targetPath: desiredTarget };
 }
 
 async function isCindyManagedSystemSkillTarget(
@@ -225,6 +228,7 @@ async function isCindyManagedSystemSkillTarget(
   descriptor: BuiltInSkillDescriptor,
   legacyUserDataDir?: string,
   appDataDir?: string,
+  additionalManagedTargets: readonly string[] = [],
 ): Promise<boolean> {
   try {
     const rawTarget = await fsp.readlink(linkPath);
@@ -232,6 +236,9 @@ async function isCindyManagedSystemSkillTarget(
       ? rawTarget
       : path.resolve(path.dirname(linkPath), rawTarget);
     if (samePath(target, descriptor.absolutePath)) return true;
+    if (additionalManagedTargets.some((managedTarget) => samePath(target, managedTarget))) {
+      return true;
+    }
     if (
       legacyUserDataDir &&
       samePath(target, path.join(builtInSkillsRoot(legacyUserDataDir), descriptor.name))
@@ -293,6 +300,15 @@ async function ensureSharedEntry(
 function realPathOrNormalized(value: string): string {
   try { return normalizeForCompare(fs.realpathSync.native(value)); }
   catch { return normalizeForCompare(value); }
+}
+
+async function hasSkillFile(skillDir: string): Promise<boolean> {
+  for (const fileName of ['SKILL.md', 'skill.md']) {
+    if ((await fsp.stat(path.join(skillDir, fileName)).catch(() => null))?.isFile()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Main-owned attestation used by the renderer; names and descriptions are not trusted. */
@@ -403,14 +419,27 @@ export async function prepareBuiltInSkills(
         continue;
       }
       try {
-        // Point at the shared name instead of a profile copy. If a user owns
-        // that name, Claude, Codex, and Pi all execute the same winner.
+        // Claude's palette scans ~/.claude while its isolated runtime reads
+        // <userData>/claude-home. Mirror the palette winner so a user-owned
+        // Claude Skill keeps precedence even when ~/.agents has Cindy's copy.
+        const homeDir = options.homeDir ?? os.homedir();
+        const claudePalettePath = path.join(
+          homeDir,
+          '.claude',
+          'skills',
+          descriptor.name,
+        );
+        const claudeRuntimeTarget = await hasSkillFile(claudePalettePath)
+          ? claudePalettePath
+          : sharedPath;
         const linked = await ensureSkillEntry(
-          { ...descriptor, absolutePath: sharedPath },
+          descriptor,
           descriptor.nativeClaudePath,
           true,
           options.userDataDir,
           options.appDataDir,
+          claudeRuntimeTarget,
+          [sharedPath],
         );
         changed = linked.changed || changed;
         if (linked.warning) warnings.push(linked.warning);

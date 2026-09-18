@@ -40,7 +40,11 @@ import { LearnRunStore } from './runStore';
 import { applyProposal, resolveInstalledSkillDir } from './apply';
 import { collectUserProfile } from './profile';
 import { formatSkillsIndexBlock, listInstalledSkills } from './skillsIndex';
-import { CONVERSATION_MESSAGE_LIMIT, formatConversationBlock } from './evidence.pure';
+import {
+  CONVERSATION_MESSAGE_LIMIT,
+  formatConversationBlock,
+  isBareLearnInvocationText,
+} from './evidence.pure';
 import { redactSensitive } from './redaction';
 import {
   cleanupStaging,
@@ -208,17 +212,13 @@ export function startLearnHost(deps: StartLearnHostDeps): LearnController {
         .limit(CONVERSATION_MESSAGE_LIMIT);
       const items: Array<{ role: string; text: string }> = [];
       const chronologicalRows = rows.reverse();
-      for (const [index, r] of chronologicalRows.entries()) {
+      for (const r of chronologicalRows) {
         const text = visibleMessageTextForConversationSearch(r.role, r.content);
         if (!text) continue;
         // The built-in Learn Skill reaches the host after its invocation has
-        // entered chat history. Keep the trigger itself out of the evidence;
-        // the former Desktop command was intercepted before persistence.
-        if (
-          index === chronologicalRows.length - 1
-          && r.role === 'user'
-          && /^\/(?:skill:)?learn\s*$/i.test(text.trim())
-        ) {
+        // entered chat history. Keep every bare trigger out of the evidence,
+        // including when an assistant/tool row was persisted after it.
+        if (r.role === 'user' && isBareLearnInvocationText(text)) {
           continue;
         }
         items.push({ role: r.role, text: redactSensitive(text).text });
