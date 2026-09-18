@@ -3,7 +3,6 @@
 import math
 import re
 import sys
-from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -99,12 +98,6 @@ def _js_scalar_key(value):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return _js_number_key(value)
-    if isinstance(value, datetime):
-        normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return f"date:{normalized.astimezone(timezone.utc).isoformat()}"
-    if isinstance(value, date):
-        normalized = datetime.combine(value, time.min, tzinfo=timezone.utc)
-        return f"date:{normalized.isoformat()}"
     return str(value)
 
 
@@ -121,6 +114,17 @@ def _reject_duplicate_mapping_keys(loader, node, visited=None):
         keys = set()
         for key_node, value_node in node.value:
             if isinstance(key_node, ScalarNode):
+                # js-yaml constructs timestamp keys as Date objects and then relies on
+                # JavaScript property-key coercion. Date#toString is host-timezone
+                # dependent, so reproducing that identity in the bundled Python
+                # validator would accept different documents on different machines.
+                # Timestamp metadata keys are not part of the Skill contract; reject
+                # them consistently instead of letting a duplicate through to the
+                # gray-matter/js-yaml runtime.
+                if key_node.tag == "tag:yaml.org,2002:timestamp":
+                    raise FrontmatterError(
+                        f"Timestamp mapping keys are not supported on line {key_node.start_mark.line + 1}"
+                    )
                 key = _js_scalar_key(loader.construct_object(key_node, deep=True))
                 if key in keys:
                     raise FrontmatterError(

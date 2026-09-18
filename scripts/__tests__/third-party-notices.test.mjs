@@ -439,6 +439,23 @@ metadata:
 
     fs.writeFileSync(
       path.join(skillDir, "SKILL.md"),
+      `---
+name: yaml-regression
+description: timestamp keys
+metadata:
+  2023-01-01: first
+  "Sun Jan 01 2023 00:00:00 GMT+0000 (Coordinated Universal Time)": second
+---
+`,
+    );
+    const timestampKey = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.notEqual(timestampKey.status, 0);
+    assert.match(timestampKey.stdout, /Timestamp mapping keys are not supported/);
+
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
       "---\nname: yaml-regression\ndescription: invalid\0value\n---\n",
     );
     const rejected = spawnSync(command, [...prefix, "-S", validator, skillDir], {

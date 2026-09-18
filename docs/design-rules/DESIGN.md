@@ -671,6 +671,15 @@ cue, not an error or CTA; the mobile white text contrast is 4.98:1.
 
 Never freestyle these semantic colors as hardcoded hex — always go through the corresponding token.
 
+**Search matches (2026-09-18, user-approved direction):** global find, file previews and
+file editors share `search-match-bg` / `search-match-fg` for ordinary matches and
+`search-match-active-bg` / `search-match-active-fg` for the current match. Both modes
+use a stronger gold current-match fill with readable dark text. Keep a non-color cue:
+global CSS highlights use an underline; preview/editor marks retain their outline.
+The existing IDs and explicit theme overrides remain supported. Exact values live in
+`packages/design-tokens/src/reference/color.json` and generate `themes/colors.ts`;
+this decision does not grant new uses of warning/status colors.
+
 ### Built-in Themes
 
 The implementation truth is `builtinThemes` in `apps/desktop/src/renderer/themes/registry.ts`; adding or removing themes does not require updating this document. The default light/dark (base) themes are exactly the §2 palette.

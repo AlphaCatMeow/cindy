@@ -27,7 +27,7 @@ const render = (ui: ReactElement) => renderUI(ui, { wrapper: MemoryRouter });
 afterEach(() => cleanup());
 
 describe('cindy-make-complete system card', () => {
-  it('renders a full card with the code step and code-verified facts', () => {
+  it('renders one completion summary with code-verified facts', () => {
     render(
       <SystemCard
         cardType="cindy-make-complete"
@@ -41,7 +41,6 @@ describe('cindy-make-complete system card', () => {
     );
     expect(screen.getByRole('region', { name: 'cindyMake.complete.title' })).toBeTruthy();
     expect(screen.getByText('cindyMake.complete.description')).toBeTruthy();
-    expect(screen.getByText('cindyMake.complete.stepCode')).toBeTruthy();
     const meta = screen.getByText(/cindyMake\.complete\.changedFiles/).textContent ?? '';
     expect(meta).toContain('"count":3');
     expect(meta).toContain('"commit":"abcdef123456"');

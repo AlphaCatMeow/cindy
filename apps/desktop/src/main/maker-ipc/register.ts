@@ -99,6 +99,7 @@ import {
   isAppSessionBoundaryPending,
 } from '../appSessionState.js';
 import { upsertRecentWorkdir } from '../localDb/ipc/recentWorkdirs.js';
+import { isRetainableProjectSession } from '../../shared/sessionSource.js';
 import type { AgentMeta, Session as RendererSession } from '../../renderer/lib/ccAgent.types';
 import {
   deriveAutoTitleSeed,
@@ -418,6 +419,7 @@ import {
 import { createAgentResourceSettingsIpc } from './agent-resource-settings-ipc.js';
 import {
   createBotDelegationService,
+  discardDelegationQueuedInputs,
   type BotDelegationService,
 } from './botDelegationService.js';
 import {
@@ -599,8 +601,9 @@ import { applyPersistedCindyMakeMarker } from './cindyMakeSessionStart.js';
 import { CINDY_MAKE_SESSION_SOURCE } from '../../shared/cindyMakeSession.js';
 import { cindyMakeManager } from '../cindy-make/manager.js';
 import { assertCindyMakeWorkspace, withCindyMakeProjectUse } from '../cindy-make/projectAccess.js';
-import { isCindyMakeWorktreePath } from '../cindy-make/sourcePaths.js';
+import { isCindyMakeWorktreePath, isCindyMakeManagedWorktreePath } from '../cindy-make/sourcePaths.js';
 import { assertCindyMakeTaskReady, configureCindyMakeTaskSender, CINDY_MAKE_TASK_DISPATCH } from '../cindy-make/taskRuntime.js';
+import { finishUpstreamMergeTurn, assertUpstreamMergeTaskWritable } from '../cindy-make/upstreamMergeRuntime.js';
 import { isIpcError, type IpcErrorCode } from '../../shared/ipc-errors.js';
 import { piPackageCommandDiagnostic } from '../maker-host/pi-package-diagnostic.js';
 import {
@@ -1607,14 +1610,14 @@ async function applyMemoryChangeWithCodexRestart<T extends object>(
     {
       prepare: async () => {
         try {
-          await prepareCodexForAuthModeChange();
+          await prepareCodexForAuthModeChange({ allLocalHosts: true });
         } catch (err) {
           // busy 原样透传 —— 执行体靠它分流延迟路径;其余是真实故障,编码后上抛。
           if (isCredentialModeSwitchBusyError(err)) throw err;
           throwIpcError('INTERNAL', err instanceof Error ? err.message : String(err));
         }
       },
-      finalize: finalizeCodexAfterAuthModeChange,
+      finalize: () => finalizeCodexAfterAuthModeChange({ prepareMcpEnvironment: true }),
       cancel: cancelCodexAuthModeChange,
       scheduleDeferredRestart: (reason, applyRuntime) => {
         deferredCodexRestartHolder?.schedule(reason, applyRuntime);
@@ -3482,6 +3485,11 @@ export function clearDeferredCodexRestartForOwnerBoundary(): void {
   deferredCodexRestartHolder?.clear();
 }
 
+/** Reuse the owner-scoped idle retry for settings whose persistence already succeeded. */
+export function scheduleDeferredCodexRestart(reason: string): void {
+  deferredCodexRestartHolder?.schedule(reason);
+}
+
 export function clearWorkingDirectoryRecoveryForOwnerBoundary(): void {
   workingDirectoryRecovery.clear();
 }
@@ -4463,6 +4471,7 @@ function cleanupClosedSessionRuntime(session: WiredSession): void {
 // operation. Capturing these services when wiring a Session would freeze the
 // pre-initialization or previous runtime value for later events.
 const sessionEventDependencies: SessionEventDependencies = {
+  onSuccessfulProductTurn: finishUpstreamMergeTurn,
   get botCompactRuntimeRefreshCoordinator() { return botCompactRuntimeRefreshCoordinator; },
   get attemptBotCompactRuntimeRefresh() { return attemptBotCompactRuntimeRefresh; },
   get botDelegationServiceHolder() { return botDelegationServiceHolder; },
@@ -5816,29 +5825,20 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // 内置 server 名对自定义 MCP 是保留名：撞名会在装配层顶替内置 server 并继承
     // 它在 MCP 审批策略里的信任，所以 CRUD 阶段就拒收。
     getReservedMcpIds: () => getBuiltinMcpServerNames(),
-    // Codex 的 MCP flags 冻在 codexEnvironment 的 cached spawn 配置里,清缓存 + dispose app-server,
-    // 让下个 codex 会话按新 MCP 配置重 spawn(与 slack 变更同款 best-effort;busy 会话软重启失败只告警)。
-    // 顺序：先 dispose app-server（含 busy 检查），成功后再关 bridge/cache。
-    // 若先关 bridge、后 dispose 失败（busy），running 会话的 mcp_servers URL 会指向已停的 bridge。
+    // Persisted MCP changes must eventually replace the frozen spawn config;
+    // busy hosts keep their bridge until the existing idle retry can refresh it.
     invalidateCodex: async () => {
-      let codexRestarted = false;
-      try {
-        await restartCodexAfterAuthModeChange();
-        codexRestarted = true;
-      } catch (err) {
-        log.warn('restartCodexAfterAuthModeChange on custom mcp change failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      if (codexRestarted) {
-        try {
-          await shutdownCodexEnvironment();
-        } catch (err) {
-          log.warn('shutdownCodexEnvironment on custom mcp change failed', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      const ownerScopeKey = activeOwnerScopeKey();
+      await refreshCodexMcpEnvironment({
+        restartCodex: restartCodexAfterAuthModeChange,
+        shutdownCodexEnvironment,
+        onDeferred: () => {
+          if (!isAppSessionBoundaryPending() && activeOwnerScopeKey() === ownerScopeKey) {
+            scheduleDeferredCodexRestart('Custom MCP configuration changed');
+          }
+        },
+        logger: log,
+      });
       // Pi 的 MCP bridge 同样按首个会话冻结 server 集合:自定义 MCP 增删改后必须 invalidate,
       // 否则新 Pi 会话仍暴露已删/已禁用的工具、拿不到新启用的工具(codex review P1)。
       // 与 codex 分支独立(不依赖 codexRestarted),下一次 startSession lazy 重建。
@@ -7444,7 +7444,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       // 项目根，而不是 auto-* 运行目录。worktreeStore 以同一预生成 sessionId
       // 保存了权威 baseRepo。先完成 best-effort upsert 再让 handler 广播 created，
       // 这样 renderer 收到广播重拉 recent 表时不会撞到写入竞态。
-      if (co.workspaceKind !== 'dialogue' && !co.remoteHostId) {
+      if (
+        co.workspaceKind !== 'dialogue' &&
+        !co.remoteHostId &&
+        isRetainableProjectSession({ source: 'desktop', orcaRole: co.orcaRole })
+      ) {
         const recentProjectDir =
           worktreeStore.get(result.session.id)?.baseRepo ??
           getManagedWorktreeBasePath(co.workingDir) ??
@@ -8356,15 +8360,19 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     log,
   });
   pendingAgentSwitchApplyHolder = async (sessionId, signal, selection) => {
-    const release = await acquireSendToSessionLock(sessionId);
+    let stage = 'direct-send:acquire';
+    const release = await acquireSendToSessionLock(sessionId, undefined, () => stage);
     try {
+      stage = 'direct-send:reconcileBotModelRoute';
       await reconcileBotModelRoute(sessionId, true);
+      stage = 'direct-send:applyPendingAgentSwitchIfIdle';
       await applyPendingAgentSwitchIfIdle(agentSwitchDeps, sessionId, {
         bootstrapAfterSwitch: true,
         signal,
       });
       let resolvedSelection: ScheduledModelSelection | undefined;
       if (selection) {
+        stage = 'direct-send:applyScheduledModelSelection';
         resolvedSelection = await applyScheduledModelSelection(selection, {
           getTarget: async () => {
             const row = await agentSwitchDeps.getSessionRow(sessionId);
@@ -8396,7 +8404,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           },
         });
       }
+      stage = 'direct-send:prepareUnhealthySession';
       await contextOverflowRolloverHolder?.prepareUnhealthySession(sessionId);
+      // The caller retains the lease through runtime refresh and Session.send.
+      stage = 'direct-send:caller-dispatch';
       return { release, selection: resolvedSelection };
     } catch (err) {
       release();
@@ -8505,6 +8516,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     anchorClientId: string,
     opts: SessionSendOptions,
   ): Promise<SessionSendResult> {
+    assertUpstreamMergeTaskWritable(session.id);
     if (!session.remoteHostId && isCindyMakeWorktreePath(app.getPath('userData'), session.workDir)) {
       if (cindyMakeManager.isTaskPreparing(session.id))
         throwIpcError('PRECONDITION_FAILED', 'Cindy Make is still preparing this task');
@@ -9287,7 +9299,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     persistedContent?: string;
     clientId?: string;
     files?: AgentInputQueuedMessage['files'];
-    onAccepted?: () => void | Promise<void>;
+    onAccepted?: (replayed?: boolean) => void | Promise<void>;
     onAcceptedRollback?: () => void | Promise<void>;
   }) => {
     if (params.clientId && params.authorizationGuard) {
@@ -9323,7 +9335,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         return { ok: false as const, errorCode: 'AGENT_NOT_READY' as const, message: 'Previous welcome acceptance is unconfirmed; retry is required.' };
       }
       if (persisted && !params.toolsDisabled) {
-        await params.onAccepted?.();
+        await params.onAccepted?.(true);
         return {
           ok: true as const,
           targetSessionId: params.targetSessionId,
@@ -9390,7 +9402,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         queuedMessageId: clientId,
       };
     }
-    return sendToSessionInternal(params);
+    return sendToSessionInternal({ ...params, onAccepted: () => params.onAccepted?.() });
   };
 
   setBotInvitationWelcomeDispatch(dispatchBotSessionMessage);
@@ -9474,6 +9486,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   setBotRemoteMessageService(botDirectMessageServiceHolder);
   botDelegationServiceHolder?.dispose();
   botDelegationServiceHolder = createBotDelegationService({
+    readSessionExecution: id => {
+      const session = maker.getSession(id);
+      return session ? { instanceId: session.instanceId, generation: session.getTurnGeneration() } : null;
+    },
+    // Native close cannot be cancelled by the ordinary send-lock watchdog.
+    withSessionLock: withSessionRestartLock,
     taskControl: {
       steer: (params) => sessionControlService.steerSession(params),
       stop: (params) => sessionControlService.stopSessionTurn(params),
@@ -9548,6 +9566,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         onAccepted,
         dispatcherSessionId,
       }),
+    discardDelegationQueuedInputs: (sessionId, delegationId) =>
+      discardDelegationQueuedInputs(inputCoordinator, sessionId, delegationId, awaitAgentInputQueueSnapshotPersistence),
     abortSession: (async (sessionId) => {
       await inputCoordinator.ensureQueueRestored(sessionId);
       resetAutomaticRecoveryForExplicitStop(sessionId);
@@ -9564,9 +9584,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     resolveInteraction: resolvePendingInteraction,
     hasPendingInput: (sessionId) =>
       inputCoordinator.getQueueControlSnapshot(sessionId).pendingQueue.length > 0,
-    collectArtifacts: async (sessionId) => {
+    readPendingInputClientIds: (sessionId) =>
+      inputCoordinator.getQueueControlSnapshot(sessionId).pendingQueue.flatMap(item => [item.clientId, ...(item.supersedesUserClientId ? [item.supersedesUserClientId] : []), ...(item.retrySourceClientId ? [item.retrySourceClientId] : [])]),
+    collectArtifacts: async (sessionId, inputClientIds) => {
       await waitForTurnChangeSetSeal(sessionId);
-      const changeSets = await listTurnChangeSets(sessionId);
+      const acceptedInputs = new Set(inputClientIds);
+      const changeSets = (await listTurnChangeSets(sessionId)).filter(changeSet => acceptedInputs.has(changeSet.anchorClientId));
       const byPath = new Map<string, {
         path: string;
         absolutePath: string;
@@ -13757,12 +13780,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // 可见行),理由与踩过的坑记在 helper 的注释里。
     supersedeRetriedUserTurn,
     getLastAssistantTranscriptUuid,
-    onAcceptedQueuedMessage: (sessionId, item): Promise<void> | undefined => {
+    onAcceptedQueuedMessage: async (sessionId, item, restoredFromSnapshot): Promise<void> => {
       // 已派发 → 该项不会再走 discard,释放 scheduler 的 discard 监听防泄漏。
       schedulerQueuedPromptDiscardWatchers.delete(item.clientId);
       // 返回 promise 让 coordinator 在 onPersisted 链路里 await —— worker 运行态与
       // pending auto-bridge 副作用必须先于 turn 启动完成；失败仍吞错落日志，不拦派发。
-      return orcaInterAgentDispatcher.runQueuedOrcaInterAgentAcceptedCallback(sessionId, item);
+      await orcaInterAgentDispatcher.runQueuedOrcaInterAgentAcceptedCallback(sessionId, item);
+      await botDelegationServiceHolder?.acceptQueuedSessionInput(sessionId, item.clientId, item.supersedesUserClientId, restoredFromSnapshot, item.retrySourceClientId);
     },
     onUserMessagePersisting: (sessionId, item) => {
       markQueuedAttachmentPersistenceStarted(sessionId, item.clientId);
@@ -13781,6 +13805,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       settleQueuedAttachmentPersistenceFailure(sessionId, item.clientId, opts.retainForRetry);
     },
     onDispatchedUserTurn: async (sessionId, item, preVendorDispatchAt): Promise<void> => {
+      botDelegationServiceHolder?.confirmQueuedSessionInputDispatched(sessionId, item.clientId);
       welcomeDispatchReceipts.settle(sessionId, item.clientId, true);
       const attemptToken = autoResumeAttemptToken(item);
       if (
@@ -14239,7 +14264,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // 期间本地 Codex live 会话的排队派发被上方 coordinator 的 hasPendingCredentialSwitch
   // 谓词挡住,兑现后由 onApplied 逐个唤醒。
   const deferredCodexRestartService = new DeferredCodexRestartService({
-    restart: restartCodexAfterAuthModeChange,
+    restart: (applyRuntime) => restartCodexAfterAuthModeChange(async () => {
+      if (await applyRuntime() === false) return false;
+      await shutdownCodexEnvironment();
+    }),
     hasBusyLocalCodexSession: () =>
       maker
         .listActiveSessions()
@@ -18125,7 +18153,7 @@ async function checkWorkDirExists(
   // 或者 agent 真跑起来时由远端 codex 自己报 ENOENT)。这里直接放行。
   if (remoteHostId) return true;
   if (!workingDir?.trim()) return true;
-  const cindyMakeWorkspace = isCindyMakeWorktreePath(app.getPath('userData'), workingDir);
+  const cindyMakeWorkspace = isCindyMakeManagedWorktreePath(app.getPath('userData'), workingDir);
   if (cindyMakeWorkspace) workingDirectoryRecovery.discard(sessionId);
   workingDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
   const source: AgentKind = agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';

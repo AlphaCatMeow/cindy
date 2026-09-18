@@ -47,9 +47,11 @@ describe('Projects sidebar section', () => {
       'disabled: projectNodesToggleDisabled && !hasDeviceLayer && !hasGroupLayer',
     );
     expect(projectsSectionSource).toContain(
-      "const hasVisibleProjectGroups = mixedEntries.some((entry) => entry.kind === 'project')",
+      "const hasGroupLayer = mixedEntries.some((entry) => entry.kind !== 'session')",
     );
-    expect(projectsSectionSource).toContain('(!hasVisibleProjectGroups || isAllCollapsed)');
+    expect(projectsSectionSource).toContain(
+      "if (hasGroupLayer && !allGroupsCollapsed) return 'collapse-groups'",
+    );
     // 平铺时来源标签要覆盖从项目摊出来的会话,不能只喂 dialogues。
     expect(projectsSectionSource).toContain('flattenedSessionsForSourceLabels');
     expect(projectsSectionSource).toContain(
@@ -117,9 +119,17 @@ describe('Projects sidebar section', () => {
     expect(projectsSectionSource).toContain('useViewedPriorityHold(');
     expect(projectsSectionSource).toContain('holdViewedPriorityRank(');
     expect(projectsSectionSource).toContain('viewedSessionId ?? activeSessionId');
-    // 折叠豁免与排序同一口径(含远程),不再用只有本地的 notifications。
+    // 折叠豁免与排序、聚合灯同一口径(含远程):attention ∪ running
+    // (Greptile P1:running-only 会话不能被折进「显示全部」,否则上层
+    // 呼吸灯指向不可见条目),不再用只有本地的 notifications。
     expect(projectsSectionSource).toContain(
-      'entrySessions(entry).some((s) => priorityContext.attentionSessionIds.has(s.id))',
+      'const next = new Set(priorityContext.attentionSessionIds)',
+    );
+    expect(projectsSectionSource).toContain(
+      'for (const id of priorityContext.runningSessionIds) next.add(id)',
+    );
+    expect(projectsSectionSource).toContain(
+      'entrySessions(entry).some((s) => lampFoldExemptIds.has(s.id))',
     );
   });
 
@@ -129,7 +139,9 @@ describe('Projects sidebar section', () => {
     expect(projectsSectionSource).toContain(
       'return splitEntriesByDevice(mixedEntries, [...(remoteDeviceIndex?.keys() ?? [])], {',
     );
-    expect(projectsSectionSource).toContain('unclassified: deviceGroupingActive && !unclassifiedHidden ? unclassified : undefined');
+    expect(projectsSectionSource).toMatch(
+      /unclassified:\s+unclassifiedHidden\s+\? \[\]\s+: deviceGroupingActive\s+\? unclassified/,
+    );
     // 每段独立折叠视图 + 段内作用域的「显示全部」(复核 P2:共用一个标志会让
     // 点任一段全段展开)。
     expect(projectsSectionSource).toMatch(
