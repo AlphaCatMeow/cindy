@@ -5,6 +5,10 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-ipc-management-'));
 afterAll(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+const expectedAttestedRoot = (value: string): string => {
+  const physicalRoot = fs.realpathSync.native(value);
+  return process.platform === 'win32' ? physicalRoot.toLowerCase() : physicalRoot;
+};
 const setCindySkillEnabled = vi.fn(async () => undefined);
 const isCindyLearnSkillEnabled = vi.fn(() => true);
 vi.mock('../activationPreferences', () => ({
@@ -400,10 +404,7 @@ describe('registerSkillhubIpc usage handlers', () => {
     fs.mkdirSync(builtInRoot, { recursive: true });
     fs.writeFileSync(builtInFile, '# Learn\n');
     fs.writeFileSync(builtInNotes, 'notes\n');
-    const physicalBuiltInRoot = fs.realpathSync.native(builtInRoot);
-    const attestedRoot = process.platform === 'win32'
-      ? physicalBuiltInRoot.toLowerCase()
-      : physicalBuiltInRoot;
+    const attestedRoot = expectedAttestedRoot(builtInRoot);
     const sender = { id: 18, on: vi.fn(), once: vi.fn() };
     resolveExistingSkillPathForGrant.mockReturnValue(null);
     isExistingSkillPathGranted.mockReturnValue(false);
@@ -479,9 +480,7 @@ describe('registerSkillhubIpc usage handlers', () => {
     fs.writeFileSync(builtInFile, '# Learn\n');
     fs.symlinkSync(builtInRoot, sharedAlias, process.platform === 'win32' ? 'junction' : 'dir');
     const physicalBuiltInRoot = fs.realpathSync.native(builtInRoot);
-    const attestedRoot = process.platform === 'win32'
-      ? physicalBuiltInRoot.toLowerCase()
-      : physicalBuiltInRoot;
+    const attestedRoot = expectedAttestedRoot(builtInRoot);
     const sender = { id: 181, on: vi.fn(), once: vi.fn() };
     resolveExistingSkillPathForGrant.mockReturnValue(physicalBuiltInRoot);
     isExistingSkillPathGranted.mockReturnValue(true);
@@ -986,7 +985,7 @@ describe('registerSkillhubIpc usage handlers', () => {
 
     expect(readSkillRawFile).toHaveBeenCalledWith({
       filePath: mdPath,
-      attestedRoot: fs.realpathSync(builtInRoot),
+      attestedRoot: expectedAttestedRoot(builtInRoot),
     });
     expect(getLocalSkillUsageSummary).toHaveBeenCalledWith({
       skillName: 'cindy-skill-creator',
