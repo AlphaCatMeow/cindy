@@ -11123,6 +11123,9 @@
       "officialDetail": "由 Cindy 隨應用程式提供並維護。",
       "skillCreator": {
         "description": "建立或更新 Cindy 技能，並編寫清楚的說明與所需支援資源。"
+      },
+      "learn": {
+        "description": "從目前任務、描述的工作流程或 SkillHub 技能中提煉可重用技能，並透過 Cindy 的審查流程儲存。"
       }
     },
     "common": {
@@ -12071,7 +12074,8 @@
       "INTERNAL": "內部錯誤，請稍後重試"
     },
     "hub": {
-      "learnButton": "學習此技能"
+      "learnButton": "學習此技能",
+      "disabledHint": "請先在本機技能中啟用內建 Learn 技能。"
     }
   },
   "planMode": {

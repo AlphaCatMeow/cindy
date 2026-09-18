@@ -1046,7 +1046,7 @@ import {
   resetGoalController,
   getGoalTeardownGeneration,
 } from './goal-host/index.js';
-import { startLearnHost, getLearnController, resetLearnController } from './learn-host/index.js';
+import { startLearnHost, resetLearnController } from './learn-host/index.js';
 import { fetchHubSkillReference } from './learn-host/hubReference.js';
 import { registerLearnIpc, broadcastLearnEvent } from './learn-host/registerIpc.js';
 import { registerGoalHandlers, broadcastGoalStatus } from './maker-ipc/goal.js';
@@ -6091,20 +6091,19 @@ const registerIpcHandlers = () => {
       // Desktop slash command registry —— 注册 /help /clear 等内置项,
       // IPC 暴露见 maker-ipc/desktop-commands.ts (待 Step 5 添加)。
       // 单例 + 幂等保护 (makerIpcsRegistered flag) 保证 builtins 只灌一次。
-      // remoteInvoke:远程会话(ctx.deviceId)的 /goal /learn /cmd 业务体经隧道路由
+      // remoteInvoke:远程会话(ctx.deviceId)的 /goal /cmd 业务体经隧道路由
       // 到被控端 —— 走与 renderer deviceLink.invoke 同一条 handleInvoke 主路径
       // (控制开关校验 + 错误映射一致)。
       registerBuiltinDesktopCommands(getDesktopCommandRegistry(), {
         getGoalController,
-        getLearnController,
         remoteInvoke: (deviceId, channel, args) =>
           deviceLinkHandleInvoke(deviceLinkIpcDeps(), deviceId, channel, args),
       });
       // desktop-cmd:run —— /cmd 的被控端远程执行 handler(仅隧道 dispatch 消费,
       // 本机 /cmd 仍在 builtins 内联执行,不走 IPC 往返)。
       registerRemoteCmdIpc();
-      // learn:* handler 提前一次性注册(eager,同 goal);handler 内部 getLearnController()
-      // 取单例,invoke 时 controller 已由 startLearnHost 启动。
+      // learn:* handler 提前一次性注册(eager,同 goal);handler 内部读取 controller
+      // 单例,invoke 时 controller 已由 startLearnHost 启动。
       registerLearnIpc();
       // maker:schedule:* handler 提前一次性注册;handler 内部 awaitReady 等真实
       // scheduler 实例(由后续 attemptStartScheduler 通过 attachSchedulerEventListeners

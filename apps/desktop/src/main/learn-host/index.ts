@@ -207,9 +207,20 @@ export function startLearnHost(deps: StartLearnHostDeps): LearnController {
         .orderBy(desc(messagesTable.createdAt))
         .limit(CONVERSATION_MESSAGE_LIMIT);
       const items: Array<{ role: string; text: string }> = [];
-      for (const r of rows.reverse()) {
+      const chronologicalRows = rows.reverse();
+      for (const [index, r] of chronologicalRows.entries()) {
         const text = visibleMessageTextForConversationSearch(r.role, r.content);
         if (!text) continue;
+        // The built-in Learn Skill reaches the host after its invocation has
+        // entered chat history. Keep the trigger itself out of the evidence;
+        // the former Desktop command was intercepted before persistence.
+        if (
+          index === chronologicalRows.length - 1
+          && r.role === 'user'
+          && /^\/(?:skill:)?learn\s*$/i.test(text.trim())
+        ) {
+          continue;
+        }
         items.push({ role: r.role, text: redactSensitive(text).text });
       }
       return formatConversationBlock(items);
@@ -312,7 +323,7 @@ export function startLearnHost(deps: StartLearnHostDeps): LearnController {
   return controller;
 }
 
-/** null-safe 取单例 —— startLearnHost 之前调用返回 null(builtins /learn 用)。 */
+/** null-safe 取单例 —— startLearnHost 之前调用返回 null(cindy_helper Learn 工具使用)。 */
 export function getLearnController(): LearnController | null {
   return _controller;
 }

@@ -11123,6 +11123,9 @@
       "officialDetail": "Cindy가 앱에 포함하고 관리합니다.",
       "skillCreator": {
         "description": "명확한 지침과 필요한 지원 리소스를 갖춘 Cindy 스킬을 만들거나 업데이트합니다."
+      },
+      "learn": {
+        "description": "현재 작업, 설명한 워크플로 또는 SkillHub 스킬에서 재사용 가능한 스킬을 추출하고 Cindy 검토 절차를 거쳐 저장합니다."
       }
     },
     "common": {
@@ -12071,7 +12074,8 @@
       "INTERNAL": "내부 오류입니다. 잠시 후 다시 시도해 주세요."
     },
     "hub": {
-      "learnButton": "이 스킬 학습하기"
+      "learnButton": "이 스킬 학습하기",
+      "disabledHint": "이 작업을 사용하려면 로컬 스킬에서 기본 제공 Learn 스킬을 활성화하세요."
     }
   },
   "planMode": {

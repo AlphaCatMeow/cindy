@@ -333,7 +333,7 @@ export class LearnController {
       throw new LearnError('INVALID_PARAMS', 'hubSlug is required for hub source');
     }
     // hubSlug 会作为路径段进入 resolveInstalledSkillDir / writeReferenceFiles:
-    // builtins 的 /learn hub: 正则已限,但 IPC learn:start 可直调 —— 边界处再校
+    // 内置 Skill 与 IPC learn:start 都可能传入 hubSlug —— 在状态机边界再校
     // 一次,拒绝分隔符 / '..' 等任意串(自查;与市场 slug 规则一致)。
     if (req.sourceKind === 'hub' && req.hubSlug && !/^[a-z0-9][a-z0-9-]*$/.test(req.hubSlug)) {
       throw new LearnError('INVALID_PARAMS', `invalid hubSlug: ${req.hubSlug}`);

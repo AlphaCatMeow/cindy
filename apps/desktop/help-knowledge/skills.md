@@ -28,12 +28,13 @@ Skills are reusable agent capabilities you package as a folder and load into you
 
 - Type `/` in the composer to open the slash-command palette; your installed skills show up there alongside built-in and agent commands. Pick one to run it.
 
-**Creating a Skill from the composer:**
+**Creating or learning a Skill from the composer:**
 
 - Cindy includes `/cindy-skill-creator`. Invoke it with a description of the Skill you want, such as `/cindy-skill-creator Create a Skill that checks release notes`. Invoking it without a description asks what you want to create.
 - The current Agent creates or updates the Skill directly with its normal file tools. It does not use the `/learn` staging flow.
 - Unless you request another location, new Skills go to `~/.agents/skills/<name>/`. Ask for a project-specific Skill to create it under `<working-dir>/.agents/skills/<name>/`.
-- The built-in `cindy-skill-creator` appears in the local Skill list. You can disable or enable it there; because it ships with Cindy, it cannot be uninstalled. The setting applies to new or restarted Agent sessions.
+- Cindy also includes `/learn`. Bare `/learn` distills the current task; `/learn <description>` learns from a described workflow; `/learn hub:<scope>:<slug> [instructions]` learns from a SkillHub Skill. Cindy gathers evidence, runs the distillation in a separate task, and shows a diff for review before saving the proposed Skill.
+- The built-in `cindy-skill-creator` and `learn` entries appear in the local Skill list with an Official badge. You can disable or enable either entry there; because they ship with Cindy, they cannot be uninstalled. The setting applies to new or restarted Agent sessions. Disabling `learn` also disables the **Learn this skill** action in SkillHub after the local Skill list has refreshed.
 
 **Disabling or uninstalling a local skill (Desktop):**
 

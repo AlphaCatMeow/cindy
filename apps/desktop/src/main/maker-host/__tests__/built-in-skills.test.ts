@@ -16,14 +16,20 @@ function fixture() {
   roots.push(root);
   const bundledRoot = path.join(root, 'resources', 'system-skills');
   const source = path.join(bundledRoot, 'cindy-skill-creator');
+  const learnSource = path.join(bundledRoot, 'learn');
   const userDataDir = path.join(root, 'user-data');
   const homeDir = path.join(root, 'home');
   fs.mkdirSync(path.join(source, 'scripts'), { recursive: true });
+  fs.mkdirSync(learnSource, { recursive: true });
   fs.writeFileSync(
     path.join(source, 'SKILL.md'),
     '---\nname: cindy-skill-creator\ndescription: Create Skills\n---\n\n# Creator\n',
   );
   fs.writeFileSync(path.join(source, 'scripts', 'validate.py'), 'print("ok")\n');
+  fs.writeFileSync(
+    path.join(learnSource, 'SKILL.md'),
+    '---\nname: learn\ndescription: Start Cindy Learn\n---\n\n# Learn\n',
+  );
   return { bundledRoot, source, userDataDir, homeDir };
 }
 
@@ -45,6 +51,13 @@ describe('built-in Skills', () => {
     );
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       '# Creator',
+    );
+    const learnDescriptor = first.descriptors.find((item) => item.name === 'learn')!;
+    expect(fs.realpathSync(path.join(input.homeDir, '.agents', 'skills', 'learn'))).toBe(
+      fs.realpathSync(learnDescriptor.absolutePath),
+    );
+    expect(fs.readFileSync(path.join(learnDescriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
+      '# Learn',
     );
 
     const second = await prepareBuiltInSkills(input);

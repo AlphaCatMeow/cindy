@@ -18,7 +18,7 @@ import {
   type SortBy,
   type Visibility,
 } from './hooks/useMarketList';
-import { refresh as refreshSkillhub } from './hooks/useSkillhub';
+import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
 import { MarketManagementDialogs, useMarketManagement } from './hooks/useMarketManagement';
 import { getMarketSelected, setMarketSelected } from './hooks/useMarketSelection';
 import { MarketCard } from './components/MarketCard';
@@ -31,6 +31,7 @@ import { syncMarketPreviewSelection } from './lib/marketPreviewSync';
 import { useAuth } from '@/contexts/AuthContext';
 import { CATEGORY_ALL } from '../../../shared/skillhubCategory';
 import { useSkillhubIdentityPolicy } from './hooks/useSkillhubIdentityPolicy';
+import { isBuiltInLearnSkillEnabled } from './lib/builtInSkillPresentation';
 
 const FILTER_CHIP_STYLE = { height: '32px', padding: '0 12px', fontSize: '12px' };
 // Must match the global native scrollbar width in styles/globals.css.
@@ -77,6 +78,7 @@ export function SkillhubMarketListView() {
 function SkillhubMarketListViewInner() {
   const { t } = useTranslation();
   const { user, isInitializing } = useAuth();
+  const { skills: localSkills, bootstrapped: skillhubBootstrapped } = useSkillhub();
   const identityPolicy = useSkillhubIdentityPolicy(user);
   const location = useLocation();
   const navigate = useNavigate();
@@ -505,6 +507,7 @@ function SkillhubMarketListViewInner() {
           : 'none'}
         onClone={handleClone}
         onManageAction={management.handleManageAction}
+        learnSkillEnabled={isBuiltInLearnSkillEnabled(localSkills, skillhubBootstrapped)}
       />
       <MarketManagementDialogs controller={management} />
     </div>

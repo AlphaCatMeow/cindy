@@ -116,16 +116,17 @@ function HelpCard({ data }: { data?: Record<string, unknown> }) {
     items: Array<{ name: string; description?: string; source: string }>,
   ) => (
     <div className="flex flex-col gap-[2px]">
-      {items.map((c) => (
-        <div key={c.name} className={rowClass}>
-          <span className={codeClass}>/{c.name}</span>
-          <span className={descClass}>
-            {builtInSkillDescriptionKey(c)
-              ? t('skillhub.builtIn.skillCreator.description')
-              : c.description ?? ''}
-          </span>
-        </div>
-      ))}
+      {items.map((c) => {
+        const descriptionKey = builtInSkillDescriptionKey(c);
+        return (
+          <div key={c.name} className={rowClass}>
+            <span className={codeClass}>/{c.name}</span>
+            <span className={descClass}>
+              {descriptionKey ? t(descriptionKey) : c.description ?? ''}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 

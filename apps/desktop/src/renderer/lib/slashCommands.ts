@@ -19,10 +19,7 @@
 import type { UnifiedCommand, AgentKind } from '@cindy/maker-core';
 import { leadingSlashInvocation } from '@cindy/maker-shared';
 import type { PiPackageCommandRuntimeStatus } from '@/../shared/piPackages';
-import {
-  isCindyBuiltInSkillMetadata,
-  isCindyOfficialDesktopCommandName,
-} from '@/../shared/cindyBuiltInSkills';
+import { isCindyBuiltInSkillMetadata } from '@/../shared/cindyBuiltInSkills';
 
 export { leadingSlashInvocation };
 
@@ -45,9 +42,6 @@ export function isSlashCommandUnavailable(command: UnifiedCommand): boolean {
 }
 
 export function isCindyOfficialSlashCommand(command: UnifiedCommand): boolean {
-  if (command.kind === 'desktop') {
-    return isCindyOfficialDesktopCommandName(command.name);
-  }
   return command.kind === 'agent-skill' && isCindyBuiltInSkillMetadata(command);
 }
 
@@ -207,9 +201,10 @@ export function isSlashCommandRosterReady(
 }
 
 // device-link 远程会话下 desktop 命令**全量可用**:业务语义在「会话归属设备」的命令
-// (/goal /learn /cmd)由控制端 main(commands/builtins.ts)按 ctx.deviceId 经隧道路由
-// 到被控端对应 channel(maker:goal:* / learn:* / desktop-cmd:run,均在 REMOTE_INVOKE_ALLOWLIST);
+// (/goal /cmd)由控制端 main(commands/builtins.ts)按 ctx.deviceId 经隧道路由
+// 到被控端对应 channel(maker:goal:* / desktop-cmd:run,均在 REMOTE_INVOKE_ALLOWLIST);
 // 纯控制端 UI 命令(/help /clear /workflows /jump-session /issue)本就与会话归属无关。
+// /learn 是被控端 Agent 暴露的 Skill,通过同机 cindy_helper 启动 Learn host,不走此路径。
 // 历史上这里有一张 DEVICE_LINK_UNAVAILABLE 黑名单(goal/learn,reviewer #354 / Codex #483
 // 时代控制端还没有隧道路由)—— 隧道链路打通后已删除;被控端版本过旧不支持对应 channel 时,
 // main 会广播 error: 'remote-unsupported',renderer toast 提示,不再静默剔除命令。
@@ -478,7 +473,7 @@ export interface DispatchContext {
   workingDir?: string;
   /** `/name args...` 中 name 后面的剩余文本; 没有则空串。 */
   args?: string;
-  /** device-link 远程会话的归属设备 id(本机会话缺省)。main 侧 /goal /learn /cmd
+  /** device-link 远程会话的归属设备 id(本机会话缺省)。main 侧 /goal /cmd
    *  据此把业务体经隧道路由到被控端执行。 */
   deviceId?: string;
 }

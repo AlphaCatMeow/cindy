@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CINDY_LEARN_SOURCE_DESCRIPTION } from '../../../shared/cindyBuiltInSkills';
 
 import {
   filterSlashCommands,
@@ -126,7 +127,12 @@ describe('filterSlashCommands', () => {
         description: 'Create or update a Cindy Skill',
         source: 'skill' as const,
       },
-      { kind: 'desktop' as const, name: 'learn', description: 'Learn' },
+      {
+        kind: 'agent-skill' as const,
+        name: 'learn',
+        description: CINDY_LEARN_SOURCE_DESCRIPTION,
+        source: 'skill' as const,
+      },
       { kind: 'agent-skill' as const, name: 'release-notes', source: 'skill' as const },
     ];
 
@@ -138,11 +144,23 @@ describe('filterSlashCommands', () => {
     ]);
   });
 
-  it('recognizes only the Desktop /learn command as official', () => {
+  it('recognizes the Cindy Learn Skill but not a same-name desktop command or user Skill', () => {
     expect(isCindyOfficialSlashCommand({
       kind: 'desktop',
       name: 'learn',
       description: 'Learn',
+    })).toBe(false);
+    expect(isCindyOfficialSlashCommand({
+      kind: 'agent-skill',
+      name: 'learn',
+      description: CINDY_LEARN_SOURCE_DESCRIPTION,
+      source: 'skill',
+    })).toBe(true);
+    expect(isCindyOfficialSlashCommand({
+      kind: 'agent-skill',
+      name: 'learn',
+      description: 'Distill a reusable Skill with Cindy',
+      source: 'skill',
     })).toBe(true);
     expect(isCindyOfficialSlashCommand({
       kind: 'agent-skill',

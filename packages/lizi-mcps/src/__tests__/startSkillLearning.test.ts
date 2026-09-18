@@ -1,0 +1,103 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
+import { registerStartSkillLearningTool } from '../xdt-helper/start_skill_learning.js';
+
+function payload(result: { content: Array<{ type: string; text?: string }> }): Record<string, unknown> {
+  const text = result.content.find((block) => block.type === 'text')?.text;
+  if (!text) throw new Error('missing text payload');
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+describe('start_skill_learning', () => {
+  it('binds the current task and starts a session Learn run', async () => {
+    const registry = new XdtHelperToolRegistry();
+    const startSkillLearning = vi.fn(async () => ({ ok: true as const, runId: 'run-1' }));
+    registerStartSkillLearningTool(registry, {
+      getSessionContext: () => ({
+        agentKind: 'codex',
+        workingDir: '/repo',
+        sessionId: 'session-1',
+      }),
+      startSkillLearning,
+    });
+
+    const result = await registry.call('start_skill_learning', {
+      source_kind: 'session',
+      input: '',
+    });
+
+    expect(startSkillLearning).toHaveBeenCalledWith({
+      callerSessionId: 'session-1',
+      input: '',
+      sourceKind: 'session',
+    });
+    expect(payload(result)).toMatchObject({ ok: true, run_id: 'run-1', status: 'collecting' });
+  });
+
+  it('normalizes SkillHub input and defaults its catalog scope', async () => {
+    const registry = new XdtHelperToolRegistry();
+    const startSkillLearning = vi.fn(async () => ({ ok: true as const, runId: 'run-2' }));
+    registerStartSkillLearningTool(registry, {
+      getSessionContext: () => ({
+        agentKind: 'claude-code',
+        workingDir: '/repo',
+        sessionId: 'session-2',
+      }),
+      startSkillLearning,
+    });
+
+    await registry.call('start_skill_learning', {
+      source_kind: 'hub',
+      hub_slug: 'release-notes',
+      input: '  keep the checks  ',
+    });
+
+    expect(startSkillLearning).toHaveBeenCalledWith({
+      callerSessionId: 'session-2',
+      input: 'keep the checks',
+      sourceKind: 'hub',
+      hubSlug: 'release-notes',
+      hubCatalogScope: 'market',
+    });
+  });
+
+  it.each([
+    [{ source_kind: 'freetext', input: '   ' }, 'INVALID_ARGS'],
+    [{ source_kind: 'hub', input: '' }, 'INVALID_ARGS'],
+    [{ source_kind: 'session', input: '', hub_slug: 'extra' }, 'INVALID_ARGS'],
+  ])('rejects inconsistent arguments %#', async (args, expectedErrorCode) => {
+    const registry = new XdtHelperToolRegistry();
+    const startSkillLearning = vi.fn();
+    registerStartSkillLearningTool(registry, {
+      getSessionContext: () => ({
+        agentKind: 'pi',
+        workingDir: '/repo',
+        sessionId: 'session-3',
+      }),
+      startSkillLearning,
+    });
+
+    const result = await registry.call('start_skill_learning', args);
+
+    expect(payload(result)).toMatchObject({ ok: false, errorCode: expectedErrorCode });
+    expect(startSkillLearning).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without a bound Cindy task', async () => {
+    const registry = new XdtHelperToolRegistry();
+    const startSkillLearning = vi.fn();
+    registerStartSkillLearningTool(registry, {
+      getSessionContext: () => ({ agentKind: 'codex', workingDir: '/repo' }),
+      startSkillLearning,
+    });
+
+    const result = await registry.call('start_skill_learning', {
+      source_kind: 'session',
+      input: '',
+    });
+
+    expect(payload(result)).toMatchObject({ ok: false, errorCode: 'NO_SESSION_CONTEXT' });
+    expect(startSkillLearning).not.toHaveBeenCalled();
+  });
+});

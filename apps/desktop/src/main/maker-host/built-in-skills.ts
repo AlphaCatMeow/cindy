@@ -3,12 +3,16 @@ import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CINDY_SKILL_CREATOR_NAME } from '../../shared/cindyBuiltInSkills';
+import {
+  CINDY_LEARN_NAME,
+  CINDY_SKILL_CREATOR_NAME,
+} from '../../shared/cindyBuiltInSkills';
 import { atomicWriteFileSync } from '../utils/atomicWriteFile';
 
 export const BUILT_IN_SKILL_CREATOR_NAME = CINDY_SKILL_CREATOR_NAME;
+export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
 
-const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME] as const;
+const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_NAME] as const;
 const MANIFEST_FILE = '.cindy-system-skills.json';
 
 export interface BuiltInSkillDescriptor {

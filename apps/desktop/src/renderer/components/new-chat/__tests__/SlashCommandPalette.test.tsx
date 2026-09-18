@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import zhCNCommon from '@/i18n/locales/zh-CN/common.json';
 import type { UnifiedCommand } from '@/lib/slashCommands';
+import { CINDY_LEARN_SOURCE_DESCRIPTION } from '../../../../shared/cindyBuiltInSkills';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -200,11 +201,17 @@ describe('SlashCommandPalette project Skill rows', () => {
     expect(screen.queryByText('skillhub.builtIn.official')).toBeNull();
   });
 
-  it('marks Cindy Desktop /learn as official', () => {
+  it('localizes and marks the built-in Learn Skill as official', () => {
     render(
       <SlashCommandPalette
         query=""
-        commands={[{ kind: 'desktop', name: 'learn', description: 'Learn from this task' }]}
+        commands={[{
+          kind: 'agent-skill',
+          name: 'learn',
+          description: CINDY_LEARN_SOURCE_DESCRIPTION,
+          source: 'skill',
+          scope: 'user',
+        }]}
         focusedIndex={0}
         onFocusedIndexChange={vi.fn()}
         onSelect={vi.fn()}
@@ -213,6 +220,7 @@ describe('SlashCommandPalette project Skill rows', () => {
     );
 
     expect(screen.getByText('skillhub.builtIn.official')).toBeTruthy();
+    expect(screen.getByText('skillhub.builtIn.learn.description')).toBeTruthy();
   });
 
   it('does not mark a user Skill named learn as official', () => {

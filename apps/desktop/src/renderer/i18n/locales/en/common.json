@@ -11139,6 +11139,9 @@
       "officialDetail": "Included and maintained by Cindy.",
       "skillCreator": {
         "description": "Create or update a Cindy Skill with clear instructions and supporting resources."
+      },
+      "learn": {
+        "description": "Distill a reusable Skill from this task, a described workflow, or a SkillHub Skill through Cindy's review flow."
       }
     },
     "common": {
@@ -12088,7 +12091,8 @@
       "INTERNAL": "Internal error. Please try again later."
     },
     "hub": {
-      "learnButton": "Learn this skill"
+      "learnButton": "Learn this skill",
+      "disabledHint": "Enable the built-in Learn Skill in Local Skills to use this action."
     }
   },
   "planMode": {

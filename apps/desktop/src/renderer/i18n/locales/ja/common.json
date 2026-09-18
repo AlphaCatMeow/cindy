@@ -11123,6 +11123,9 @@
       "officialDetail": "Cindy がアプリに同梱し、管理しています。",
       "skillCreator": {
         "description": "明確な手順と必要な補助リソースを備えた Cindy スキルを作成または更新します。"
+      },
+      "learn": {
+        "description": "現在のタスク、説明されたワークフロー、または SkillHub のスキルから再利用可能なスキルを抽出し、Cindy のレビューフローを経て保存します。"
       }
     },
     "common": {
@@ -12071,7 +12074,8 @@
       "INTERNAL": "内部エラーです。しばらくしてから再試行してください。"
     },
     "hub": {
-      "learnButton": "このスキルを学習"
+      "learnButton": "このスキルを学習",
+      "disabledHint": "この操作を使うには、ローカルスキルで組み込みの Learn スキルを有効にしてください。"
     }
   },
   "planMode": {

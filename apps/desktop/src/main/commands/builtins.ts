@@ -26,10 +26,9 @@ import { resolveMakeRuntime } from '../cindy-make/runtimeVersion.js';
 import { makeToolRoot } from '../cindy-make/toolInstaller.js';
 import { makeSourceRoot, prepareCindySource } from '../cindy-make/sourcePreparation.js';
 import type { MakeDoctorReport } from '../../shared/cindyMakeDoctor.js';
-// type-only:不引入对 goal-host / learn-host 的运行时依赖(避免潜在 import 环),
-// 运行时实例由 bootstrap 经 deps.getGoalController / getLearnController 注入。
+// type-only:不引入对 goal-host 的运行时依赖(避免潜在 import 环),
+// 运行时实例由 bootstrap 经 deps.getGoalController 注入。
 import type { GoalController } from '../goal-host/controller.js';
-import type { LearnController } from '../learn-host/controller.js';
 import type { DesktopCommandContext, DesktopCommandRegistry } from './registry.js';
 
 const log = createLogger('desktop-commands');
@@ -51,7 +50,6 @@ export interface DesktopCommandTriggeredPayload {
     | 'jump-session'
     | 'goal'
     | 'workflows'
-    | 'learn'
     | 'cindy-make-doctor'
     | 'cindy-make';
   doctorReport?: MakeDoctorReport;
@@ -60,14 +58,12 @@ export interface DesktopCommandTriggeredPayload {
   args?: string;
   /** /cmd 专用 —— shell 命令执行结果。其它命令此字段不存在。 */
   result?: CmdExecutionResult;
-  /** /goal、/learn 共用 —— 错误码(renderer 据此显示用法/错误提示):
-   *  goal-usage / goal-no-session / goal-failed;learn-usage / learn-busy / learn-failed;
+  /** /goal 专用 —— 错误码(renderer 据此显示用法/错误提示):
+   *  goal-usage / goal-no-session / goal-failed;
    *  remote-unsupported(远程会话:被控端版本过旧,不支持该命令的隧道 channel)。 */
   error?: string;
   /** /goal 专用 —— 动作:'set'(已设目标)/ 'cleared'(已清除)/ 'open-dialog'(无参 /goal → renderer 打开新建目标弹窗)。GoalIndicator 由状态 push 驱动,set/cleared 仅用于插一张确认卡。 */
   goalAction?: 'set' | 'cleared' | 'open-dialog';
-  /** /learn 专用 —— 启动成功时的 runId(renderer 据此关联 learn:event 状态流)。 */
-  learnRunId?: string;
 }
 
 export interface CmdExecutionResult {
@@ -340,11 +336,9 @@ const GOAL_CLEAR_ALIASES = new Set(['clear', 'stop', 'off', 'cancel', 'reset', '
 export interface BuiltinDesktopCommandDeps {
   /** null-safe 取 GoalController 单例(注册早于 startGoalController,invoke 时已就绪)。 */
   getGoalController: () => GoalController | null;
-  /** null-safe 取 LearnController 单例(同 goal:注册早于 startLearnHost)。 */
-  getLearnController: () => LearnController | null;
   /**
    * device-link 隧道 invoke(控制端 → 被控端)。ctx.deviceId 存在(远程会话)时,
-   * /goal /learn /cmd 的业务体经它路由到被控端执行 —— 与 renderer 的
+   * /goal /cmd 的业务体经它路由到被控端执行 —— 与 renderer 的
    * deviceLink.invoke 走同一条 handleInvoke 主路径(含控制开关校验 + 错误映射,
    * 失败抛 `[CODE] message` 形态 Error)。bootstrap 注入,避免 builtins 直接
    * import device-link 运行时(与 getGoalController 同款解耦)。
@@ -353,7 +347,7 @@ export interface BuiltinDesktopCommandDeps {
 }
 
 /**
- * 从错误对象提取错误码:优先取 `.code`(本机 LearnError / GoalControllerInputError),
+ * 从错误对象提取错误码:优先取 `.code`(本机 GoalControllerInputError),
  * 回退解析 throwIpcError 的 `[CODE] message` 编码(隧道透传的被控端错误)。
  * 本机与远程两条错误链路因此在调用点收敛成同一套分类逻辑。
  */
@@ -686,64 +680,6 @@ export function registerBuiltinDesktopCommands(
         broadcastDesktopCommand({
           ...buildPayload('goal', ctx),
           error: isRemoteUnsupported(err) ? 'remote-unsupported' : 'goal-failed',
-        });
-      }
-    },
-  });
-
-  registry.register({
-    name: 'learn',
-    description:
-      'Distill a reusable skill from anything you describe (a workflow, a repo, a URL, how you usually do X) — grounded in your usage history and profile, reviewed as a diff before saving. Bare /learn distills the current conversation; /learn hub:<slug> learns from a SkillHub skill. Usage: /learn [hub:<slug>] [what to learn]',
-    execute: async (ctx) => {
-      const arg = (ctx.args ?? '').trim();
-      // 无参 /learn = 蒸馏当前会话(Hermes 同语义)—— 需要挂在一个已有会话上;
-      // 草稿态(无 sessionId)没有可蒸的内容,回用法提示。
-      if (!arg && !ctx.sessionId) {
-        sendDesktopCommandToSender(ctx, { ...buildPayload('learn', ctx), error: 'learn-usage' });
-        return;
-      }
-      // 远程会话:learn-host 全流程在被控端(证据查它自己的 DB、staging 在它的
-      // userData、skill 落它的 ~/.agents/skills),startLearn 经隧道路由到
-      // learn:start;本机路径不变。
-      const controller = ctx.deviceId ? null : deps.getLearnController();
-      if (!ctx.deviceId && !controller) {
-        sendDesktopCommandToSender(ctx, { ...buildPayload('learn', ctx), error: 'learn-failed' });
-        return;
-      }
-      // `/learn hub:<slug> [补充要求]` —— skill hub「学习此技能」预填的形态,
-      // 用户可在输入框改要求、换模型后再发。slug 规则与市场一致([a-z0-9-])。
-      const hubMatch = /^hub:(?:(market|team):)?([a-z0-9][a-z0-9-]*)\s*/.exec(arg);
-      const req = hubMatch
-        ? {
-            input: arg.slice(hubMatch[0].length).trim(),
-            sourceKind: 'hub' as const,
-            hubSlug: hubMatch[2],
-            ...(hubMatch[1] ? { hubCatalogScope: hubMatch[1] as 'market' | 'team' } : {}),
-            ...(ctx.sessionId ? { originSessionId: ctx.sessionId } : {}),
-          }
-        : {
-            input: arg,
-            sourceKind: (arg ? 'freetext' : 'session') as 'freetext' | 'session',
-            ...(ctx.sessionId ? { originSessionId: ctx.sessionId } : {}),
-          };
-      try {
-        const { runId } = ctx.deviceId
-          ? ((await deps.remoteInvoke(ctx.deviceId, 'learn:start', [req])) as { runId: string })
-          : await controller!.startLearn(req);
-        sendDesktopCommandToSender(ctx, { ...buildPayload('learn', ctx), learnRunId: runId });
-      } catch (err) {
-        // extractErrorCode 同时覆盖本机 LearnError.code 与隧道 `[LEARN_BUSY] ...` 编码。
-        const code = extractErrorCode(err);
-        log.warn('/learn startLearn failed', err);
-        sendDesktopCommandToSender(ctx, {
-          ...buildPayload('learn', ctx),
-          error:
-            code === 'LEARN_BUSY'
-              ? 'learn-busy'
-              : isRemoteUnsupported(err)
-                ? 'remote-unsupported'
-                : 'learn-failed',
         });
       }
     },

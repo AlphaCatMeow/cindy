@@ -29,7 +29,10 @@ import {
   PluginManagementPage,
 } from '@/features/plugin/PluginManagementLayout';
 import { buildLocalSkillRoute, findLocalSkillByPath } from './lib/localRoutes';
-import { builtInSkillDescriptionKey } from './lib/builtInSkillPresentation';
+import {
+  builtInSkillDescriptionKey,
+  isBuiltInLearnSkillEnabled,
+} from './lib/builtInSkillPresentation';
 import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
 import {
   MARKET_PAGE_SIZE,
@@ -476,6 +479,7 @@ export function SkillhubHomeView({
           }
           onClone={handleClone}
           onManageAction={management.handleManageAction}
+          learnSkillEnabled={isBuiltInLearnSkillEnabled(skills, bootstrapped)}
         />
         <MarketManagementDialogs controller={management} />
         <InstallTargetPicker
