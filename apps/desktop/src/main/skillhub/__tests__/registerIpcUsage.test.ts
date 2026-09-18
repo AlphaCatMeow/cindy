@@ -374,6 +374,56 @@ describe('registerSkillhubIpc usage handlers', () => {
     expect(afterDestroy).toMatchObject({ success: false });
   });
 
+  it('grants read-only access to a Main-attested built-in with no discovery alias', async () => {
+    const builtInRoot = path.join(fixtureRoot, 'shared-system-skills', 'learn');
+    const builtInFile = path.join(builtInRoot, 'SKILL.md');
+    fs.mkdirSync(builtInRoot, { recursive: true });
+    fs.writeFileSync(builtInFile, '# Learn\n');
+    const sender = { id: 18, on: vi.fn(), once: vi.fn() };
+    resolveExistingSkillPathForGrant.mockReturnValue(null);
+    isExistingSkillPathGranted.mockReturnValue(false);
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        id: 'builtin:learn',
+        kind: 'skill',
+        name: 'learn',
+        absolutePath: builtInRoot,
+        discoveredPath: builtInRoot,
+        discoveryPaths: [builtInRoot],
+        scope: 'global',
+        builtIn: true,
+      }],
+      sources: [],
+    });
+    readSkillContent.mockResolvedValue({ success: true, content: 'Learn' });
+    const { registerSkillhubIpc } = await import('../registerIpc');
+    registerSkillhubIpc({
+      getMaker: () => ({ listAgentSkills }) as never,
+      getManagedSkillRoots,
+      getBuiltInSkills: () => [{
+        name: 'learn',
+        absolutePath: builtInRoot,
+        nativeClaudePath: '/tmp/claude-home/skills/learn',
+      }],
+      getAllowedProjectRoots,
+      marketService: marketService as never,
+      publishService: { publish, cancel } as never,
+    });
+
+    await handlers.get('skillhub:scan')?.({ sender }, { projects: [] });
+    await expect(handlers.get('skillhub:read-skill')?.(
+      { sender },
+      { mdPath: builtInFile },
+    )).resolves.toMatchObject({ success: true, content: 'Learn' });
+    expect(readSkillContent).toHaveBeenCalledWith({ mdPath: builtInFile });
+
+    await expect(handlers.get('skillhub:write-file')?.(
+      { sender },
+      { filePath: builtInFile, content: '# changed' },
+    )).resolves.toMatchObject({ success: false, error: expect.stringContaining('read-only') });
+    expect(writeSkillFile).not.toHaveBeenCalled();
+  });
+
   it.each(['unchanged', 'grant-wait', 'mutation-wait', 'boundary-pending'] as const)(
     'guards local rename at its original owner generation: %s', async (transition) => {
       const sender = { id: 71, on: vi.fn(), once: vi.fn() };

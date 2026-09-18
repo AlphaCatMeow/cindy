@@ -2,7 +2,7 @@
  * builtinsRemoteRouting.test.ts
  * ---------------------------------------------------------------------------
  * desktop 命令按会话归属路由的回归:ctx.deviceId 存在(device-link 远程会话)时,
- * /goal /cmd 的业务体必须经 deps.remoteInvoke 隧道到被控端对应 channel,
+ * /goal /learn /cmd 的业务体必须经 deps.remoteInvoke 隧道到被控端对应 channel,
  * 且**不**触碰本机 controller;本机会话(无 deviceId)行为与改造前一致。
  * 错误分类:隧道 `[CODE] message` 编码与本机 err.code 收敛到同一套。
  */
@@ -37,15 +37,19 @@ function sentPayloads(): Payload[] {
 
 function makeHarness(overrides?: {
   remoteInvoke?: (deviceId: string, channel: string, args: unknown[]) => Promise<unknown>;
+  isLearnEnabled?: () => boolean;
 }) {
   const registry = new DesktopCommandRegistry();
   const goalController = { setGoal: vi.fn(), clearGoal: vi.fn() };
+  const learnController = { startLearn: vi.fn(async () => ({ runId: 'local-run' })) };
   const remoteInvoke = vi.fn(overrides?.remoteInvoke ?? (async () => ({})));
   registerBuiltinDesktopCommands(registry, {
     getGoalController: () => goalController as never,
+    getLearnController: () => learnController as never,
+    isLearnEnabled: overrides?.isLearnEnabled ?? (() => true),
     remoteInvoke,
   });
-  return { registry, goalController, remoteInvoke };
+  return { registry, goalController, learnController, remoteInvoke };
 }
 
 beforeEach(() => {
@@ -61,7 +65,7 @@ describe('/cindy-make composer entry', () => {
       description: expect.stringContaining('/cindy-make'),
     });
     expect(registry.list().some((command) => command.name === 'cindy-maker')).toBe(false);
-    expect(registry.list().some((command) => command.name === 'learn')).toBe(false);
+    expect(registry.list().some((command) => command.name === 'learn')).toBe(true);
   });
 
   it.each([undefined, 'remote-device'])(
@@ -75,6 +79,28 @@ describe('/cindy-make composer entry', () => {
       expect(remoteInvoke).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('/learn SSH fallback', () => {
+  it('routes to the local Learn host for an SSH-backed session', async () => {
+    const { registry, learnController, remoteInvoke } = makeHarness();
+    await registry.execute('learn', { sessionId: 'ssh-session', args: '学习部署流程' });
+    expect(learnController.startLearn).toHaveBeenCalledWith({
+      input: '学习部署流程',
+      sourceKind: 'freetext',
+      originSessionId: 'ssh-session',
+    });
+    expect(remoteInvoke).not.toHaveBeenCalled();
+    expect(sentPayloads().at(-1)).toMatchObject({ command: 'learn', learnRunId: 'local-run' });
+  });
+
+  it('follows the Learn Skill activation preference', async () => {
+    const { registry } = makeHarness({ isLearnEnabled: () => false });
+    expect(registry.list().some((command) => command.name === 'learn')).toBe(false);
+    await expect(registry.execute('learn', { sessionId: 'ssh-session' })).rejects.toThrow(
+      'unknown command "/learn"',
+    );
+  });
 });
 
 describe('/goal 远程路由', () => {

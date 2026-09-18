@@ -201,10 +201,10 @@ export function isSlashCommandRosterReady(
 }
 
 // device-link 远程会话下 desktop 命令**全量可用**:业务语义在「会话归属设备」的命令
-// (/goal /cmd)由控制端 main(commands/builtins.ts)按 ctx.deviceId 经隧道路由
-// 到被控端对应 channel(maker:goal:* / desktop-cmd:run,均在 REMOTE_INVOKE_ALLOWLIST);
+// (/goal /learn /cmd)由控制端 main(commands/builtins.ts)按 ctx.deviceId 经隧道路由
+// 到被控端对应 channel(maker:goal:* / learn:* / desktop-cmd:run,均在 REMOTE_INVOKE_ALLOWLIST);
 // 纯控制端 UI 命令(/help /clear /workflows /jump-session /issue)本就与会话归属无关。
-// /learn 是被控端 Agent 暴露的 Skill,通过同机 cindy_helper 启动 Learn host,不走此路径。
+// 正常会话由 agent-skill /learn 覆盖兼容入口；SSH 无法扫描远端 Skill 时保留 Desktop 路由。
 // 历史上这里有一张 DEVICE_LINK_UNAVAILABLE 黑名单(goal/learn,reviewer #354 / Codex #483
 // 时代控制端还没有隧道路由)—— 隧道链路打通后已删除;被控端版本过旧不支持对应 channel 时,
 // main 会广播 error: 'remote-unsupported',renderer toast 提示,不再静默剔除命令。
@@ -372,7 +372,12 @@ export async function loadAllCommands(
     opts?.onPiRuntimeStatus?.(builtinRes.runtimeStatus);
   }
 
-  const desktop = (desktopRes.success && desktopRes.commands ? desktopRes.commands : []) as UnifiedCommand[];
+  const rawDesktop = (desktopRes.success && desktopRes.commands ? desktopRes.commands : []) as UnifiedCommand[];
+  // Learn 已迁成可开关的官方 Skill。本地/Device Link 能读 Skill 清单时只展示
+  // agent-skill；SSH 显式跳过扫描，才使用仍可路由 Learn host 的 Desktop 兼容入口。
+  const desktop = shouldLoadSkills
+    ? rawDesktop.filter((command) => command.name !== 'learn')
+    : rawDesktop;
   const agentBuiltin = (builtinRes.success && builtinRes.commands ? builtinRes.commands : []) as UnifiedCommand[];
   const agentSkill = (skillRes.success && skillRes.skills ? skillRes.skills : []) as UnifiedCommand[];
   return mergeCommands(desktop, agentBuiltin, agentSkill);
@@ -473,7 +478,7 @@ export interface DispatchContext {
   workingDir?: string;
   /** `/name args...` 中 name 后面的剩余文本; 没有则空串。 */
   args?: string;
-  /** device-link 远程会话的归属设备 id(本机会话缺省)。main 侧 /goal /cmd
+  /** device-link 远程会话的归属设备 id(本机会话缺省)。main 侧 /goal /learn /cmd
    *  据此把业务体经隧道路由到被控端执行。 */
   deviceId?: string;
 }

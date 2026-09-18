@@ -62,6 +62,7 @@ interface ScannedSkillGrant {
   entries: Array<{
     root: string;
     projectRootKey?: string;
+    builtIn?: boolean;
   }>;
 }
 
@@ -235,6 +236,7 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
       if (skill.scope === 'project' && !skillProjectRootKey) continue;
       // discoveredPath preserves an allowed lexical alias when absolutePath was
       // canonicalized through a parent-directory symlink.
+      let remembered = false;
       for (const candidate of [skill.discoveredPath, skill.absolutePath]) {
         const root = resolveExistingSkillPathForGrant(candidate);
         if (root) {
@@ -246,7 +248,19 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
               ...(skillProjectRootKey ? { projectRootKey: skillProjectRootKey } : {}),
             });
           }
+          remembered = true;
           break;
+        }
+      }
+      // Scanner may inject the official copy when a same-name user Skill owns
+      // every normal discovery alias. Authorize only the exact physical root
+      // supplied by Main so its detail/files view remains readable.
+      if (!remembered) {
+        const root = configuredBuiltInRoot(skill.absolutePath);
+        const entryKey = root ? `${root}\0built-in` : null;
+        if (root && entryKey && !seenEntries.has(entryKey)) {
+          seenEntries.add(entryKey);
+          entries.push({ root, builtIn: true });
         }
       }
     }
@@ -290,8 +304,10 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
       if (grant) scannedSkillRootsBySender.delete(event.sender.id);
       return Promise.resolve(false);
     }
-    const matchingEntries = grant.entries.filter(({ root }) => (
-      isExistingSkillPathGranted(targetPath, new Set([root]))
+    const matchingEntries = grant.entries.filter(({ root, builtIn }) => (
+      builtIn
+        ? isSameOrInside(realPathOrResolved(targetPath), root)
+        : isExistingSkillPathGranted(targetPath, new Set([root]))
     ));
     if (matchingEntries.length === 0) return Promise.resolve(false);
     if (matchingEntries.some(({ projectRootKey: key }) => !key)) return Promise.resolve(true);
@@ -330,6 +346,13 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
       && !relative.startsWith(`..${path.sep}`)
       && !path.isAbsolute(relative)
     );
+  };
+  const configuredBuiltInRoot = (source: string): string | null => {
+    const physicalSource = realPathOrResolved(source);
+    const descriptor = (options.getBuiltInSkills?.() ?? []).find((skill) => (
+      realPathOrResolved(skill.absolutePath) === physicalSource
+    ));
+    return descriptor ? realPathOrResolved(descriptor.absolutePath) : null;
   };
   const isBuiltInSkillPath = (targetPath: string): boolean => (
     (options.getBuiltInSkills?.() ?? []).some((skill) => {

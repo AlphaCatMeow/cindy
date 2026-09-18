@@ -578,10 +578,12 @@ import { SkillhubMarketService } from './skillhub/marketService';
 import { skillhubAutoSyncService } from './skillhub/autoSyncService';
 import { rehydrateCloseSuppression } from './maker-host/rehydrateCloseSuppression.js';
 import {
+  BUILT_IN_LEARN_SKILL_NAME,
   builtInSkillDescriptors,
   prepareBuiltInSkills,
   resolveBundledSystemSkillsRoot,
 } from './maker-host/built-in-skills.js';
+import { isCindySkillEnabled } from './skillhub/activationPreferences';
 import { prepareSharedGlobalSkillLinks } from './maker-host/shared-global-skills.js';
 // Maker Core 一阶段重构（新链路）—— 静态 import 避免 dynamic import 触发 vite chunking
 // 让 imageProtocol 等需要 app.ready 前注册的模块跑在错误时机。getMaker() 是 lazy 的，
@@ -1046,7 +1048,7 @@ import {
   resetGoalController,
   getGoalTeardownGeneration,
 } from './goal-host/index.js';
-import { startLearnHost, resetLearnController } from './learn-host/index.js';
+import { startLearnHost, getLearnController, resetLearnController } from './learn-host/index.js';
 import { fetchHubSkillReference } from './learn-host/hubReference.js';
 import { registerLearnIpc, broadcastLearnEvent } from './learn-host/registerIpc.js';
 import { registerGoalHandlers, broadcastGoalStatus } from './maker-ipc/goal.js';
@@ -6091,11 +6093,19 @@ const registerIpcHandlers = () => {
       // Desktop slash command registry —— 注册 /help /clear 等内置项,
       // IPC 暴露见 maker-ipc/desktop-commands.ts (待 Step 5 添加)。
       // 单例 + 幂等保护 (makerIpcsRegistered flag) 保证 builtins 只灌一次。
-      // remoteInvoke:远程会话(ctx.deviceId)的 /goal /cmd 业务体经隧道路由
+      // remoteInvoke:远程会话(ctx.deviceId)的 /goal /learn /cmd 业务体经隧道路由
       // 到被控端 —— 走与 renderer deviceLink.invoke 同一条 handleInvoke 主路径
       // (控制开关校验 + 错误映射一致)。
       registerBuiltinDesktopCommands(getDesktopCommandRegistry(), {
         getGoalController,
+        getLearnController,
+        isLearnEnabled: () => {
+          const descriptor = builtInSkillDescriptors(
+            app.getPath('userData'),
+            app.getPath('appData'),
+          ).find((skill) => skill.name === BUILT_IN_LEARN_SKILL_NAME);
+          return descriptor ? isCindySkillEnabled(descriptor.absolutePath) : false;
+        },
         remoteInvoke: (deviceId, channel, args) =>
           deviceLinkHandleInvoke(deviceLinkIpcDeps(), deviceId, channel, args),
       });
