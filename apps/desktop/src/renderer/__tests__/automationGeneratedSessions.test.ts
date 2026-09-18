@@ -122,7 +122,6 @@ describe('automation-generated sessions', () => {
       'plugin',
       // /cindy-make 制作个人版创建的代码任务:按源码 workingDir 归入项目分组。
       'cindy-make',
-      // 合并任务沿用 Cindy Make 的可见性与项目归属规则。
       'cindy-make-merge',
     ]);
     expect(DESKTOP_VISIBLE_SESSION_SOURCES).toContain('feishu');

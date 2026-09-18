@@ -167,6 +167,7 @@ import type {
   AgentBuiltinCommand,
   ListAgentSkillsOptions,
   ListAgentSkillsResult,
+  ListRuntimeSkillsOptions,
 } from '../../types/palette.js';
 import { CLAUDE_CODE_AGENT_COMMANDS } from './commands.js';
 import type {
@@ -1012,6 +1013,35 @@ export class ClaudeCodeAgent extends BaseAgent {
         scope: c.scope,
         enabled: c.enabled,
       })),
+    };
+  }
+
+  override async listRuntimeSkills(opts: ListRuntimeSkillsOptions): Promise<ListAgentSkillsResult> {
+    if (opts.remoteHostId) return this.listAgentSkills(opts);
+    if (!opts.workingDir) return { skills: [] };
+    let result: Awaited<ReturnType<typeof scanClaudeRuntimeSkills>>;
+    try {
+      result = await scanClaudeRuntimeSkills(opts.workingDir, opts.runtimeConfigDir);
+    } catch (error) {
+      return {
+        skills: [],
+        errors: [{
+          path: opts.workingDir,
+          message: error instanceof Error ? error.message : String(error),
+        }],
+      };
+    }
+    return {
+      skills: result.items.map((item) => ({
+        kind: 'agent-skill' as const,
+        name: item.name,
+        description: item.description,
+        source: 'skill' as const,
+        path: item.mdPath,
+        scope: item.scope === 'project' ? 'project' as const : 'global' as const,
+        enabled: true,
+      })),
+      ...(result.errors.length > 0 ? { errors: result.errors } : {}),
     };
   }
 

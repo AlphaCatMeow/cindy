@@ -46,4 +46,25 @@ describe('scanClaudeRuntimeSkills', () => {
       fs.realpathSync(projectSkill),
     ]);
   });
+
+  it('includes ancestor project Skills through the nearest Git boundary', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-runtime-ancestors-'));
+    roots.push(root);
+    const isolatedConfig = path.join(root, 'claude-home');
+    const repository = path.join(root, 'repository');
+    const workingDir = path.join(repository, 'packages', 'app');
+    fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
+    const globalLearn = writeSkill(isolatedConfig, 'learn');
+    const repositoryLearn = writeSkill(path.join(repository, '.claude'), 'learn');
+    const outsideLearn = writeSkill(path.join(root, '.claude'), 'outside');
+
+    const result = await scanClaudeRuntimeSkills(workingDir, isolatedConfig);
+
+    expect(result.items.filter((item) => item.name === 'learn').map((item) => item.absolutePath)).toEqual([
+      globalLearn,
+      fs.realpathSync(repositoryLearn),
+    ]);
+    expect(result.items.map((item) => item.absolutePath)).not.toContain(fs.realpathSync(outsideLearn));
+  });
 });

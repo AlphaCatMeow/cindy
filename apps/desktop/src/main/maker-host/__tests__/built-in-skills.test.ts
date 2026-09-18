@@ -70,7 +70,11 @@ describe('built-in Skills', () => {
       bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION,
     });
     expect(descriptor.absolutePath).toBe(
-      path.join(root, '.versions', manifest.activeBundle, 'cindy-skill-creator'),
+      path.join(root, '.active', 'cindy-skill-creator'),
+    );
+    const firstImmutablePath = fs.realpathSync(descriptor.absolutePath);
+    expect(firstImmutablePath).toBe(
+      fs.realpathSync(path.join(root, '.versions', manifest.activeBundle, 'cindy-skill-creator')),
     );
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(descriptor.absolutePath));
     expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(
@@ -96,11 +100,12 @@ describe('built-in Skills', () => {
       (item) => item.name === 'cindy-skill-creator',
     )!;
     expect(repaired.changed).toBe(true);
-    expect(repairedDescriptor.absolutePath).not.toBe(descriptor.absolutePath);
+    expect(repairedDescriptor.absolutePath).toBe(descriptor.absolutePath);
+    expect(fs.realpathSync(repairedDescriptor.absolutePath)).not.toBe(firstImmutablePath);
     expect(fs.readFileSync(path.join(repairedDescriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       '# Creator',
     );
-    expect(fs.existsSync(path.join(descriptor.absolutePath, 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(firstImmutablePath, 'SKILL.md'))).toBe(true);
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
     const updated = await prepareAndProjectBuiltInSkills({
@@ -343,32 +348,96 @@ describe('built-in Skills', () => {
     expect(fs.readdirSync(versionsRoot)).toEqual([initialActiveBundle]);
   });
 
-  it('rolls every Agent projection back before keeping the previous manifest', async () => {
+  it('keeps every managed projection on one stable target across bundle upgrades', async () => {
     const input = fixture();
     const initial = await prepareBuiltInSkills(input);
     const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
-    const manifestPath = path.join(root, '.cindy-system-skills.json');
-    const initialManifest = fs.readFileSync(manifestPath, 'utf8');
     const initialCreator = initial.descriptors.find(
       (descriptor) => descriptor.name === 'cindy-skill-creator',
     )!;
     const initialLearn = initial.descriptors.find((descriptor) => descriptor.name === 'learn')!;
     const creatorLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
     const learnLink = path.join(input.homeDir, '.agents', 'skills', 'learn');
+    const nativeCreatorLink = initialCreator.nativeClaudePath;
+    const nativeLearnLink = initialLearn.nativeClaudePath;
+    const initialCreatorBytes = fs.realpathSync(initialCreator.absolutePath);
+    const initialLearnBytes = fs.realpathSync(initialLearn.absolutePath);
+    const projectionTargets = new Map([
+      [creatorLink, fs.readlinkSync(creatorLink)],
+      [learnLink, fs.readlinkSync(learnLink)],
+      [nativeCreatorLink, fs.readlinkSync(nativeCreatorLink)],
+      [nativeLearnLink, fs.readlinkSync(nativeLearnLink)],
+    ]);
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
     fs.appendFileSync(path.join(input.bundledRoot, 'learn', 'SKILL.md'), '\nLearn v2\n');
 
-    const originalSymlink = fs.promises.symlink.bind(fs.promises);
-    vi.spyOn(fs.promises, 'symlink').mockImplementation(async (target, linkPath, type) => {
-      if (
-        String(target).includes(
-          `${path.sep}.versions${path.sep}v${BUILT_IN_SKILLS_BUNDLE_VERSION + 1}-`,
-        )
-        && String(linkPath).includes(`learn.next-`)
-      ) {
-        throw new Error('blocked Learn projection');
+    const updated = await prepareBuiltInSkills({
+      ...input,
+      bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION + 1,
+    });
+
+    expect(updated.warnings).toEqual([]);
+    expect(updated.projectionSafe).toBe(true);
+    for (const [linkPath, target] of projectionTargets) {
+      expect(fs.readlinkSync(linkPath)).toBe(target);
+    }
+    expect(fs.readlinkSync(creatorLink)).toBe(path.join(root, '.active', 'cindy-skill-creator'));
+    expect(fs.realpathSync(creatorLink)).not.toBe(initialCreatorBytes);
+    expect(fs.realpathSync(learnLink)).not.toBe(initialLearnBytes);
+    expect(fs.realpathSync(nativeCreatorLink)).toBe(fs.realpathSync(creatorLink));
+    expect(fs.realpathSync(nativeLearnLink)).toBe(fs.realpathSync(learnLink));
+  });
+
+  it('finishes a committed active-pointer switch after an interrupted upgrade', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const activePath = path.join(root, '.active');
+    const oldActiveTarget = fs.readlinkSync(activePath);
+    const oldCreatorBytes = fs.realpathSync(initial.descriptors[0]!.absolutePath);
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
+
+    const upgraded = await prepareBuiltInSkills({
+      ...input,
+      bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION + 1,
+    });
+    const committedCreatorBytes = fs.realpathSync(upgraded.descriptors[0]!.absolutePath);
+    expect(committedCreatorBytes).not.toBe(oldCreatorBytes);
+
+    // Simulate termination after the manifest commit but before .active moved.
+    fs.unlinkSync(activePath);
+    fs.symlinkSync(oldActiveTarget, activePath, process.platform === 'win32' ? 'junction' : 'dir');
+    const sharedLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    expect(fs.realpathSync(sharedLink)).toBe(oldCreatorBytes);
+
+    const recovered = await prepareBuiltInSkills({
+      ...input,
+      bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION + 1,
+    });
+
+    expect(recovered.changed).toBe(true);
+    expect(recovered.projectionSafe).toBe(true);
+    expect(recovered.warnings).toEqual([]);
+    expect(fs.realpathSync(sharedLink)).toBe(committedCreatorBytes);
+  });
+
+  it('restores the previous manifest and active pointer when publication fails', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const manifestPath = path.join(root, '.cindy-system-skills.json');
+    const activePath = path.join(root, '.active');
+    const initialManifest = fs.readFileSync(manifestPath, 'utf8');
+    const initialActiveTarget = fs.readlinkSync(activePath);
+    const initialCreatorBytes = fs.realpathSync(initial.descriptors[0]!.absolutePath);
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
+
+    const originalRename = fs.promises.rename.bind(fs.promises);
+    vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (String(destination) === activePath && String(source).includes('.active.next-')) {
+        throw new Error('blocked active pointer switch');
       }
-      await originalSymlink(target, linkPath, type);
+      await originalRename(source, destination);
     });
 
     const failed = await prepareBuiltInSkills({
@@ -376,19 +445,11 @@ describe('built-in Skills', () => {
       bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION + 1,
     });
 
-    expect(failed.changed).toBe(false);
     expect(failed.projectionSafe).toBe(true);
-    expect(failed.warnings.join('\n')).toContain('blocked Learn projection');
-    expect(failed.warnings.join('\n')).toContain('not every Agent projection accepted');
+    expect(failed.warnings.join('\n')).toContain('blocked active pointer switch');
     expect(fs.readFileSync(manifestPath, 'utf8')).toBe(initialManifest);
-    expect(fs.realpathSync(creatorLink)).toBe(fs.realpathSync(initialCreator.absolutePath));
-    expect(fs.realpathSync(learnLink)).toBe(fs.realpathSync(initialLearn.absolutePath));
-    expect(fs.realpathSync(initialCreator.nativeClaudePath)).toBe(
-      fs.realpathSync(initialCreator.absolutePath),
-    );
-    expect(fs.realpathSync(initialLearn.nativeClaudePath)).toBe(
-      fs.realpathSync(initialLearn.absolutePath),
-    );
+    expect(fs.readlinkSync(activePath)).toBe(initialActiveTarget);
+    expect(fs.realpathSync(initial.descriptors[0]!.absolutePath)).toBe(initialCreatorBytes);
     expect(fs.readdirSync(path.join(root, '.versions'))).toEqual([
       JSON.parse(initialManifest).activeBundle,
     ]);
@@ -415,6 +476,28 @@ describe('built-in Skills', () => {
     expect(fs.realpathSync(creatorLink)).toBe(
       fs.realpathSync(initial.descriptors[0]!.absolutePath),
     );
+  });
+
+  it('migrates direct current-version links onto the stable active path', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const descriptor = initial.descriptors[0]!;
+    const immutableTarget = fs.realpathSync(descriptor.absolutePath);
+    const sharedLink = path.join(input.homeDir, '.agents', 'skills', descriptor.name);
+    fs.unlinkSync(sharedLink);
+    fs.symlinkSync(
+      immutableTarget,
+      sharedLink,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const migrated = await prepareBuiltInSkills(input);
+
+    expect(fs.readlinkSync(sharedLink)).toBe(path.join(root, '.active', descriptor.name));
+    expect(fs.realpathSync(sharedLink)).toBe(immutableTarget);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.warnings).toEqual([]);
   });
 
   it('removes first-install projections when no bundle was ever activated', async () => {

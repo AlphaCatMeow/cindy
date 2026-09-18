@@ -1,5 +1,5 @@
 import { registerCodexTextOnlyPolicy } from './codex-text-only-policy.js';
-import { readDisabledSkillPaths } from '../skillhub/activationPreferences';
+import { isCindyLearnSkillEnabled, readDisabledSkillPaths } from '../skillhub/activationPreferences';
 import { cindyMakeManager } from '../cindy-make/manager.js';
 import { makeSourceRoot } from '../cindy-make/sourcePaths.js';
 import { clearCodexAccountUsageSnapshot } from '../usageBroadcaster.js';
@@ -25,6 +25,7 @@ import { app, BrowserWindow } from 'electron';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import fsSync from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -947,13 +948,25 @@ export function getMaker(): Maker {
           || !session
           || session.instanceId !== sessionInstanceId
           || session.remoteHostId
+          || !isCindyLearnSkillEnabled()
         ) {
           return false;
         }
-        const result = await _maker!.listAgentSkills(session.agentKind, {
-          workingDir: session.workDir,
-          sessionId,
-        });
+        const result = session.agentKind === 'claude-code'
+          ? await _maker!.listAgentRuntimeSkills(session.agentKind, {
+            workingDir: session.workDir,
+            sessionId,
+            runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || (
+              process.env.XDT_USER_DATA_DIR && !app.isPackaged
+                ? path.join(app.getPath('userData'), 'claude-home')
+                : path.join(os.homedir(), '.claude')
+            ),
+          })
+          : await _maker!.listAgentSkills(session.agentKind, {
+            workingDir: session.workDir,
+            sessionId,
+          });
+        if (result.errors?.length) return false;
         const skills = markCindyBuiltInAgentSkills(
           result.skills,
           builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),

@@ -35,7 +35,11 @@ describe('session runtime control wiring', () => {
       "mainWindow.once('ready-to-show'",
       'void runComputerUseSmokeIfRequested();',
     );
-    expect(body.indexOf('refreshWindowsAppBadge();')).toBeGreaterThan(body.indexOf('showMainWindowAndRestoreFullscreen('));
+    const shown = body.indexOf('showMainWindowAndRestoreFullscreen(');
+    const badge = body.indexOf('refreshWindowsAppBadge();');
+    expect(shown).toBeGreaterThan(-1);
+    expect(badge).toBeGreaterThan(shown);
+    expect(body.indexOf('markDesktopDevWindowReady();')).toBeGreaterThan(badge);
   });
   it('advertises host-side model-window protection to remote controllers', () => {
     const capabilities = handlerBody(

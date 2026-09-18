@@ -73,6 +73,7 @@ import type {
   AgentBuiltinCommand,
   ListAgentSkillsOptions,
   ListAgentSkillsResult,
+  ListRuntimeSkillsOptions,
 } from '../types/palette.js';
 import type {
   ListCustomizationsOptions,
@@ -2516,6 +2517,11 @@ export abstract class BaseAgent {
   async listAgentSkills(opts: ListAgentSkillsOptions): Promise<ListAgentSkillsResult> {
     void opts;
     return { skills: [] };
+  }
+
+  /** Runtime-accurate Skill discovery for host-side authorization checks. */
+  async listRuntimeSkills(opts: ListRuntimeSkillsOptions): Promise<ListAgentSkillsResult> {
+    return this.listAgentSkills(opts);
   }
 
   /**

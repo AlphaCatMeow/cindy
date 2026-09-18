@@ -605,9 +605,9 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     try {
       const ownerId = getActiveAppSession().dataOwnerId;
       const result = await withSharedGlobalSkillProjectionMutation(ownerId, async () => {
-        // Bundle publication projects every managed Agent link before it
-        // advances the active manifest. The stable-owner boundary prevents a
-        // passive profile from participating in that transaction.
+        // Bundle publication keeps every managed Agent link on one stable
+        // active pointer. The stable-owner boundary prevents a passive profile
+        // from participating in that transaction.
         const preparedBuiltIns = await prepareBuiltInSkills({
           bundledRoot: resolveBundledSystemSkillsRoot({
             isPackaged: app.isPackaged,
@@ -621,7 +621,7 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
         });
         // Publication already established a usable Claude projection before
-        // switching the manifest. Reconcile once more after the generic
+        // switching the active pointer. Reconcile once more after the generic
         // palette sync so a newly surfaced user-owned ~/.claude winner keeps
         // precedence; atomic link replacement preserves the usable projection
         // if this optional refinement fails.

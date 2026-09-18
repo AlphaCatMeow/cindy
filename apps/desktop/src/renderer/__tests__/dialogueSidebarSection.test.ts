@@ -52,11 +52,13 @@ describe('Mixed main list (sidebar-redesign D 期)', () => {
   it('renders dialogues through the mixed ProjectsSection instead of a fixed DialogueSection', () => {
     expect(sidebarSource).toContain('dialogues={visibleDialogues}');
     expect(sidebarSource).not.toContain('<DialogueSection');
-    expect(projectsSectionSource).toContain('buildMainListEntries({');
-    expect(projectsSectionSource).toContain('projects,');
-    expect(projectsSectionSource).toContain('dialogues,');
-    expect(projectsSectionSource).toContain('bots,');
-    expect(projectsSectionSource).toContain('unclassified: unclassifiedHidden');
+    expect(projectsSectionSource).toContain('useMainListEntries(');
+    const entriesHook = readFileSync(
+      resolve(__dirname, '..', 'features', 'cc-agent', 'hooks', 'useMainListEntries.ts'),
+      'utf8',
+    );
+    expect(entriesHook).toContain('buildMainListEntries({');
+    expect(entriesHook).toContain('projects, dialogues, bots, unclassified');
   });
 
   it('drops the removed date-grouped section entirely', () => {

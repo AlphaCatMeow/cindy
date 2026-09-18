@@ -17,6 +17,7 @@ export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
 const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_NAME] as const;
 const MANIFEST_FILE = '.cindy-system-skills.json';
 const VERSIONS_DIRECTORY = '.versions';
+const ACTIVE_BUNDLE_LINK = '.active';
 const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
 /** Increment whenever shipped built-in Skill bytes change between releases. */
 export const BUILT_IN_SKILLS_BUNDLE_VERSION = 10;
@@ -122,6 +123,13 @@ function builtInSkillDescriptorsAtRoot(
   }));
 }
 
+function stableBuiltInSkillDescriptors(
+  root: string,
+  userDataDir: string,
+): BuiltInSkillDescriptor[] {
+  return builtInSkillDescriptorsAtRoot(path.join(root, ACTIVE_BUNDLE_LINK), userDataDir);
+}
+
 function validActiveBundle(value: unknown): value is string {
   return typeof value === 'string'
     && /^v[1-9][0-9]*-[a-f0-9]{16}-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
@@ -136,15 +144,22 @@ export function canonicalBuiltInSkillActivationPath(
   const name = path.basename(source);
   if (!(BUILT_IN_SKILL_NAMES as readonly string[]).includes(name)) return source;
   const bundleRoot = path.dirname(source);
+  const managedRoots = [
+    builtInSkillsRoot(userDataDir),
+    ...(appDataDir ? [sharedBuiltInSkillsRoot(appDataDir)] : []),
+  ];
+  if (
+    path.basename(bundleRoot) === ACTIVE_BUNDLE_LINK
+    && managedRoots.some((root) => realPathOrNormalized(path.dirname(bundleRoot)) === realPathOrNormalized(root))
+  ) {
+    return path.join(path.dirname(bundleRoot), name);
+  }
   const versionsRoot = path.dirname(bundleRoot);
   const stableRoot = path.dirname(versionsRoot);
   if (
     path.basename(versionsRoot) !== VERSIONS_DIRECTORY ||
     !validActiveBundle(path.basename(bundleRoot)) ||
-    ![
-      builtInSkillsRoot(userDataDir),
-      ...(appDataDir ? [sharedBuiltInSkillsRoot(appDataDir)] : []),
-    ].some((root) => realPathOrNormalized(stableRoot) === realPathOrNormalized(root))
+    !managedRoots.some((root) => realPathOrNormalized(stableRoot) === realPathOrNormalized(root))
   ) return source;
   return path.join(stableRoot, name);
 }
@@ -178,17 +193,19 @@ function parseManifest(raw: string): MaterializationManifest | null {
 }
 
 function activeBuiltInSkillsRoot(root: string): string {
+  const active = path.join(root, ACTIVE_BUNDLE_LINK);
+  if (fs.existsSync(active)) return active;
   try {
     const raw = readAtomicFileSync(path.join(root, MANIFEST_FILE));
-    if (raw === null) return root;
+    if (raw === null) return active;
     const manifest = parseManifest(raw);
-    return manifest?.schemaVersion === 3
-      ? path.join(root, VERSIONS_DIRECTORY, manifest.activeBundle!)
-      : root;
+    // Schema 2 stored bytes directly below root. Keep that legacy view only
+    // until preparation migrates it to the stable active indirection.
+    return manifest?.schemaVersion === 2 && !isEmptyManifest(manifest) ? root : active;
   } catch {
-    // Preparation reports corrupt/unreadable manifests. Other readers retain
-    // the legacy path and never guess an unpublished version directory.
-    return root;
+    // Preparation reports corrupt/unreadable manifests. Other readers use the
+    // stable link and never guess an immutable version directory.
+    return active;
   }
 }
 
@@ -228,6 +245,12 @@ async function hasExistingMaterializedSkill(root: string): Promise<boolean> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
+  }
+  try {
+    await fsp.lstat(path.join(root, ACTIVE_BUNDLE_LINK));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   try {
     const versions = await fsp.readdir(path.join(root, VERSIONS_DIRECTORY));
@@ -347,7 +370,18 @@ async function ensureSkillEntry(
     const current = await fsp.realpath(linkPath);
     currentTarget = current;
     const expected = await fsp.realpath(desiredTarget);
-    if (samePath(current, expected)) return { changed: false };
+    if (samePath(current, expected)) {
+      if (!replaceStaleCindyLink) return { changed: false };
+      const rawTarget = await fsp.readlink(linkPath).catch(() => null);
+      if (rawTarget === null) return { changed: false };
+      const lexicalTarget = path.isAbsolute(rawTarget)
+        ? rawTarget
+        : path.resolve(path.dirname(linkPath), rawTarget);
+      // A direct immutable-version link can resolve to the same bytes as the
+      // stable active link. Still migrate its lexical target so future bundle
+      // changes have one publication point.
+      if (samePath(lexicalTarget, desiredTarget)) return { changed: false };
+    }
   } catch {
     // Inspect the lexical entry below; a missing entry may be created.
   }
@@ -426,7 +460,11 @@ async function isCindyManagedSystemSkillTarget(
     ];
     for (const root of managedRoots) {
       if (samePath(target, path.join(root, descriptor.name))) return true;
-      const relative = path.relative(path.join(root, VERSIONS_DIRECTORY), target);
+      if (samePath(target, path.join(root, ACTIVE_BUNDLE_LINK, descriptor.name))) return true;
+      const relative = path.relative(
+        realPathOrNormalized(path.join(root, VERSIONS_DIRECTORY)),
+        realPathOrNormalized(target),
+      );
       const segments = relative.split(path.sep);
       if (
         segments.length === 2 &&
@@ -471,6 +509,87 @@ function normalizeForCompare(value: string): string {
 
 function samePath(left: string, right: string): boolean {
   return normalizeForCompare(left) === normalizeForCompare(right);
+}
+
+function activeBundleTarget(root: string, bundle: string): string {
+  return path.join(root, VERSIONS_DIRECTORY, bundle);
+}
+
+async function readActiveBundle(root: string): Promise<string | null> {
+  const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.lstat(activePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!stat.isSymbolicLink()) {
+    throw new Error(`built-in Skill active pointer is not a link: ${activePath}`);
+  }
+  const rawTarget = await fsp.readlink(activePath);
+  const target = path.isAbsolute(rawTarget)
+    ? rawTarget
+    : path.resolve(root, rawTarget);
+  const relative = path.relative(
+    realPathOrNormalized(path.join(root, VERSIONS_DIRECTORY)),
+    realPathOrNormalized(target),
+  );
+  const segments = relative.split(path.sep);
+  if (segments.length !== 1 || !validActiveBundle(segments[0])) {
+    throw new Error(`built-in Skill active pointer has an invalid target: ${target}`);
+  }
+  return segments[0];
+}
+
+async function switchActiveBundle(root: string, bundle: string): Promise<boolean> {
+  const target = activeBundleTarget(root, bundle);
+  if (!(await fsp.stat(target).catch(() => null))?.isDirectory()) {
+    throw new Error(`built-in Skill bundle is unavailable: ${target}`);
+  }
+  if (await readActiveBundle(root) === bundle) return false;
+
+  const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
+  const replacement = `${activePath}.next-${randomUUID()}`;
+  const backup = `${activePath}.previous-${randomUUID()}`;
+  await fsp.symlink(target, replacement, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    // POSIX replaces a symlink atomically. Windows may reject replacing an
+    // existing directory junction, in which case the fallback still changes
+    // every Agent through this one pointer rather than one projection at a time.
+    await fsp.rename(replacement, activePath);
+  } catch (firstError) {
+    const activeEntryExists = await fsp.lstat(activePath).then(() => true).catch(() => false);
+    if (!activeEntryExists) {
+      await fsp.rm(replacement, { force: true }).catch(() => undefined);
+      throw firstError;
+    }
+    let movedExisting = false;
+    try {
+      await fsp.rename(activePath, backup);
+      movedExisting = true;
+      await fsp.rename(replacement, activePath);
+    } catch (error) {
+      await fsp.rm(replacement, { force: true }).catch(() => undefined);
+      const activeEntryExistsAfterFailure = await fsp.lstat(activePath)
+        .then(() => true)
+        .catch(() => false);
+      if (movedExisting && !activeEntryExistsAfterFailure) {
+        await fsp.rename(backup, activePath).catch(() => undefined);
+      }
+      throw error;
+    }
+    await fsp.rm(backup, { force: true }).catch(() => undefined);
+  }
+  return true;
+}
+
+async function removeActiveBundlePointer(root: string): Promise<boolean> {
+  const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
+  const activeBundle = await readActiveBundle(root);
+  if (activeBundle === null) return false;
+  await fsp.unlink(activePath);
+  return true;
 }
 
 async function ensureSharedEntry(
@@ -587,7 +706,9 @@ export function activeCindyBuiltInAgentSkills(
 }
 
 async function refreshBuiltInClaudeSkillLinksUnlocked(
-  options: Omit<RefreshBuiltInClaudeSkillLinksOptions, 'withSharedMutation'>,
+  options: Omit<RefreshBuiltInClaudeSkillLinksOptions, 'withSharedMutation'> & {
+    allowUnresolvedManagedSharedTarget?: boolean;
+  },
 ): Promise<RefreshBuiltInClaudeSkillLinksResult> {
   const descriptors = options.descriptors
     ?? builtInSkillDescriptors(options.userDataDir, options.appDataDir);
@@ -599,10 +720,17 @@ async function refreshBuiltInClaudeSkillLinksUnlocked(
   for (const descriptor of descriptors) {
     const sharedPath = path.join(homeDir, '.agents', 'skills', descriptor.name);
     const claudePalettePath = path.join(homeDir, '.claude', 'skills', descriptor.name);
-    const claudeRuntimeTarget = await hasSkillFile(claudePalettePath)
-      ? claudePalettePath
-      : sharedPath;
-    if (!(await hasSkillFile(claudeRuntimeTarget))) {
+    const hasClaudePaletteSkill = await hasSkillFile(claudePalettePath);
+    const claudeRuntimeTarget = hasClaudePaletteSkill ? claudePalettePath : sharedPath;
+    const unresolvedSharedTargetIsManaged = !hasClaudePaletteSkill
+      && options.allowUnresolvedManagedSharedTarget === true
+      && await isCindyManagedSystemSkillTarget(
+        sharedPath,
+        descriptor,
+        options.userDataDir,
+        options.appDataDir,
+      );
+    if (!(await hasSkillFile(claudeRuntimeTarget)) && !unresolvedSharedTargetIsManaged) {
       complete = false;
       warnings.push(
         `could not expose built-in Skill ${descriptor.name} to Claude because its palette winner is unavailable`,
@@ -734,6 +862,7 @@ async function removeInactiveBuiltInProjections(
   allowedDescriptors: readonly BuiltInSkillDescriptor[],
 ): Promise<{ complete: boolean; warnings: string[] }> {
   const versionsRoot = realPathOrNormalized(path.join(root, VERSIONS_DIRECTORY));
+  const activeRoot = normalizeForCompare(path.join(root, ACTIVE_BUNDLE_LINK));
   const allowedRoots = allowedDescriptors.map((descriptor) => (
     realPathOrNormalized(descriptor.absolutePath)
   ));
@@ -760,6 +889,11 @@ async function removeInactiveBuiltInProjections(
           return lexicalTarget;
         });
       const relative = path.relative(versionsRoot, target);
+      const activeRelative = path.relative(activeRoot, lexicalTarget);
+      const lexicallyPointsIntoActive = activeRelative !== ''
+        && activeRelative !== '..'
+        && !activeRelative.startsWith(`..${path.sep}`)
+        && !path.isAbsolute(activeRelative);
       const pointsIntoAllowedBundle = allowedRoots.some((allowedRoot) => {
         const allowedRelative = path.relative(allowedRoot, target);
         return allowedRelative === '' || (
@@ -770,6 +904,7 @@ async function removeInactiveBuiltInProjections(
       });
       if (
         (!resolvedTarget && sharedPaths.has(lexicalTarget))
+        || (allowedRoots.length === 0 && lexicallyPointsIntoActive)
         || (
           relative !== ''
           && relative !== '..'
@@ -794,6 +929,7 @@ async function removeInactiveBuiltInProjections(
 async function projectBuiltInSkillLinksUnlocked(
   options: PrepareBuiltInSkillsOptions,
   descriptors: readonly BuiltInSkillDescriptor[],
+  allowUnresolvedManagedSharedTarget = false,
 ): Promise<{ changed: boolean; complete: boolean; warnings: string[] }> {
   const homeDir = options.homeDir ?? os.homedir();
   const shared = await refreshBuiltInSharedSkillLinksUnlocked({
@@ -807,6 +943,7 @@ async function projectBuiltInSkillLinksUnlocked(
     appDataDir: options.appDataDir,
     homeDir,
     descriptors,
+    allowUnresolvedManagedSharedTarget,
   });
   return {
     changed: shared.changed || claude.changed,
@@ -816,9 +953,9 @@ async function projectBuiltInSkillLinksUnlocked(
 }
 
 /**
- * Materialize Cindy-owned Skill bytes and make every managed Agent projection
- * usable before atomically advancing the active manifest. The immutable old
- * bundle remains available for rollback throughout the transaction.
+ * Materialize Cindy-owned Skill bytes, keep every managed Agent projection on
+ * the stable active path, then publish the whole bundle through one pointer.
+ * The immutable old bundle remains available throughout the transaction.
  */
 export async function prepareBuiltInSkills(
   options: PrepareBuiltInSkillsOptions,
@@ -837,7 +974,8 @@ export async function prepareBuiltInSkills(
   const locked = await mutate(BUILT_IN_SKILL_NAMES, async () => {
     await fsp.mkdir(root, { recursive: true });
     const homeDir = options.homeDir ?? os.homedir();
-    const descriptors = builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+    const stableDescriptors = stableBuiltInSkillDescriptors(root, options.userDataDir);
+    let descriptors = builtInSkillDescriptors(options.userDataDir, options.appDataDir);
     let manifest: MaterializationManifest;
     try {
       manifest = await readManifest(root);
@@ -854,12 +992,50 @@ export async function prepareBuiltInSkills(
       return true;
     }
     if (isEmptyManifest(manifest)) {
+      try {
+        changed = await removeActiveBundlePointer(root) || changed;
+      } catch (error) {
+        warnings.push(
+          `kept the empty built-in Skill manifest because its active pointer could not be cleared: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return true;
+      }
+      descriptors = stableDescriptors;
       const recovered = await removeInactiveBuiltInProjections(root, descriptors, homeDir, []);
       warnings.push(...recovered.warnings);
       if (!recovered.complete) {
         warnings.push('kept the empty built-in Skill manifest because unpublished Agent projections could not be removed');
         return true;
       }
+    }
+    let committedBundleVerified = manifest.schemaVersion === 2;
+    if (manifest.schemaVersion === 3) {
+      const committedBundle = manifest.activeBundle!;
+      const committedDescriptors = builtInSkillDescriptorsAtRoot(
+        activeBundleTarget(root, committedBundle),
+        options.userDataDir,
+      );
+      committedBundleVerified = true;
+      for (const descriptor of committedDescriptors) {
+        const installed = await hashDirectory(descriptor.absolutePath).catch(() => null);
+        if (installed !== manifest.fingerprints[descriptor.name]) {
+          committedBundleVerified = false;
+          break;
+        }
+      }
+      if (committedBundleVerified) {
+        try {
+          changed = await switchActiveBundle(root, committedBundle) || changed;
+        } catch (error) {
+          warnings.push(
+            `could not recover the committed built-in Skill bundle: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return true;
+        }
+      } else {
+        warnings.push('the committed built-in Skill bundle does not match its recorded fingerprints');
+      }
+      descriptors = stableDescriptors;
     }
     const installedFingerprints = new Map<string, string | null>();
     for (const descriptor of descriptors) {
@@ -868,7 +1044,7 @@ export async function prepareBuiltInSkills(
         await hashDirectory(descriptor.absolutePath).catch(() => null),
       );
     }
-    projectionSafe = !isEmptyManifest(manifest) && descriptors.every((descriptor) => (
+    projectionSafe = !isEmptyManifest(manifest) && committedBundleVerified && descriptors.every((descriptor) => (
       typeof manifest.fingerprints[descriptor.name] === 'string'
       && installedFingerprints.get(descriptor.name) === manifest.fingerprints[descriptor.name]
     ));
@@ -878,7 +1054,7 @@ export async function prepareBuiltInSkills(
         root,
         descriptors,
         homeDir,
-        descriptors,
+        [],
       );
       warnings.push(...recovered.warnings);
       if (!recovered.complete) {
@@ -967,6 +1143,7 @@ export async function prepareBuiltInSkills(
       activeBundle,
     };
     let publishedDirectory = false;
+    let manifestAdvanced = false;
     let projectionSnapshots: BuiltInProjectionSnapshot[] = [];
     try {
       await fsp.mkdir(versionsRoot, { recursive: true });
@@ -974,29 +1151,48 @@ export async function prepareBuiltInSkills(
       for (const { descriptor, source, fingerprint } of plans) {
         await materializeSkill(source, path.join(pending, descriptor.name), fingerprint);
       }
-      // Publish immutable bytes first. The one manifest-file replacement below
-      // remains the only authoritative visibility switch. Project the complete
-      // candidate first, then commit the pointer only if every Agent can use it.
+      // Every managed projection permanently targets .active/<skill>. Preparing
+      // those links cannot split the live bundle because .active still resolves
+      // to the previous version. The final pointer replacement publishes every
+      // Skill to every managed Agent together.
       await fsp.rename(pending, published);
       publishedDirectory = true;
-      const candidateDescriptors = builtInSkillDescriptorsAtRoot(published, options.userDataDir);
-      projectionSnapshots = await captureBuiltInProjectionState(candidateDescriptors, homeDir);
+      projectionSnapshots = await captureBuiltInProjectionState(stableDescriptors, homeDir);
       const candidateProjection = await projectBuiltInSkillLinksUnlocked(
         options,
-        candidateDescriptors,
+        stableDescriptors,
+        true,
       );
       warnings.push(...candidateProjection.warnings);
       if (!candidateProjection.complete) {
         throw new Error('not every Agent projection accepted the prepared bundle');
       }
       await writeManifest(root, nextManifest);
+      manifestAdvanced = true;
+      await switchActiveBundle(root, activeBundle);
       changed = true;
       projectionSafe = true;
     } catch (error) {
       await fsp.rm(pending, { recursive: true, force: true }).catch(() => undefined);
-      const restored = projectionSnapshots.length > 0
+      let manifestRestored = true;
+      if (manifestAdvanced) {
+        try {
+          await writeManifest(root, manifest);
+          if (manifest.schemaVersion === 3) {
+            await switchActiveBundle(root, manifest.activeBundle!);
+          } else {
+            await removeActiveBundlePointer(root);
+          }
+        } catch (restoreError) {
+          manifestRestored = false;
+          warnings.push(
+            `could not restore the previous built-in Skill manifest: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+          );
+        }
+      }
+      const restored = manifestRestored && projectionSnapshots.length > 0
         ? await restoreBuiltInProjectionState(projectionSnapshots)
-        : { complete: true, warnings: [] };
+        : { complete: manifestRestored, warnings: [] };
       warnings.push(...restored.warnings);
       if (!restored.complete) projectionSafe = false;
       if (publishedDirectory && restored.complete) {

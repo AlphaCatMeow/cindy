@@ -90,6 +90,12 @@ export interface ListAgentSkillsOptions {
   includeManagedPiPackages?: boolean;
 }
 
+/** Host-only runtime discovery inputs used for security decisions about the live task. */
+export interface ListRuntimeSkillsOptions extends ListAgentSkillsOptions {
+  /** Exact config directory passed to the local runtime process, when it differs from its default. */
+  runtimeConfigDir?: string;
+}
+
 export interface ListAgentSkillsResult {
   skills: AgentSkillCommand[];
   errors?: Array<{ path?: string; message: string }>;
