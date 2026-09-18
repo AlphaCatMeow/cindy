@@ -45,6 +45,16 @@ describe('Skill activation preferences', () => {
     await reloaded.setCindySkillEnabled(b, true);
     expect(reloaded.readDisabledSkillPaths()).toEqual([]);
   });
+  it('reports the built-in Learn Skill activation state from its stable physical path', async () => {
+    const prefs = await import('../activationPreferences');
+    const descriptors = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root);
+    const learn = descriptors.find((descriptor) => descriptor.name === 'learn')!;
+    expect(prefs.isCindyLearnSkillEnabled()).toBe(true);
+    await prefs.setCindySkillEnabled(learn.absolutePath, false);
+    expect(prefs.isCindyLearnSkillEnabled()).toBe(false);
+    await prefs.setCindySkillEnabled(learn.absolutePath, true);
+    expect(prefs.isCindyLearnSkillEnabled()).toBe(true);
+  });
   it('also disables native runtime projections when the Cindy built-in Skill is disabled', async () => {
     const prefs = await import('../activationPreferences');
     const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root)[0]!;

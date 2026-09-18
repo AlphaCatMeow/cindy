@@ -578,12 +578,11 @@ import { SkillhubMarketService } from './skillhub/marketService';
 import { skillhubAutoSyncService } from './skillhub/autoSyncService';
 import { rehydrateCloseSuppression } from './maker-host/rehydrateCloseSuppression.js';
 import {
-  BUILT_IN_LEARN_SKILL_NAME,
   builtInSkillDescriptors,
   prepareBuiltInSkills,
   resolveBundledSystemSkillsRoot,
 } from './maker-host/built-in-skills.js';
-import { isCindySkillEnabled } from './skillhub/activationPreferences';
+import { isCindyLearnSkillEnabled } from './skillhub/activationPreferences';
 import { prepareSharedGlobalSkillLinks } from './maker-host/shared-global-skills.js';
 // Maker Core 一阶段重构（新链路）—— 静态 import 避免 dynamic import 触发 vite chunking
 // 让 imageProtocol 等需要 app.ready 前注册的模块跑在错误时机。getMaker() 是 lazy 的，
@@ -6099,13 +6098,7 @@ const registerIpcHandlers = () => {
       registerBuiltinDesktopCommands(getDesktopCommandRegistry(), {
         getGoalController,
         getLearnController,
-        isLearnEnabled: () => {
-          const descriptor = builtInSkillDescriptors(
-            app.getPath('userData'),
-            app.getPath('appData'),
-          ).find((skill) => skill.name === BUILT_IN_LEARN_SKILL_NAME);
-          return descriptor ? isCindySkillEnabled(descriptor.absolutePath) : false;
-        },
+        isLearnEnabled: isCindyLearnSkillEnabled,
         remoteInvoke: (deviceId, channel, args) =>
           deviceLinkHandleInvoke(deviceLinkIpcDeps(), deviceId, channel, args),
       });

@@ -53,11 +53,15 @@ def _parse_scalar(raw):
         return int(value)
     if re.fullmatch(r"[-+]?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)", value):
         return float(value)
-    if value.startswith(('[', '{')):
-        try:
-            return json.loads(value)
-        except (TypeError, ValueError) as exc:
-            raise FrontmatterError(f"Invalid flow value: {exc}") from exc
+    if value.startswith(("[", "{")):
+        closing = "]" if value.startswith("[") else "}"
+        if not value.endswith(closing):
+            raise FrontmatterError(f"Unterminated flow value, expected '{closing}'")
+        # The bundled tools only inspect scalar name/description values. Keep
+        # flow collection contents opaque while preserving the collection type,
+        # so valid YAML bare scalars such as [Read, Grep] and {owner: me} do not
+        # require PyYAML or JSON syntax.
+        return [] if value.startswith("[") else {}
     return value
 
 

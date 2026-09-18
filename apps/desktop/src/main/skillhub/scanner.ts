@@ -269,6 +269,24 @@ export async function scanAllSkills(
     log.error('maker.listCustomizations failed', err);
     listed = { items: [], errors: [{ message: err instanceof Error ? err.message : String(err) }] };
   }
+  const discoveredEnginesByRealPath = new Map<
+    string,
+    Map<Skill['engine'], Skill['linkedEngines'][number]>
+  >();
+  for (const rawItem of listed.items) {
+    const item = normalizeSkillEntityPath(rawItem);
+    if (item.kind !== 'skill') continue;
+    const realPath = realPathOrNormalized(item.absolutePath);
+    const engines = discoveredEnginesByRealPath.get(realPath) ?? new Map();
+    if (!engines.has(item.engine)) {
+      engines.set(item.engine, {
+        engine: item.engine,
+        label: item.engine === 'claude-code' ? 'Claude' : item.engine === 'codex' ? 'Codex' : 'Pi',
+        ...(item.runtimeStatus ? { runtimeStatus: item.runtimeStatus } : {}),
+      });
+    }
+    discoveredEnginesByRealPath.set(realPath, engines);
+  }
   const builtInRealPaths = new Set<string>();
   for (const descriptor of builtInSkills) {
     try {
@@ -368,11 +386,7 @@ export async function scanAllSkills(
       }
     }
     const linkedEngines = builtIn
-      ? [
-          { engine: 'claude-code' as const, label: 'Claude' },
-          { engine: 'codex' as const, label: 'Codex' },
-          { engine: 'pi' as const, label: 'Pi' },
-        ]
+      ? Array.from(discoveredEnginesByRealPath.get(realPath)?.values() ?? [])
       : Array.from(engineSet.values());
 
     const skill: Skill = {

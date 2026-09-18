@@ -14,6 +14,7 @@ const mockState = vi.hoisted(() => ({
   collabService: null as null | {
     [key: string]: ReturnType<typeof vi.fn>;
   },
+  learnEnabled: true,
   capturedProvidersConfig: null as null | Record<string, unknown>,
 }));
 
@@ -87,6 +88,10 @@ vi.mock('../../maker-host/session-search.js', () => ({
 
 vi.mock('../../maker-host/lsp-mode-store.js', () => ({
   readLspModeSettings: () => ({ enabled: true }),
+}));
+
+vi.mock('../../skillhub/activationPreferences.js', () => ({
+  isCindyLearnSkillEnabled: () => mockState.learnEnabled,
 }));
 
 vi.mock('../../localDb/chatHistoryReader.js', () => ({
@@ -164,6 +169,7 @@ describe('collab send outcome semantics', () => {
     mockState.logger.trace.mockClear();
     mockState.logger.fatal.mockClear();
     mockState.collabService = null;
+    mockState.learnEnabled = true;
     mockState.capturedProvidersConfig = null;
     vi.clearAllMocks();
   });
@@ -196,6 +202,35 @@ describe('collab send outcome semantics', () => {
         workingDir: 'C:/projects/cindy',
       } as never),
     ).toBe(true);
+  });
+
+  it('rejects start_skill_learning after the built-in Learn Skill is disabled', async () => {
+    mockState.learnEnabled = false;
+    createDesktopMcpProviders({
+      botCapabilities,
+      getMakerMemoryManager: vi.fn(),
+      lspPool: {} as never,
+      pluginRegistry: { isEnabled: () => true } as never,
+      resolveIOSSimulatorAccess: () => ({ allowed: true }),
+      invokeRemote: vi.fn(),
+    });
+    const xdtHelper = mockState.capturedProvidersConfig?.xdtHelper as {
+      skillLearning: (input: {
+        callerSessionId: string;
+        input: string;
+        sourceKind: 'session';
+      }) => Promise<Record<string, unknown>>;
+    };
+
+    await expect(xdtHelper.skillLearning({
+      callerSessionId: 'session-1',
+      input: '',
+      sourceKind: 'session',
+    })).resolves.toEqual({
+      ok: false,
+      errorCode: 'SKILL_DISABLED',
+      message: 'Cindy Learn is disabled in Local Skills.',
+    });
   });
 
   it('reports enable_collab_mode delegate_task created-and-dispatched distinctly', async () => {

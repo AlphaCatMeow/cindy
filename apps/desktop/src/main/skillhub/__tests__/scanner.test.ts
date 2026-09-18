@@ -115,15 +115,47 @@ describe('scanAllSkills', () => {
       builtIn: true,
       canUninstall: false,
       cindyEnabled: true,
-      linkedEngines: [
-        { engine: 'claude-code', label: 'Claude' },
-        { engine: 'codex', label: 'Codex' },
-        { engine: 'pi', label: 'Pi' },
-      ],
+      linkedEngines: [],
     });
     expect(result.skills.find((skill) => !skill.builtIn)).toMatchObject({
       description: 'User copy',
       canUninstall: true,
+    });
+  });
+
+  it('lists only engines that actually discover the bundled Skill path', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-built-in-engines-'));
+    tempRoots.push(root);
+    const builtIn = path.join(root, 'shared-system-skills', 'learn');
+    fs.mkdirSync(builtIn, { recursive: true });
+    fs.writeFileSync(path.join(builtIn, 'SKILL.md'), '---\nname: learn\ndescription: Learn\n---\nBody\n');
+    const items = (['codex', 'pi'] as const).map((engine) => ({
+      engine,
+      kind: 'skill' as const,
+      scope: 'user' as const,
+      name: 'learn',
+      description: 'Learn',
+      absolutePath: builtIn,
+      mdPath: path.join(builtIn, 'SKILL.md'),
+      files: [],
+    }));
+    const maker = {
+      listCustomizations: vi.fn(async () => ({ errors: [], items })),
+    } as unknown as Maker;
+
+    const result = await scanAllSkills({}, maker, [], [{
+      name: 'learn',
+      absolutePath: builtIn,
+      nativeClaudePath: path.join(root, 'claude-home', 'skills', 'learn'),
+    }]);
+
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0]).toMatchObject({
+      builtIn: true,
+      linkedEngines: [
+        { engine: 'codex', label: 'Codex' },
+        { engine: 'pi', label: 'Pi' },
+      ],
     });
   });
 

@@ -4,7 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
 import { createLogger } from '../logger';
 import { createOverrideSettingsFile } from '../maker-host/override-settings-file';
-import { builtInSkillDescriptors } from '../maker-host/built-in-skills';
+import {
+  BUILT_IN_LEARN_SKILL_NAME,
+  builtInSkillDescriptors,
+} from '../maker-host/built-in-skills';
 
 /** Device/profile-local user intent; independent of cloud installs and account changes. */
 interface SkillActivationPreferences {
@@ -74,6 +77,14 @@ export function readDisabledSkillPaths(): readonly string[] {
 
 export function isCindySkillEnabled(source: string): boolean {
   return !readDisabledSkillPaths().includes(skillActivationKey(source));
+}
+
+export function isCindyLearnSkillEnabled(): boolean {
+  const descriptor = builtInSkillDescriptors(
+    app.getPath('userData'),
+    app.getPath('appData'),
+  ).find((skill) => skill.name === BUILT_IN_LEARN_SKILL_NAME);
+  return descriptor ? isCindySkillEnabled(descriptor.absolutePath) : false;
 }
 
 export interface SkillActivationSnapshot { key: string; revision?: string; aliases: string[] }
