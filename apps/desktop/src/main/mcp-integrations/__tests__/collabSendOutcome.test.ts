@@ -15,6 +15,8 @@ const mockState = vi.hoisted(() => ({
     [key: string]: ReturnType<typeof vi.fn>;
   },
   learnEnabled: true,
+  learnController: {} as object | null,
+  consumeLearnInvocationGrant: vi.fn(async (_request: unknown) => ({ ok: true as const })),
   capturedProvidersConfig: null as null | Record<string, unknown>,
 }));
 
@@ -94,6 +96,15 @@ vi.mock('../../skillhub/activationPreferences.js', () => ({
   isCindyLearnSkillEnabled: () => mockState.learnEnabled,
 }));
 
+vi.mock('../../learn-host/index.js', () => ({
+  getLearnController: () => mockState.learnController,
+}));
+
+vi.mock('../../learn-host/invocationGrant.js', () => ({
+  consumeLearnInvocationGrant: (request: unknown) =>
+    mockState.consumeLearnInvocationGrant(request),
+}));
+
 vi.mock('../../localDb/chatHistoryReader.js', () => ({
   listWorkdirsForHistory: vi.fn(),
   listSessionsForHistory: vi.fn(),
@@ -170,6 +181,9 @@ describe('collab send outcome semantics', () => {
     mockState.logger.fatal.mockClear();
     mockState.collabService = null;
     mockState.learnEnabled = true;
+    mockState.learnController = {};
+    mockState.consumeLearnInvocationGrant.mockReset();
+    mockState.consumeLearnInvocationGrant.mockResolvedValue({ ok: true });
     mockState.capturedProvidersConfig = null;
     vi.clearAllMocks();
   });
@@ -231,6 +245,46 @@ describe('collab send outcome semantics', () => {
       errorCode: 'SKILL_DISABLED',
       message: 'Cindy Learn is disabled in Local Skills.',
     });
+  });
+
+  it('authorizes Learn only when the active slash-command winner is Cindy built-in Learn', async () => {
+    const attestCindyLearnSkillForSession = vi.fn(async () => false);
+    createDesktopMcpProviders({
+      botCapabilities,
+      getMakerMemoryManager: vi.fn(),
+      lspPool: {} as never,
+      pluginRegistry: { isEnabled: () => true } as never,
+      resolveIOSSimulatorAccess: () => ({ allowed: true }),
+      invokeRemote: vi.fn(),
+      attestCindyLearnSkillForSession,
+    });
+    const xdtHelper = mockState.capturedProvidersConfig?.xdtHelper as {
+      authorizeSkillLearning: (input: {
+        callerSessionId: string;
+        input: string;
+        sourceKind: 'freetext';
+      }, context: { sessionInstanceId: string }) => Promise<Record<string, unknown>>;
+    };
+    const request = {
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext' as const,
+    };
+
+    const context = { sessionInstanceId: 'instance-1' };
+    await expect(xdtHelper.authorizeSkillLearning(request, context)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'USER_REQUEST_REQUIRED',
+    });
+    expect(attestCindyLearnSkillForSession).toHaveBeenLastCalledWith(
+      'session-1',
+      'instance-1',
+    );
+    expect(mockState.consumeLearnInvocationGrant).not.toHaveBeenCalled();
+
+    attestCindyLearnSkillForSession.mockResolvedValue(true);
+    await expect(xdtHelper.authorizeSkillLearning(request, context)).resolves.toEqual({ ok: true });
+    expect(mockState.consumeLearnInvocationGrant).toHaveBeenCalledWith(request);
   });
 
   it('reports enable_collab_mode delegate_task created-and-dispatched distinctly', async () => {

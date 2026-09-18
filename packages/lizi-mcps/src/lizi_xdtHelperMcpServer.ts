@@ -64,7 +64,10 @@ import type { SetCurrentSessionTitleDeps } from './xdt-helper/set_current_sessio
 import type { RenameSessionsDeps } from './xdt-helper/rename_sessions.js';
 import type { ArchiveSessionsDeps } from './xdt-helper/archive_sessions.js';
 import type { SendToSessionCallback } from './xdt-helper/send_to_session.js';
-import type { StartSkillLearningCallback } from './xdt-helper/start_skill_learning.js';
+import type {
+  AuthorizeSkillLearningCallback,
+  StartSkillLearningCallback,
+} from './xdt-helper/start_skill_learning.js';
 import {
   registerBotSkillTools,
   type BotSkillCallbacks,
@@ -639,6 +642,8 @@ export interface XdtHelperMcpDeps {
   sendToSession?: SendToSessionCallback;
   /** Cindy-managed Learn flow; registered in the skills category when supplied by the host. */
   skillLearning?: StartSkillLearningCallback;
+  /** Host-owned, one-shot authorization for the current direct Learn invocation. */
+  authorizeSkillLearning?: AuthorizeSkillLearningCallback;
   /** Register an existing local directory as a Cindy project without starting a task. */
   createProject?: CreateProjectCallback;
   moveSession?: MoveSessionCallback;
@@ -806,9 +811,10 @@ export function createXdtHelperMcpServer(
       sendToSession: deps.sendToSession,
     });
   }
-  if (deps.skillLearning) {
+  if (deps.skillLearning && deps.authorizeSkillLearning) {
     registerStartSkillLearningTool(registry, {
       getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
+      authorizeSkillLearning: deps.authorizeSkillLearning,
       startSkillLearning: deps.skillLearning,
     });
   }

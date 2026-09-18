@@ -109,6 +109,10 @@ vi.mock('../shared-global-skills.js', () => ({
   prepareSharedProjectSkillLinks: async () => ({ warnings: [] }),
 }));
 
+vi.mock('../built-in-skills.js', () => ({
+  refreshBuiltInClaudeSkillLinks: async () => ({ warnings: [] }),
+}));
+
 vi.mock('../anthropic-compat-proxy-host.js', () => ({
   isAnthropicCompatProxyHandleReady: () => h.proxyReady,
 }));

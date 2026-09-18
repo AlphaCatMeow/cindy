@@ -41,6 +41,19 @@ export interface PrepareBuiltInSkillsResult {
   warnings: string[];
 }
 
+export interface RefreshBuiltInClaudeSkillLinksOptions {
+  userDataDir: string;
+  appDataDir?: string;
+  homeDir?: string;
+  descriptors?: readonly BuiltInSkillDescriptor[];
+  withSharedMutation?: typeof withSkillMutation;
+}
+
+export interface RefreshBuiltInClaudeSkillLinksResult {
+  changed: boolean;
+  warnings: string[];
+}
+
 interface MaterializationManifest {
   schemaVersion: 2;
   bundleVersion: number;
@@ -330,6 +343,81 @@ export function markCindyBuiltInAgentSkills(
   });
 }
 
+/** Mark trusted Cindy entries, then apply the live activation override to those entries only. */
+export function activeCindyBuiltInAgentSkills(
+  skills: readonly AgentSkillCommand[],
+  descriptors: readonly BuiltInSkillDescriptor[],
+  isEnabled: (source: string) => boolean,
+): AgentSkillCommand[] {
+  const descriptorsByName = new Map(descriptors.map((descriptor) => [descriptor.name, descriptor]));
+  return markCindyBuiltInAgentSkills(skills, descriptors).filter((skill) => {
+    if (skill.builtIn !== true) return true;
+    const descriptor = descriptorsByName.get(skill.name);
+    return descriptor ? isEnabled(descriptor.absolutePath) : false;
+  });
+}
+
+async function refreshBuiltInClaudeSkillLinksUnlocked(
+  options: Omit<RefreshBuiltInClaudeSkillLinksOptions, 'withSharedMutation'>,
+): Promise<RefreshBuiltInClaudeSkillLinksResult> {
+  const descriptors = options.descriptors
+    ?? builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+  const homeDir = options.homeDir ?? os.homedir();
+  const warnings: string[] = [];
+  let changed = false;
+
+  for (const descriptor of descriptors) {
+    const sharedPath = path.join(homeDir, '.agents', 'skills', descriptor.name);
+    const claudePalettePath = path.join(homeDir, '.claude', 'skills', descriptor.name);
+    const claudeRuntimeTarget = await hasSkillFile(claudePalettePath)
+      ? claudePalettePath
+      : sharedPath;
+    if (!(await hasSkillFile(claudeRuntimeTarget))) {
+      warnings.push(
+        `could not expose built-in Skill ${descriptor.name} to Claude because its palette winner is unavailable`,
+      );
+      continue;
+    }
+    try {
+      const linked = await ensureSkillEntry(
+        descriptor,
+        descriptor.nativeClaudePath,
+        true,
+        options.userDataDir,
+        options.appDataDir,
+        claudeRuntimeTarget,
+        [sharedPath, claudePalettePath],
+      );
+      changed = linked.changed || changed;
+      if (linked.warning) warnings.push(linked.warning);
+    } catch (error) {
+      warnings.push(
+        `could not expose built-in Skill ${descriptor.name} to Claude: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { changed, warnings };
+}
+
+/** Keep Cindy's isolated Claude runtime pointed at the latest shared/palette winner. */
+export async function refreshBuiltInClaudeSkillLinks(
+  options: RefreshBuiltInClaudeSkillLinksOptions,
+): Promise<RefreshBuiltInClaudeSkillLinksResult> {
+  const descriptors = options.descriptors
+    ?? builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+  const mutate = options.withSharedMutation ?? withSkillMutation;
+  const refreshed = await mutate(
+    descriptors.map((descriptor) => descriptor.name),
+    () => refreshBuiltInClaudeSkillLinksUnlocked({ ...options, descriptors }),
+    { waitMs: BUILT_IN_SKILL_MUTATION_WAIT_MS },
+  );
+  return refreshed ?? {
+    changed: false,
+    warnings: ['could not refresh built-in Claude Skills because another Skill mutation is in progress'],
+  };
+}
+
 /**
  * Materialize Cindy-owned Skill bytes under a profile-independent appData path, then expose
  * them through the shared ~/.agents discovery root and Cindy's isolated Claude
@@ -391,13 +479,6 @@ export async function prepareBuiltInSkills(
         continue;
       }
 
-      const sharedPath = path.join(
-        options.homeDir ?? os.homedir(),
-        '.agents',
-        'skills',
-        descriptor.name,
-      );
-      let sharedTarget: string | undefined;
       try {
         const linked = await ensureSharedEntry(
           descriptor,
@@ -406,49 +487,22 @@ export async function prepareBuiltInSkills(
           options.appDataDir,
         );
         changed = linked.changed || changed;
-        sharedTarget = linked.targetPath ?? await fsp.realpath(sharedPath).catch(() => undefined);
         if (linked.warning) warnings.push(linked.warning);
       } catch (error) {
         warnings.push(
           `could not expose built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-
-      if (!sharedTarget) {
-        warnings.push(`could not expose built-in Skill ${descriptor.name} to Claude because the shared entry is unavailable`);
-        continue;
-      }
-      try {
-        // Claude's palette scans ~/.claude while its isolated runtime reads
-        // <userData>/claude-home. Mirror the palette winner so a user-owned
-        // Claude Skill keeps precedence even when ~/.agents has Cindy's copy.
-        const homeDir = options.homeDir ?? os.homedir();
-        const claudePalettePath = path.join(
-          homeDir,
-          '.claude',
-          'skills',
-          descriptor.name,
-        );
-        const claudeRuntimeTarget = await hasSkillFile(claudePalettePath)
-          ? claudePalettePath
-          : sharedPath;
-        const linked = await ensureSkillEntry(
-          descriptor,
-          descriptor.nativeClaudePath,
-          true,
-          options.userDataDir,
-          options.appDataDir,
-          claudeRuntimeTarget,
-          [sharedPath],
-        );
-        changed = linked.changed || changed;
-        if (linked.warning) warnings.push(linked.warning);
-      } catch (error) {
-        warnings.push(
-          `could not expose built-in Skill ${descriptor.name} to Claude: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
     }
+
+    const claudeProjection = await refreshBuiltInClaudeSkillLinksUnlocked({
+      userDataDir: options.userDataDir,
+      appDataDir: options.appDataDir,
+      homeDir: options.homeDir,
+      descriptors,
+    });
+    changed = claudeProjection.changed || changed;
+    warnings.push(...claudeProjection.warnings);
 
     if (!newerBundleIsInstalled) {
       if (bundleReady) manifest.bundleVersion = bundleVersion;

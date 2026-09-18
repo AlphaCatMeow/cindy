@@ -400,7 +400,10 @@ describe('registerSkillhubIpc usage handlers', () => {
     fs.mkdirSync(builtInRoot, { recursive: true });
     fs.writeFileSync(builtInFile, '# Learn\n');
     fs.writeFileSync(builtInNotes, 'notes\n');
-    const attestedRoot = fs.realpathSync.native(builtInRoot);
+    const physicalBuiltInRoot = fs.realpathSync.native(builtInRoot);
+    const attestedRoot = process.platform === 'win32'
+      ? physicalBuiltInRoot.toLowerCase()
+      : physicalBuiltInRoot;
     const sender = { id: 18, on: vi.fn(), once: vi.fn() };
     resolveExistingSkillPathForGrant.mockReturnValue(null);
     isExistingSkillPathGranted.mockReturnValue(false);

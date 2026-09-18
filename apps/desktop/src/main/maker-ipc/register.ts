@@ -392,9 +392,10 @@ import {
 } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
 import {
+  activeCindyBuiltInAgentSkills,
   builtInSkillDescriptors,
-  markCindyBuiltInAgentSkills,
 } from '../maker-host/built-in-skills.js';
+import { isCindySkillEnabled } from '../skillhub/activationPreferences.js';
 import { ensurePiManagerInstalled } from '../maker-host/pi-manager-client.js';
 import {
   setRemoteCodexLiveTurnChecker,
@@ -6023,9 +6024,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         return {
           success: true,
           ...result,
-          skills: markCindyBuiltInAgentSkills(
+          skills: activeCindyBuiltInAgentSkills(
             result.skills,
             builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),
+            isCindySkillEnabled,
           ),
         };
       } catch (err) {

@@ -76,6 +76,10 @@ import {
   type BotProfileRuntimeSnapshot,
 } from '../maker-ipc/botProfileRuntime.js';
 import { collectBotOwnSkillMounts } from '../maker-ipc/botSkillService.js';
+import {
+  builtInSkillDescriptors,
+  markCindyBuiltInAgentSkills,
+} from './built-in-skills.js';
 import { buildBotMcpCatalog } from './botMcpCatalog.js';
 import { createBotCapabilityService, type BotCapabilityServiceDeps, type BotCapabilityUpdate } from '../maker-ipc/botCapabilityService.js';
 import {
@@ -930,6 +934,31 @@ export function getMaker(): Maker {
       pluginRegistry,
       resolveIOSSimulatorAccess,
       invokeRemote: remoteInvoke,
+      attestCindyLearnSkillForSession: async (
+        sessionId: string,
+        sessionInstanceId: string | undefined,
+      ) => {
+        const session = _maker?.getSession(sessionId);
+        if (
+          !sessionInstanceId
+          || !session
+          || session.instanceId !== sessionInstanceId
+          || session.remoteHostId
+        ) {
+          return false;
+        }
+        const result = await _maker!.listAgentSkills(session.agentKind, {
+          workingDir: session.workDir,
+          sessionId,
+        });
+        const skills = markCindyBuiltInAgentSkills(
+          result.skills,
+          builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),
+        );
+        const learnCandidates = skills.filter((skill) => skill.name.toLowerCase() === 'learn');
+        return learnCandidates.length > 0
+          && learnCandidates.every((skill) => skill.builtIn === true);
+      },
       // 只读活跃 Session 的运行时真相。权限切换是 runtime-first、DB-second，
       // 因此插件过户自动放行不得回退 sessions.permission_mode；会话不再 active
       // 时同样 fail closed。闭包在 MCP tool-call 时执行，此时 _maker 已装配完成。

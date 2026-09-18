@@ -4,18 +4,28 @@ import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult, LiziMcpSessionContext } from '../types.js';
 import { errorPayload, okPayload } from './_payload.js';
 
-export type StartSkillLearningCallback = (params: {
+export interface StartSkillLearningParams {
   callerSessionId: string;
   input: string;
   sourceKind: 'session' | 'freetext' | 'hub';
   hubSlug?: string;
   hubCatalogScope?: 'market' | 'team';
-}) => Promise<ControlResult<{ runId: string }, string>>;
+}
+
+export type AuthorizeSkillLearningCallback = (
+  params: StartSkillLearningParams,
+  context: LiziMcpSessionContext,
+) => Promise<ControlResult<object, string>>;
+
+export type StartSkillLearningCallback = (
+  params: StartSkillLearningParams,
+) => Promise<ControlResult<{ runId: string }, string>>;
 
 export function registerStartSkillLearningTool(
   registry: XdtHelperToolRegistry,
   deps: {
     getSessionContext: () => LiziMcpSessionContext;
+    authorizeSkillLearning: AuthorizeSkillLearningCallback;
     startSkillLearning: StartSkillLearningCallback;
   },
 ): void {
@@ -50,7 +60,7 @@ export function registerStartSkillLearningTool(
         );
       }
 
-      const result = await deps.startSkillLearning({
+      const request: StartSkillLearningParams = {
         callerSessionId: context.sessionId,
         input: normalizedInput,
         sourceKind: source_kind,
@@ -58,7 +68,13 @@ export function registerStartSkillLearningTool(
         ...(source_kind === 'hub'
           ? { hubCatalogScope: hub_catalog_scope ?? 'market' }
           : {}),
-      });
+      };
+      const authorization = await deps.authorizeSkillLearning(request, context);
+      if (!authorization.ok) {
+        return errorPayload(authorization.errorCode, authorization.message);
+      }
+
+      const result = await deps.startSkillLearning(request);
       return result.ok
         ? okPayload({
             run_id: result.runId,

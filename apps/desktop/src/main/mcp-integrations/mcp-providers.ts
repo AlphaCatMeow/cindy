@@ -88,6 +88,7 @@ import {
 import { botSessionLinks, sessions } from '../localDb/schema.js';
 import { isCindyLearnSkillEnabled } from '../skillhub/activationPreferences.js';
 import { getLearnController } from '../learn-host/index.js';
+import { consumeLearnInvocationGrant } from '../learn-host/invocationGrant.js';
 
 export interface DesktopMcpProvidersDeps {
   botCapabilities: Pick<ReturnType<typeof createBotCapabilityService>, 'list' | 'select'>;
@@ -109,6 +110,11 @@ export interface DesktopMcpProvidersDeps {
     sessionId: string,
     sessionInstanceId: string,
   ) => GhostGrantLiveSessionState | null;
+  /** Confirms that this Session's actual slash-command winner is Cindy's built-in Learn Skill. */
+  attestCindyLearnSkillForSession?: (
+    sessionId: string,
+    sessionInstanceId: string | undefined,
+  ) => Promise<boolean>;
   /** 把工具结果图片转成文字描述（视觉桥，最佳努力）。缺失 = 不处理。
    *  返回结构区分「有意跳过」(skipped:true, 视觉桥未开/模型不命中, 不告警)与
    *  「真正尝试但失败」(skipped:false + null, 计入 attemptedCount 供告警)。 */
@@ -377,6 +383,33 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
       createProject,
       moveSession: createMoveSession(isSessionInTurn),
       projectManagement: { list: listProjects, rename: renameProject, remove: removeProject },
+      authorizeSkillLearning: async (request, context) => {
+        if (!isCindyLearnSkillEnabled()) {
+          return {
+            ok: false,
+            errorCode: 'SKILL_DISABLED',
+            message: 'Cindy Learn is disabled in Local Skills.',
+          };
+        }
+        if (!getLearnController()) {
+          return {
+            ok: false,
+            errorCode: 'HOST_NOT_READY',
+            message: 'Cindy Learn is not ready yet.',
+          };
+        }
+        if (!await deps.attestCindyLearnSkillForSession?.(
+          request.callerSessionId,
+          context.sessionInstanceId,
+        )) {
+          return {
+            ok: false,
+            errorCode: 'USER_REQUEST_REQUIRED',
+            message: 'Cindy Learn is not the active /learn Skill for this task.',
+          };
+        }
+        return consumeLearnInvocationGrant(request);
+      },
       skillLearning: async ({
         callerSessionId,
         input,

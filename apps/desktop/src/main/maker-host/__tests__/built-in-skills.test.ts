@@ -4,9 +4,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  activeCindyBuiltInAgentSkills,
   builtInSkillDescriptors,
   markCindyBuiltInAgentSkills,
   prepareBuiltInSkills,
+  refreshBuiltInClaudeSkillLinks,
   resolveBundledSystemSkillsRoot,
 } from '../built-in-skills';
 
@@ -239,7 +241,7 @@ describe('built-in Skills', () => {
     expect(result.warnings.join('\n')).toContain('already owned by the user');
   });
 
-  it('keeps the isolated Claude runtime aligned with the user-owned palette winner', async () => {
+  it('refreshes the isolated Claude runtime when the palette winner changes', async () => {
     const input = fixture();
     const first = await prepareBuiltInSkills(input);
     const descriptor = first.descriptors.find((item) => item.name === 'learn')!;
@@ -250,13 +252,25 @@ describe('built-in Skills', () => {
     fs.mkdirSync(claudePaletteSkill, { recursive: true });
     fs.writeFileSync(path.join(claudePaletteSkill, 'SKILL.md'), '# User Claude Learn\n');
 
-    const updated = await prepareBuiltInSkills(input);
+    const updated = await refreshBuiltInClaudeSkillLinks({
+      ...input,
+      descriptors: first.descriptors,
+    });
 
     expect(updated.warnings).toEqual([]);
     expect(fs.realpathSync(sharedSkill)).toBe(fs.realpathSync(descriptor.absolutePath));
     expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(
       fs.realpathSync(claudePaletteSkill),
     );
+
+    fs.rmSync(claudePaletteSkill, { recursive: true, force: true });
+    const restored = await refreshBuiltInClaudeSkillLinks({
+      ...input,
+      descriptors: first.descriptors,
+    });
+
+    expect(restored.warnings).toEqual([]);
+    expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(fs.realpathSync(sharedSkill));
   });
 
   it('attests only commands backed by the materialized Cindy copy', async () => {
@@ -287,6 +301,30 @@ describe('built-in Skills', () => {
 
     expect(official?.builtIn).toBe(true);
     expect(spoofed?.builtIn).toBeUndefined();
+  });
+
+  it('removes disabled Cindy built-ins from the Agent roster without hiding user collisions', async () => {
+    const input = fixture();
+    const { descriptors } = await prepareBuiltInSkills(input);
+    const descriptor = descriptors[0]!;
+    const userCopy = path.join(input.homeDir, 'user-copy', 'SKILL.md');
+    fs.mkdirSync(path.dirname(userCopy), { recursive: true });
+    fs.writeFileSync(userCopy, '# User copy\n');
+
+    const skills = activeCindyBuiltInAgentSkills([
+      {
+        kind: 'agent-skill', name: descriptor.name, source: 'skill',
+        path: path.join(descriptor.absolutePath, 'SKILL.md'), scope: 'user', enabled: true,
+      },
+      {
+        kind: 'agent-skill', name: descriptor.name, source: 'skill',
+        path: userCopy, scope: 'user', enabled: true,
+      },
+    ], descriptors, (source) => source !== descriptor.absolutePath);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.path).toBe(userCopy);
+    expect(skills[0]?.builtIn).toBeUndefined();
   });
 
   it('resolves source and packaged resource roots', () => {

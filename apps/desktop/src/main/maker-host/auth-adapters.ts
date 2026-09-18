@@ -39,6 +39,7 @@ import { prepareCodexGlobalRulesCopy } from './codex-global-rules.js';
 import { prepareCodexGlobalPluginsBridge } from './codex-global-plugins.js';
 import { DESKTOP_CAPABILITY_ROUTING_POLICY } from './capability-routing.js';
 import { prepareSharedGlobalSkillLinks } from './shared-global-skills.js';
+import { refreshBuiltInClaudeSkillLinks } from './built-in-skills.js';
 import {
   copyCodexAuthSnapshot,
   inspectCodexAuthLink,
@@ -599,11 +600,21 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
   private async runEnsureSharedGlobalSkills(): Promise<void> {
     try {
       const ownerId = getActiveAppSession().dataOwnerId;
-      const result = await withSharedGlobalSkillProjectionMutation(ownerId, () =>
-        prepareSharedGlobalSkillLinks({
+      const result = await withSharedGlobalSkillProjectionMutation(ownerId, async () => {
+        const sharedProjection = await prepareSharedGlobalSkillLinks({
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
-        }),
-      );
+        });
+        const isolatedClaudeProjection = await refreshBuiltInClaudeSkillLinks({
+          userDataDir: app.getPath('userData'),
+          appDataDir: app.getPath('appData'),
+        });
+        return {
+          warnings: [
+            ...sharedProjection.warnings,
+            ...isolatedClaudeProjection.warnings,
+          ],
+        };
+      });
       for (const warning of result.warnings) {
         assetPrepLog.warn('shared global skill warning', { warning });
       }

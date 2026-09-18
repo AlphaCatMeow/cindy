@@ -12,6 +12,7 @@ function payload(result: { content: Array<{ type: string; text?: string }> }): R
 describe('start_skill_learning', () => {
   it('binds the current task and starts a session Learn run', async () => {
     const registry = new XdtHelperToolRegistry();
+    const authorizeSkillLearning = vi.fn(async () => ({ ok: true as const }));
     const startSkillLearning = vi.fn(async () => ({ ok: true as const, runId: 'run-1' }));
     registerStartSkillLearningTool(registry, {
       getSessionContext: () => ({
@@ -19,6 +20,7 @@ describe('start_skill_learning', () => {
         workingDir: '/repo',
         sessionId: 'session-1',
       }),
+      authorizeSkillLearning,
       startSkillLearning,
     });
 
@@ -27,16 +29,22 @@ describe('start_skill_learning', () => {
       input: '',
     });
 
-    expect(startSkillLearning).toHaveBeenCalledWith({
+    const request = {
       callerSessionId: 'session-1',
       input: '',
       sourceKind: 'session',
-    });
+    } as const;
+    expect(authorizeSkillLearning).toHaveBeenCalledWith(request, expect.objectContaining({
+      sessionId: 'session-1',
+      agentKind: 'codex',
+    }));
+    expect(startSkillLearning).toHaveBeenCalledWith(request);
     expect(payload(result)).toMatchObject({ ok: true, run_id: 'run-1', status: 'collecting' });
   });
 
   it('normalizes SkillHub input and defaults its catalog scope', async () => {
     const registry = new XdtHelperToolRegistry();
+    const authorizeSkillLearning = vi.fn(async () => ({ ok: true as const }));
     const startSkillLearning = vi.fn(async () => ({ ok: true as const, runId: 'run-2' }));
     registerStartSkillLearningTool(registry, {
       getSessionContext: () => ({
@@ -44,6 +52,7 @@ describe('start_skill_learning', () => {
         workingDir: '/repo',
         sessionId: 'session-2',
       }),
+      authorizeSkillLearning,
       startSkillLearning,
     });
 
@@ -68,6 +77,7 @@ describe('start_skill_learning', () => {
     [{ source_kind: 'session', input: '', hub_slug: 'extra' }, 'INVALID_ARGS'],
   ])('rejects inconsistent arguments %#', async (args, expectedErrorCode) => {
     const registry = new XdtHelperToolRegistry();
+    const authorizeSkillLearning = vi.fn(async () => ({ ok: true as const }));
     const startSkillLearning = vi.fn();
     registerStartSkillLearningTool(registry, {
       getSessionContext: () => ({
@@ -75,20 +85,52 @@ describe('start_skill_learning', () => {
         workingDir: '/repo',
         sessionId: 'session-3',
       }),
+      authorizeSkillLearning,
       startSkillLearning,
     });
 
     const result = await registry.call('start_skill_learning', args);
 
     expect(payload(result)).toMatchObject({ ok: false, errorCode: expectedErrorCode });
+    expect(authorizeSkillLearning).not.toHaveBeenCalled();
+    expect(startSkillLearning).not.toHaveBeenCalled();
+  });
+
+  it('requires a host-attested one-shot Learn invocation before starting', async () => {
+    const registry = new XdtHelperToolRegistry();
+    const authorizeSkillLearning = vi.fn(async () => ({
+      ok: false as const,
+      errorCode: 'USER_REQUEST_REQUIRED',
+      message: 'The latest user message is not a matching /learn invocation.',
+    }));
+    const startSkillLearning = vi.fn();
+    registerStartSkillLearningTool(registry, {
+      getSessionContext: () => ({
+        agentKind: 'codex',
+        workingDir: '/repo',
+        sessionId: 'session-4',
+      }),
+      authorizeSkillLearning,
+      startSkillLearning,
+    });
+
+    const result = await registry.call('start_skill_learning', {
+      source_kind: 'freetext',
+      input: 'create release notes',
+    });
+
+    expect(payload(result)).toMatchObject({ ok: false, errorCode: 'USER_REQUEST_REQUIRED' });
+    expect(authorizeSkillLearning).toHaveBeenCalledOnce();
     expect(startSkillLearning).not.toHaveBeenCalled();
   });
 
   it('fails closed without a bound Cindy task', async () => {
     const registry = new XdtHelperToolRegistry();
+    const authorizeSkillLearning = vi.fn(async () => ({ ok: true as const }));
     const startSkillLearning = vi.fn();
     registerStartSkillLearningTool(registry, {
       getSessionContext: () => ({ agentKind: 'codex', workingDir: '/repo' }),
+      authorizeSkillLearning,
       startSkillLearning,
     });
 
@@ -98,6 +140,7 @@ describe('start_skill_learning', () => {
     });
 
     expect(payload(result)).toMatchObject({ ok: false, errorCode: 'NO_SESSION_CONTEXT' });
+    expect(authorizeSkillLearning).not.toHaveBeenCalled();
     expect(startSkillLearning).not.toHaveBeenCalled();
   });
 });

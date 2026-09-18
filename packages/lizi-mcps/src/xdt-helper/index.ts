@@ -158,7 +158,9 @@ export {
 } from './submit_github_issue.js';
 export {
   registerStartSkillLearningTool,
+  type AuthorizeSkillLearningCallback,
   type StartSkillLearningCallback,
+  type StartSkillLearningParams,
 } from './start_skill_learning.js';
 export type {
   XdtHelperHistoryDeps,

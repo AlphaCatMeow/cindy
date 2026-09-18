@@ -13,7 +13,14 @@ FRONTMATTER_RE = re.compile(
     re.DOTALL,
 )
 TOP_LEVEL_FIELD_RE = re.compile(r"^([A-Za-z0-9_-]+)[ \t]*:[ \t]*(.*)$")
-BLOCK_SCALAR_RE = re.compile(r"^([|>])(?:[+-])?(?:[1-9])?[ \t]*(?:#.*)?$")
+BLOCK_SCALAR_RE = re.compile(
+    r"^([|>])(?:(?:[+-]([1-9])?)|(?:([1-9])[+-]?))?(?:[ \t]+#.*|[ \t]*)$"
+)
+
+
+def _block_indent_indicator(match):
+    value = match.group(2) or match.group(3)
+    return int(value) if value is not None else None
 
 
 def split_frontmatter(content):
@@ -214,7 +221,7 @@ def _parse_scalar(raw):
     return value
 
 
-def _block_value(lines, start, style):
+def _block_value(lines, start, style, indent_indicator=None):
     cursor = start
     captured = []
     minimum_indent = None
@@ -226,10 +233,14 @@ def _block_value(lines, start, style):
             indent = len(line) - len(line.lstrip(" "))
             if indent == 0 or line.startswith("\t"):
                 raise FrontmatterError("Block scalars must use space indentation")
+            if indent_indicator is not None and indent < indent_indicator:
+                raise FrontmatterError(
+                    f"Block scalar content must be indented at least {indent_indicator} spaces"
+                )
             minimum_indent = indent if minimum_indent is None else min(minimum_indent, indent)
         captured.append(line)
         cursor += 1
-    indent = minimum_indent or 0
+    indent = indent_indicator if indent_indicator is not None else minimum_indent or 0
     values = [line[indent:] if line.strip() else "" for line in captured]
     if style == "|":
         return "\n".join(values).rstrip("\n"), cursor
@@ -288,7 +299,10 @@ def _split_mapping_entry(value):
 
 def _validate_nested_entry(text, line_number):
     sequence_entry = text == "-" or text.startswith("- ") or text.startswith("-\t")
-    value = text[1:].lstrip() if sequence_entry else text
+    sequence_content_indent = (
+        1 + len(text[1:]) - len(text[1:].lstrip()) if sequence_entry else 0
+    )
+    value = text[sequence_content_indent:] if sequence_entry else text
     if not value or value.startswith("#"):
         return True, False, "sequence" if sequence_entry else "scalar"
 
@@ -305,7 +319,11 @@ def _validate_nested_entry(text, line_number):
             return True, False, "sequence" if sequence_entry else "mapping"
         block_match = BLOCK_SCALAR_RE.match(scalar_value)
         if block_match:
-            return True, True, "sequence" if sequence_entry else "mapping"
+            return (
+                True,
+                sequence_content_indent + (_block_indent_indicator(block_match) or 1),
+                "sequence" if sequence_entry else "mapping",
+            )
         _parse_scalar(scalar_value)
         # A sequence item may start a mapping whose sibling keys are indented
         # beneath the dash even when this first key already has a value.
@@ -313,7 +331,11 @@ def _validate_nested_entry(text, line_number):
 
     block_match = BLOCK_SCALAR_RE.match(value)
     if block_match:
-        return True, True, "sequence" if sequence_entry else "scalar"
+        return (
+            True,
+            sequence_content_indent + (_block_indent_indicator(block_match) or 1),
+            "sequence" if sequence_entry else "scalar",
+        )
     _parse_scalar(value)
     return False, False, "sequence" if sequence_entry else "scalar"
 
@@ -329,7 +351,8 @@ def _parse_nested_block(lines, start):
     cursor = start
     indent_levels = []
     previous_allows_child = True
-    block_scalar_indent = None
+    block_scalar_parent_indent = None
+    block_scalar_required_indent = None
     collection = None
 
     while cursor < len(lines):
@@ -347,11 +370,16 @@ def _parse_nested_block(lines, start):
             cursor += 1
             continue
 
-        if block_scalar_indent is not None:
-            if indent > block_scalar_indent:
+        if block_scalar_parent_indent is not None:
+            if indent >= block_scalar_required_indent:
                 cursor += 1
                 continue
-            block_scalar_indent = None
+            if indent > block_scalar_parent_indent:
+                raise FrontmatterError(
+                    f"Block scalar content is under-indented on line {cursor + 1}"
+                )
+            block_scalar_parent_indent = None
+            block_scalar_required_indent = None
 
         if not indent_levels:
             indent_levels.append([indent, None])
@@ -366,7 +394,7 @@ def _parse_nested_block(lines, start):
             if not indent_levels or indent != indent_levels[-1][0]:
                 raise FrontmatterError(f"Inconsistent indentation on line {cursor + 1}")
 
-        previous_allows_child, is_block_scalar, entry_kind = _validate_nested_entry(
+        previous_allows_child, block_indent, entry_kind = _validate_nested_entry(
             stripped,
             cursor + 1,
         )
@@ -374,8 +402,9 @@ def _parse_nested_block(lines, start):
             indent_levels[-1][1] = entry_kind
         elif indent_levels[-1][1] != entry_kind:
             raise FrontmatterError(f"Mixed collection types on line {cursor + 1}")
-        if is_block_scalar:
-            block_scalar_indent = indent
+        if block_indent is not False:
+            block_scalar_parent_indent = indent
+            block_scalar_required_indent = indent + block_indent
         cursor += 1
 
     return collection, cursor
@@ -406,7 +435,12 @@ def parse_frontmatter(frontmatter_text):
 
         block_match = BLOCK_SCALAR_RE.match(raw_value)
         if block_match:
-            value, index = _block_value(lines, index + 1, block_match.group(1))
+            value, index = _block_value(
+                lines,
+                index + 1,
+                block_match.group(1),
+                _block_indent_indicator(block_match),
+            )
             result[key] = value
             continue
 
