@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { transferableAbortController } from 'node:util';
 import { cleanup, render, screen, act } from '@testing-library/react';
 import { createMemoryRouter, Outlet, RouterProvider, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,8 +28,13 @@ function launch(path = '/') {
   const view = render(tree());
   return { router, rerender: () => view.rerender(tree()) };
 }
-beforeEach(() => { localStorage.clear(); auth.dataOwnerId = 'account-a'; });
-afterEach(cleanup);
+// React Router's Node-native Request requires a matching native AbortSignal.
+const NativeAbortController = transferableAbortController().constructor;
+beforeEach(() => {
+  vi.stubGlobal('AbortController', NativeAbortController);
+  localStorage.clear(); auth.dataOwnerId = 'account-a';
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('main entry startup', () => {
   it('reopens the partner list after closing a partner chat, without restoring its id', async () => {
