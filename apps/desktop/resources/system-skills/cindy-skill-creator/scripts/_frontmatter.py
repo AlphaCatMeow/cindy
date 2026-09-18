@@ -155,16 +155,16 @@ def _validate_flow_mapping_entry(value, required):
     if mapping_entry is None:
         if required:
             raise FrontmatterError("Flow mapping entry is missing ':'")
-        _parse_scalar(value)
+        _parse_scalar(value, in_flow=True)
         return
 
     raw_key, raw_value = mapping_entry
     if not raw_key.strip():
         raise FrontmatterError("Flow mapping entry is missing a key")
-    key = _parse_scalar(raw_key.strip())
+    key = _parse_scalar(raw_key.strip(), in_flow=True)
     if not isinstance(key, (str, int, float, bool)):
         raise FrontmatterError("Invalid flow mapping key")
-    _parse_scalar(raw_value.strip())
+    _parse_scalar(raw_value.strip(), in_flow=True)
 
 
 def _parse_flow_collection(value):
@@ -175,7 +175,7 @@ def _parse_flow_collection(value):
     return {} if is_mapping else []
 
 
-def _parse_scalar(raw):
+def _parse_scalar(raw, in_flow=False):
     value = _strip_plain_comment(raw)
     if value.startswith('"'):
         try:
@@ -214,6 +214,8 @@ def _parse_scalar(raw):
         # so valid YAML bare scalars such as [Read, Grep] and {owner: me} do not
         # require PyYAML or JSON syntax.
         return _parse_flow_collection(value)
+    if in_flow and re.search(r"[\[\]{},]", value):
+        raise FrontmatterError("Plain flow scalar contains an unquoted delimiter")
     if re.match(r"^(?:[-?:](?:[ \t]|$)|[,\]\}#&*!|>'\"%@`])", value):
         raise FrontmatterError("Invalid leading indicator in plain scalar")
     if re.search(r":[ \t]|:$", value):

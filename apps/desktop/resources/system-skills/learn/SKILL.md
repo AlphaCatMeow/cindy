@@ -1,6 +1,6 @@
 ---
 name: learn
-description: Distill a reusable Cindy Skill from the current task, a described workflow, or a SkillHub skill through Cindy's review flow when the user invokes /learn or explicitly asks to start Learn.
+description: Distill a reusable Cindy Skill from the current task, a described workflow, or a SkillHub skill through Cindy's review flow when the user directly invokes /learn or /skill:learn in Pi.
 ---
 
 # Learn
