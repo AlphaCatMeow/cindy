@@ -214,6 +214,12 @@ export function isCodexThreadModelProviderIdentityMismatch(
     (provider) => provider.id === nextProviderId,
   );
   const targetCatalogId = targetProvider ? providerCatalogId(targetProvider) : null;
+  const targetRawProviderIds = new Set(
+    targetProvider?.models.codex?.flatMap((model) => [
+      model.catalogPresetId,
+      model.api === 'azure-openai-responses' ? 'azure' : undefined,
+    ].filter((id): id is string => typeof id === 'string')) ?? [],
+  );
   // Older app-server versions may report the logical provider id directly
   // (for example `openai`) instead of Cindy's materialized `cindy_openai`
   // alias. Account-specific OpenAI ids also share the catalog identity
@@ -223,6 +229,7 @@ export function isCodexThreadModelProviderIdentityMismatch(
     actualThreadModelProviderId !== null &&
     (actualThreadModelProviderId === nextProviderId ||
       actualThreadModelProviderId === targetCatalogId ||
+      targetRawProviderIds.has(actualThreadModelProviderId) ||
       (nextProviderId === null &&
         effectiveNextMode === 'oauth-bearer' &&
         actualThreadModelProviderId === 'openai'));
