@@ -195,6 +195,21 @@ describe('shouldCloseSessionForCredentialSwitch codex mode', () => {
     expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
   });
 
+  it('keeps a raw OpenAI identity for the implicit OAuth route', () => {
+    const input = {
+      agentKind: 'codex',
+      currentProviderId: null,
+      nextProviderId: null,
+      currentModel: 'gpt-5.4',
+      nextModel: 'gpt-5.5',
+      currentCodexProxyActive: true,
+      currentCodexThreadModelProviderId: 'openai',
+      codexAuthInjection: 'oauth-bearer',
+    } as const;
+    expect(isCodexThreadModelProviderIdentityMismatch(input)).toBe(false);
+    expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
+  });
+
   it('still closes a gateway Codex session when switching to OAuth on a proxy-active host', () => {
     expect(shouldCloseSessionForCredentialSwitch({
       agentKind: 'codex',

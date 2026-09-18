@@ -222,7 +222,10 @@ export function isCodexThreadModelProviderIdentityMismatch(
   const actualMatchesTargetLogicalProvider =
     actualThreadModelProviderId !== null &&
     (actualThreadModelProviderId === nextProviderId ||
-      actualThreadModelProviderId === targetCatalogId);
+      actualThreadModelProviderId === targetCatalogId ||
+      (nextProviderId === null &&
+        effectiveNextMode === 'oauth-bearer' &&
+        actualThreadModelProviderId === 'openai'));
   // The app-server may report a provider id that is not one of Cindy's
   // materialized identities (for example `openai`, Azure, or a custom provider).
   // It is still a sticky thread identity. Treating those ids as unknown lets a
