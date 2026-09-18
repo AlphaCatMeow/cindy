@@ -5,6 +5,7 @@ import {
   INHERITED_CAPABILITY_SELECTION,
   appendAutoReviewUserIntent,
   MAIN_OWNED_SEND_CONTEXT,
+  PINNED_SKILL_INVOCATION,
   type AgentKind,
   type SessionSendOptions,
   type SessionSendResult,
@@ -253,6 +254,11 @@ describe('maker SEND transaction', () => {
       '{"text":"/learn release flow","slashCommandRanges":[{"start":0,"end":6}]}',
       '/learn release flow',
     );
+    const sendOptions = vi.mocked(session.send).mock.calls[0]?.[1];
+    expect(sendOptions?.[PINNED_SKILL_INVOCATION]).toEqual({
+      name: 'learn',
+      path: grant.resolvedSkillPath,
+    });
     expect(deps.createDbMessage).toHaveBeenCalledWith(
       'session-1',
       expect.objectContaining({

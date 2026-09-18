@@ -19,6 +19,9 @@ import shutil
 import sys
 from pathlib import Path
 
+# This script runs inside Cindy's content-addressed built-in Skill bundle.
+sys.dont_write_bytecode = True
+
 from generate_openai_yaml import render_openai_yaml
 
 MAX_SKILL_NAME_LENGTH = 64

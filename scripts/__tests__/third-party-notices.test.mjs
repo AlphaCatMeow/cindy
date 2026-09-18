@@ -351,6 +351,26 @@ test("the bundled Skill validator accepts standard multiline YAML without extern
   }
 
   const skillDir = fs.mkdtempSync(path.join(os.tmpdir(), "cindy-skill-validator-"));
+  const bundledScriptsDir = path.join(
+    repoRoot,
+    "apps/desktop/resources/system-skills/cindy-skill-creator/scripts",
+  );
+  const bytecodeArtifacts = () => {
+    const artifacts = [];
+    const visit = directory => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "__pycache__") artifacts.push(absolute);
+          visit(absolute);
+        } else if (entry.name.endsWith(".pyc")) {
+          artifacts.push(absolute);
+        }
+      }
+    };
+    visit(bundledScriptsDir);
+    return artifacts;
+  };
   try {
     const printableBoundaries = String.fromCodePoint(
       0xa0,
@@ -385,6 +405,20 @@ metadata:
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stdout, /Skill is valid!/);
+
+    const generator = path.join(bundledScriptsDir, "generate_openai_yaml.py");
+    const generated = spawnSync(command, [...prefix, "-S", generator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.equal(generated.status, 0, `${generated.stdout}\n${generated.stderr}`);
+
+    const initializer = path.join(bundledScriptsDir, "init_skill.py");
+    const initialized = spawnSync(
+      command,
+      [...prefix, "-S", initializer, "bytecode-regression", "--path", skillDir],
+      { encoding: "utf8" },
+    );
+    assert.equal(initialized.status, 0, `${initialized.stdout}\n${initialized.stderr}`);
 
     fs.writeFileSync(
       path.join(skillDir, "SKILL.md"),
@@ -463,6 +497,11 @@ metadata:
     });
     assert.notEqual(rejected.status, 0);
     assert.match(rejected.stdout, /special characters are not allowed/);
+    assert.deepEqual(
+      bytecodeArtifacts(),
+      [],
+      "bundled Python helpers must not mutate the content-addressed Skill with bytecode caches",
+    );
   } finally {
     fs.rmSync(skillDir, { recursive: true, force: true });
   }

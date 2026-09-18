@@ -10,6 +10,9 @@ import argparse
 import sys
 from pathlib import Path
 
+# This script runs inside Cindy's content-addressed built-in Skill bundle.
+sys.dont_write_bytecode = True
+
 from _frontmatter import FrontmatterError, parse_frontmatter, split_frontmatter
 
 ACRONYMS = {

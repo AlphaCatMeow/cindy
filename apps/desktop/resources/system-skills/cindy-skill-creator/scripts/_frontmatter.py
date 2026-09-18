@@ -6,6 +6,9 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+# These helpers execute from Cindy's content-addressed built-in Skill bundle.
+# Keep the whole local import chain from mutating that immutable directory.
+sys.dont_write_bytecode = True
 
 VENDOR_ROOT = Path(__file__).resolve().parent / "_vendor"
 sys.path.insert(0, str(VENDOR_ROOT))

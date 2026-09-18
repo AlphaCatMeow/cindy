@@ -5,6 +5,7 @@ import {
   AUTO_REVIEW_USER_INTENT,
   INHERITED_CAPABILITY_SELECTION,
   MAIN_OWNED_SEND_CONTEXT,
+  PINNED_SKILL_INVOCATION,
   LIBRARY_READ_ROOT,
   type AgentKind,
   type MainOwnedSendContext,
@@ -1435,6 +1436,14 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
           [AUTO_REVIEW_SOURCE_CONTENT]: autoReviewSourceContent,
           ...(so[INHERITED_CAPABILITY_SELECTION] !== undefined
             ? { [INHERITED_CAPABILITY_SELECTION]: so[INHERITED_CAPABILITY_SELECTION] }
+            : {}),
+          ...(cindyLearnInvocation
+            ? {
+                [PINNED_SKILL_INVOCATION]: {
+                  name: 'learn',
+                  path: cindyLearnInvocation.resolvedSkillPath,
+                },
+              }
             : {}),
           ...(restoredAutoReviewIntent !== undefined
             ? { [AUTO_REVIEW_USER_INTENT]: restoredAutoReviewIntent }
