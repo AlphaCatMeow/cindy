@@ -8336,15 +8336,19 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     log,
   });
   pendingAgentSwitchApplyHolder = async (sessionId, signal, selection) => {
-    const release = await acquireSendToSessionLock(sessionId);
+    let stage = 'direct-send:acquire';
+    const release = await acquireSendToSessionLock(sessionId, undefined, () => stage);
     try {
+      stage = 'direct-send:reconcileBotModelRoute';
       await reconcileBotModelRoute(sessionId, true);
+      stage = 'direct-send:applyPendingAgentSwitchIfIdle';
       await applyPendingAgentSwitchIfIdle(agentSwitchDeps, sessionId, {
         bootstrapAfterSwitch: true,
         signal,
       });
       let resolvedSelection: ScheduledModelSelection | undefined;
       if (selection) {
+        stage = 'direct-send:applyScheduledModelSelection';
         resolvedSelection = await applyScheduledModelSelection(selection, {
           getTarget: async () => {
             const row = await agentSwitchDeps.getSessionRow(sessionId);
@@ -8376,7 +8380,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           },
         });
       }
+      stage = 'direct-send:prepareUnhealthySession';
       await contextOverflowRolloverHolder?.prepareUnhealthySession(sessionId);
+      // The caller retains the lease through runtime refresh and Session.send.
+      stage = 'direct-send:caller-dispatch';
       return { release, selection: resolvedSelection };
     } catch (err) {
       release();
