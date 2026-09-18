@@ -64,6 +64,7 @@ import { ChatInput } from '@/components/new-chat/ChatInput';
 import { CindyMakeComposerMask } from '@/components/cindy-make/CindyMakeComposerMask';
 import { getCindyMakeComposerPhase } from '@/lib/cindyMakeComposer';
 import { useCindyMakeState } from '@/lib/cindyMakeState';
+import { resolveLearnDesktopCommandFeedback } from '@/features/learn/desktopCommandFeedback';
 import { GoalIndicator } from '@/components/new-chat/GoalIndicator';
 import { PinnedPlanPanel } from '@/components/new-chat/PinnedPlanPanel';
 import { sessionsStore } from '@/lib/sessionsStore';
@@ -2474,6 +2475,17 @@ export function CCAgentSessionView({
         }
         return;
       }
+      if (payload.command === 'learn') {
+        // Agent Skill 成功路径不会发 Desktop payload；SSH / Skill 查询失败时仍会回退
+        // 到 Desktop 命令。保留回退的错误提示，并用 runId 补上可能早于订阅到达的状态卡。
+        const feedback = resolveLearnDesktopCommandFeedback(payload);
+        if (feedback?.kind === 'toast') {
+          toast[feedback.level](t(feedback.i18nKey));
+        } else if (feedback?.kind === 'insert-card') {
+          insertSystemCard('learn', { runId: feedback.runId });
+        }
+        return;
+      }
       if (payload.command === 'workflows') {
         // workflow 的主视图在右栏「后台任务」面板:有 live workflow 任务则打开面板
         // 并定位其详情;没有(如重载后任务表已清空)也打开面板列表 —— 列表基于消息
@@ -4361,9 +4373,9 @@ export function CCAgentSessionView({
     };
   }, [historyLoaded, insertSystemCard, sessionId, learnRestoreKey]);
 
-  // Learn 现在由 Agent Skill 通过宿主工具启动,不再有 Desktop command payload。
-  // 首个属于本会话的状态事件负责插入卡片；提案就绪 / 每轮修订刷新时再把卡片
-  // 移到消息流末尾,避免蒸馏长输出把「查看提案」入口留在顶部。
+  // Agent Skill 路径由首个属于本会话的状态事件插入卡片；Desktop 回退路径也会
+  // 用 learnRunId 幂等补卡。提案就绪 / 每轮修订刷新时再把卡片移到消息流末尾，
+  // 避免蒸馏长输出把「查看提案」入口留在顶部。
   useEffect(() => {
     if (!sessionId) return;
     // subscribeLearnEvents:本机走 learn:event IPC;device-link 远程会话经
