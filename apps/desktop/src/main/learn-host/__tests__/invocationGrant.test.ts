@@ -6,6 +6,19 @@ import {
 } from '../invocationGrant.js';
 
 describe('Learn invocation grant', () => {
+  const createPersistentConsumer = (
+    readLatest: () => Promise<{ messageId: string; text: string }>,
+    consumed = new Set<string>(),
+  ) => createLearnInvocationGrantConsumer(
+    readLatest,
+    async (sessionId, messageId) => {
+      const key = `${sessionId}\0${messageId}`;
+      if (consumed.has(key)) return false;
+      consumed.add(key);
+      return true;
+    },
+  );
+
   it.each([
     ['/learn', { input: '', sourceKind: 'session' }],
     ['/learn release flow', { input: 'release flow', sourceKind: 'freetext' }],
@@ -27,7 +40,7 @@ describe('Learn invocation grant', () => {
       messageId: 'message-1',
       text: '/learn hub:market:release-notes keep   checks',
     }));
-    const consume = createLearnInvocationGrantConsumer(readLatest);
+    const consume = createPersistentConsumer(readLatest);
 
     await expect(consume({
       callerSessionId: 'session-1',
@@ -51,7 +64,7 @@ describe('Learn invocation grant', () => {
   });
 
   it('consumes each persisted user invocation only once', async () => {
-    const consume = createLearnInvocationGrantConsumer(async () => ({
+    const consume = createPersistentConsumer(async () => ({
       messageId: 'message-1',
       text: '/learn release flow',
     }));
@@ -63,6 +76,27 @@ describe('Learn invocation grant', () => {
 
     await expect(consume(request)).resolves.toEqual({ ok: true });
     await expect(consume(request)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'USER_REQUEST_REQUIRED',
+    });
+  });
+
+  it('rejects a persisted invocation after the consumer is recreated', async () => {
+    const consumed = new Set<string>();
+    const readLatest = async () => ({
+      messageId: 'message-1',
+      text: '/learn release flow',
+    });
+    const request = {
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext' as const,
+    };
+
+    await expect(createPersistentConsumer(readLatest, consumed)(request)).resolves.toEqual({
+      ok: true,
+    });
+    await expect(createPersistentConsumer(readLatest, consumed)(request)).resolves.toMatchObject({
       ok: false,
       errorCode: 'USER_REQUEST_REQUIRED',
     });

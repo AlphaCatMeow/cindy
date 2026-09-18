@@ -25,8 +25,12 @@ type ReadLatestUserInvocation = (
   sessionId: string,
 ) => Promise<LatestUserInvocation | null>;
 
+type ConsumeUserInvocation = (
+  sessionId: string,
+  messageId: string,
+) => Promise<boolean>;
+
 const messageRowid = sql<number>`"messages"."rowid"`;
-const MAX_CONSUMED_INVOCATIONS = 2_048;
 
 function normalizeInput(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
@@ -69,10 +73,8 @@ function matchesInvocation(
 
 export function createLearnInvocationGrantConsumer(
   readLatestUserInvocation: ReadLatestUserInvocation,
+  consumeUserInvocation: ConsumeUserInvocation,
 ): (request: StartSkillLearningParams) => Promise<LearnInvocationGrantResult> {
-  const consumed = new Set<string>();
-  const consumptionOrder: string[] = [];
-
   return async (request) => {
     let latest: LatestUserInvocation | null;
     try {
@@ -92,19 +94,25 @@ export function createLearnInvocationGrantConsumer(
         message: 'Start Learn by invoking /learn directly in the current task.',
       };
     }
-    const consumptionKey = `${request.callerSessionId}\0${latest.messageId}`;
-    if (consumed.has(consumptionKey)) {
+    let consumed: boolean;
+    try {
+      consumed = await consumeUserInvocation(
+        request.callerSessionId,
+        latest.messageId,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        errorCode: isDbClientNotReadyError(error) ? 'HOST_NOT_READY' : 'INTERNAL',
+        message: 'Cindy could not record the current /learn request.',
+      };
+    }
+    if (!consumed) {
       return {
         ok: false,
         errorCode: 'USER_REQUEST_REQUIRED',
         message: 'This /learn request has already been used.',
       };
-    }
-
-    consumed.add(consumptionKey);
-    consumptionOrder.push(consumptionKey);
-    if (consumptionOrder.length > MAX_CONSUMED_INVOCATIONS) {
-      consumed.delete(consumptionOrder.shift()!);
     }
     return { ok: true };
   };
@@ -139,6 +147,38 @@ async function readLatestUserInvocation(
   };
 }
 
+async function consumeUserInvocation(
+  sessionId: string,
+  messageId: string,
+): Promise<boolean> {
+  const dbClient = tryGetDbClient();
+  if (!dbClient) {
+    throw Object.assign(new Error('DbClient not ready'), { code: 'HOST_NOT_READY' });
+  }
+  // Claim the exact persisted user message with one compare-and-update. Keeping
+  // the marker in agent_meta makes the one-shot grant survive app restarts;
+  // JSON object metadata is preserved, while malformed/non-object metadata
+  // fails closed instead of being overwritten.
+  const result = await dbClient.exec(
+    `UPDATE messages
+        SET agent_meta = json_set(COALESCE(agent_meta, '{}'), '$.cindyLearnInvocationConsumed', 1)
+      WHERE id = ?
+        AND session_id = ?
+        AND role = 'user'
+        AND rewind_at IS NULL
+        AND CASE
+              WHEN agent_meta IS NULL THEN 1
+              WHEN json_valid(agent_meta) THEN
+                json_type(agent_meta) = 'object'
+                AND json_type(agent_meta, '$.cindyLearnInvocationConsumed') IS NULL
+              ELSE 0
+            END`,
+    [messageId, sessionId],
+  );
+  return result.changes === 1;
+}
+
 export const consumeLearnInvocationGrant = createLearnInvocationGrantConsumer(
   readLatestUserInvocation,
+  consumeUserInvocation,
 );

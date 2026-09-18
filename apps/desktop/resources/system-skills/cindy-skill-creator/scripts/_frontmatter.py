@@ -202,6 +202,78 @@ def _parse_flow_collection(value):
     return {} if is_mapping else []
 
 
+def _quoted_scalar_is_closed(value, quote):
+    index = 1
+    while index < len(value):
+        char = value[index]
+        if quote == '"':
+            if char == "\\":
+                index += 2
+                continue
+            if char == '"':
+                return True
+        elif char == "'":
+            if index + 1 < len(value) and value[index + 1] == "'":
+                index += 2
+                continue
+            return True
+        index += 1
+    return False
+
+
+def _ends_with_unescaped_backslash(value):
+    count = 0
+    for char in reversed(value):
+        if char != "\\":
+            break
+        count += 1
+    return count % 2 == 1
+
+
+def _fold_quoted_scalar_lines(parts, quote):
+    value = parts[0].strip()
+    blank_lines = 0
+    for part in parts[1:]:
+        content = part.strip()
+        if not content:
+            blank_lines += 1
+            continue
+        if quote == '"' and _ends_with_unescaped_backslash(value):
+            value = value[:-1] + content
+        elif blank_lines:
+            # YAML folds one ordinary physical line break to a space and keeps
+            # each intervening empty line as a newline. JSON needs the escaped
+            # spelling while the single-quoted parser accepts the character.
+            newline = "\\n" if quote == '"' else "\n"
+            value += newline * blank_lines + content
+        else:
+            value += " " + content
+        blank_lines = 0
+    return value
+
+
+def _collect_quoted_scalar(lines, start, raw_value):
+    value = raw_value.strip()
+    quote = value[0]
+    parts = [value]
+    cursor = start + 1
+    while not _quoted_scalar_is_closed("\n".join(parts), quote):
+        if cursor >= len(lines):
+            raise FrontmatterError("Unterminated quoted scalar")
+        line = lines[cursor]
+        if line.strip() and not line[:1].isspace():
+            raise FrontmatterError(
+                f"Quoted scalar continuation must be indented on line {cursor + 1}"
+            )
+        if line.startswith("\t"):
+            raise FrontmatterError(
+                f"Quoted scalar continuation must use space indentation on line {cursor + 1}"
+            )
+        parts.append(line)
+        cursor += 1
+    return _fold_quoted_scalar_lines(parts, quote), cursor
+
+
 def _parse_scalar(raw, in_flow=False):
     value = _strip_plain_comment(raw)
     if value.startswith('"'):
@@ -488,6 +560,11 @@ def parse_frontmatter(frontmatter_text):
         if not raw_value.strip() or raw_value.lstrip().startswith("#"):
             value, index = _parse_nested_block(lines, index + 1)
             result[key] = value
+            continue
+
+        if raw_value.lstrip().startswith(('"', "'")):
+            raw_value, index = _collect_quoted_scalar(lines, index, raw_value)
+            result[key] = _parse_scalar(raw_value)
             continue
 
         result[key] = _parse_scalar(raw_value)

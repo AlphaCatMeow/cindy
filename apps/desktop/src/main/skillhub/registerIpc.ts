@@ -331,6 +331,18 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     success: false as const,
     error: 'path was not granted by this renderer\'s latest SkillHub scan',
   });
+  const readScannedSkillRawContent = async (
+    event: Electron.IpcMainInvokeEvent,
+    filePath: string,
+  ): Promise<string | null> => {
+    const grant = await findScannedSkillGrant(event, filePath);
+    if (!grant) return null;
+    const raw = await readSkillRawFile({
+      filePath,
+      ...(grant.builtIn ? { attestedRoot: grant.root } : {}),
+    });
+    return raw.success ? raw.content ?? null : null;
+  };
   const normalizePathForCompare = (value: string): string => {
     const withoutWindowsNamespace = process.platform === 'win32'
       ? value.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '')
@@ -907,13 +919,11 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
   // Claude/Codex 自己的 JSONL 文件里,不复制进 Cindy DB。
   ipcMain.handle(
     'skillhub:get-usage-summary',
-    async (_event, { name, mdPath }: { name: string; mdPath?: string }) => {
+    async (event, { name, mdPath }: { name: string; mdPath?: string }) => {
       try {
-        let currentSkillContent: string | null = null;
-        if (mdPath) {
-          const raw = await readSkillRawFile({ filePath: mdPath });
-          if (raw.success) currentSkillContent = raw.content ?? null;
-        }
+        const currentSkillContent = mdPath
+          ? await readScannedSkillRawContent(event, mdPath)
+          : null;
         const readSummary = async () => {
           const snapshot = captureUsageDbSnapshot();
           scheduleUsageAnalyticsRefresh(snapshot);
@@ -944,13 +954,11 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
   // 生成 skill 诊断会话首条消息。只返回统计摘要和 transcript 索引,不复制原始对话内容。
   ipcMain.handle(
     'skillhub:get-usage-diagnosis-context',
-    async (_event, { name, mdPath }: { name: string; mdPath?: string }) => {
+    async (event, { name, mdPath }: { name: string; mdPath?: string }) => {
       try {
-        let currentSkillContent: string | null = null;
-        if (mdPath) {
-          const raw = await readSkillRawFile({ filePath: mdPath });
-          if (raw.success) currentSkillContent = raw.content ?? null;
-        }
+        const currentSkillContent = mdPath
+          ? await readScannedSkillRawContent(event, mdPath)
+          : null;
         const readDiagnosisContext = async () => {
           const snapshot = captureUsageDbSnapshot();
           const result = await getLocalSkillUsageDiagnosisContext({

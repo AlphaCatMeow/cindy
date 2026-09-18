@@ -802,23 +802,88 @@ describe('registerSkillhubIpc usage handlers', () => {
   });
 
   it('passes readable SKILL.md content and path into diagnosis context', async () => {
+    const sender = { id: 31, on: vi.fn(), once: vi.fn() };
+    const mdPath = '/repo/.pi/skills/authorized/demo/SKILL.md';
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        absolutePath: '/physical/demo',
+        discoveredPath: '/repo/.pi/skills/authorized/demo',
+        scope: 'project',
+        projectRoot: '/repo',
+      }],
+      sources: [],
+    });
     readSkillRawFile.mockResolvedValueOnce({ success: true, content: 'skill body' });
     getLocalSkillUsageDiagnosisContext.mockResolvedValueOnce({
       success: true,
       context: { prompt: 'diagnose' },
     });
+    await handlers.get('skillhub:scan')?.({ sender }, { projects: [] });
 
     const handler = handlers.get('skillhub:get-usage-diagnosis-context');
-    const result = await handler?.({}, { name: 'word-doc', mdPath: 'C:\\skills\\word-doc\\SKILL.md' });
+    const result = await handler?.({ sender }, { name: 'word-doc', mdPath });
 
-    expect(readSkillRawFile).toHaveBeenCalledWith({ filePath: 'C:\\skills\\word-doc\\SKILL.md' });
+    expect(readSkillRawFile).toHaveBeenCalledWith({ filePath: mdPath });
     expect(getLocalSkillUsageDiagnosisContext).toHaveBeenCalledWith({
       skillName: 'word-doc',
       currentSkillContent: 'skill body',
-      skillPath: 'C:\\skills\\word-doc\\SKILL.md',
+      skillPath: mdPath,
       client: defaultDbClient,
     });
     expect(result).toEqual({ success: true, context: { prompt: 'diagnose' } });
+  });
+
+  it('reads built-in Skill usage through the attested scan root', async () => {
+    const builtInRoot = path.join(fixtureRoot, 'system-skills', 'cindy-skill-creator');
+    const mdPath = path.join(builtInRoot, 'SKILL.md');
+    fs.mkdirSync(builtInRoot, { recursive: true });
+    fs.writeFileSync(mdPath, '# Built in\n');
+    const { registerSkillhubIpc } = await import('../registerIpc');
+    registerSkillhubIpc({
+      getMaker: () => ({ listAgentSkills }) as never,
+      getManagedSkillRoots,
+      getBuiltInSkills: () => [{
+        name: 'cindy-skill-creator',
+        absolutePath: builtInRoot,
+        nativeClaudePath: '/tmp/claude-home/skills/cindy-skill-creator',
+      }],
+      getAllowedProjectRoots,
+      marketService: marketService as never,
+      publishService: { publish, cancel } as never,
+    });
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        absolutePath: builtInRoot,
+        discoveredPath: builtInRoot,
+        scope: 'user',
+        kind: 'skill',
+      }],
+      sources: [],
+    });
+    readSkillRawFile.mockResolvedValueOnce({ success: true, content: 'built-in body' });
+    getLocalSkillUsageSummary.mockResolvedValueOnce({
+      success: true,
+      summary: { totalUseCount: 1 },
+      refreshing: false,
+    });
+    const sender = { id: 32, on: vi.fn(), once: vi.fn() };
+    await handlers.get('skillhub:scan')?.({ sender }, { projects: [] });
+
+    const result = await handlers.get('skillhub:get-usage-summary')?.(
+      { sender },
+      { name: 'cindy-skill-creator', mdPath },
+    );
+
+    expect(readSkillRawFile).toHaveBeenCalledWith({
+      filePath: mdPath,
+      attestedRoot: fs.realpathSync(builtInRoot),
+    });
+    expect(getLocalSkillUsageSummary).toHaveBeenCalledWith({
+      skillName: 'cindy-skill-creator',
+      currentSkillContent: 'built-in body',
+      client: defaultDbClient,
+    });
+    expect(result).toMatchObject({ success: true });
   });
 
   it('drops internal autoSync flag from renderer install params', async () => {

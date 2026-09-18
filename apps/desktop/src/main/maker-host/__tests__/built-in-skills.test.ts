@@ -105,7 +105,7 @@ describe('built-in Skills', () => {
     );
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
-    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 5 });
+    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 6 });
     expect(updated.changed).toBe(true);
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       'Updated',
@@ -206,12 +206,12 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
     );
 
-    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
+    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 6 });
     const manifestPath = path.join(
       path.dirname(partial.descriptors[0]!.absolutePath),
       '.cindy-system-skills.json',
     );
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(4);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(5);
     expect(partial.warnings.join('\n')).toContain('missing SKILL.md');
     expect(
       fs.readFileSync(path.join(partial.descriptors[0]!.absolutePath, 'SKILL.md'), 'utf8'),
@@ -221,9 +221,9 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
       path.join(input.bundledRoot, 'learn', 'SKILL.md'),
     );
-    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
+    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 6 });
     expect(retried.warnings).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(5);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(6);
     expect(
       fs.readFileSync(
         path.join(
