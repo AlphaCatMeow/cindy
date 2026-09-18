@@ -137,6 +137,24 @@ describe('shouldCloseSessionForCredentialSwitch codex mode', () => {
     expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
   });
 
+  it('rebuilds when the live thread reports a non-Cindy provider before switching to Cindy', () => {
+    // Older app-server/provider combinations report `openai` or a vendor id
+    // instead of Cindy's cindy_* aliases. That is still a sticky thread
+    // identity; hot-switching would reuse response items that the Cindy route
+    // cannot resolve (`Item ... not found`, store=false).
+    const input = {
+      agentKind: 'codex',
+      currentProviderId: 'openai',
+      nextProviderId: 'xd',
+      currentModel: 'gpt-5.4',
+      nextModel: 'codex/gpt-5.5',
+      currentCodexProxyActive: true,
+      currentCodexThreadModelProviderId: 'openai',
+    } as const;
+    expect(isCodexThreadModelProviderIdentityMismatch(input)).toBe(true);
+    expect(shouldCloseSessionForCredentialSwitch(input)).toBe(true);
+  });
+
   it('still closes a gateway Codex session when switching to OAuth on a proxy-active host', () => {
     expect(shouldCloseSessionForCredentialSwitch({
       agentKind: 'codex',

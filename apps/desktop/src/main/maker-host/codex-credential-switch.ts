@@ -15,7 +15,10 @@ import {
   CODEX_GATEWAY_PROVIDER_ID,
   CODEX_OPENAI_COMPACT_PROVIDER_ID,
 } from './codex-gateway-config.js';
-import { crossesCodexAppliedCustomProviderIdentity } from './codex-custom-provider-route.js';
+import {
+  crossesCodexAppliedCustomProviderIdentity,
+  isAppliedCodexCustomProviderIdentity,
+} from './codex-custom-provider-route.js';
 import type { CodexProxyAuthInjection } from './codex-proxy-host.js';
 import { withRehydrateCloseSuppressed } from './rehydrateCloseSuppression.js';
 import { getActiveCatalog } from './active-catalog.js';
@@ -204,13 +207,18 @@ export function isCodexThreadModelProviderIdentityMismatch(
         ? CODEX_GATEWAY_PROVIDER_ID
         : null;
   const actualThreadModelProviderId = normalizeProviderId(input.currentCodexThreadModelProviderId);
-  const actualThreadIdentityKnown =
-    actualThreadModelProviderId === CODEX_OPENAI_COMPACT_PROVIDER_ID ||
-    actualThreadModelProviderId === CODEX_CINDY_COMPACT_PROVIDER_ID ||
-    actualThreadModelProviderId === CODEX_GATEWAY_PROVIDER_ID;
-
+  const actualIsAppliedCustomProviderIdentity = isAppliedCodexCustomProviderIdentity(
+    actualThreadModelProviderId,
+  );
+  // The app-server may report a provider id that is not one of Cindy's
+  // materialized identities (for example `openai`, Azure, or a custom provider).
+  // It is still a sticky thread identity. Treating those ids as unknown lets a
+  // live thread cross into the Cindy gateway and keeps sending old response-item
+  // ids to the new route, which fails with `Item ... not found` when `store=false`.
+  // A missing id is the only case where there is no identity to compare.
   return (
-    actualThreadIdentityKnown &&
+    !actualIsAppliedCustomProviderIdentity &&
+    actualThreadModelProviderId !== null &&
     expectedThreadModelProviderId !== null &&
     actualThreadModelProviderId !== expectedThreadModelProviderId
   );
