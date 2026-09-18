@@ -154,11 +154,145 @@ def _block_value(lines, start, style):
     return "\n".join(paragraphs), cursor
 
 
+def _split_mapping_entry(value):
+    """Find a block-mapping colon without mistaking quotes/flows/URLs for it."""
+    stack = []
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                index += 1
+            elif char == "'":
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char in "[{":
+            stack.append("]" if char == "[" else "}")
+        elif char in "]}":
+            if not stack or stack.pop() != char:
+                raise FrontmatterError(f"Mismatched flow delimiter '{char}'")
+        elif char == ":" and not stack and (
+            index + 1 == len(value) or value[index + 1].isspace()
+        ):
+            return value[:index], value[index + 1 :]
+        index += 1
+    if quote is not None or escaped:
+        raise FrontmatterError("Unterminated quoted scalar")
+    if stack:
+        raise FrontmatterError(f"Unterminated flow collection, expected '{stack[-1]}'")
+    return None
+
+
+def _validate_nested_entry(text, line_number):
+    sequence_entry = text == "-" or text.startswith("- ") or text.startswith("-\t")
+    value = text[1:].lstrip() if sequence_entry else text
+    if not value or value.startswith("#"):
+        return True, False, "sequence" if sequence_entry else "scalar"
+
+    mapping_entry = _split_mapping_entry(value)
+    if mapping_entry is not None:
+        raw_key, raw_value = mapping_entry
+        if not raw_key.strip():
+            raise FrontmatterError(f"Missing mapping key on line {line_number}")
+        key = _parse_scalar(raw_key.strip())
+        if not isinstance(key, (str, int, float, bool)):
+            raise FrontmatterError(f"Invalid mapping key on line {line_number}")
+        scalar_value = raw_value.lstrip()
+        if not scalar_value or scalar_value.startswith("#"):
+            return True, False, "sequence" if sequence_entry else "mapping"
+        block_match = BLOCK_SCALAR_RE.match(scalar_value)
+        if block_match:
+            return True, True, "sequence" if sequence_entry else "mapping"
+        _parse_scalar(scalar_value)
+        # A sequence item may start a mapping whose sibling keys are indented
+        # beneath the dash even when this first key already has a value.
+        return sequence_entry, False, "sequence" if sequence_entry else "mapping"
+
+    block_match = BLOCK_SCALAR_RE.match(value)
+    if block_match:
+        return True, True, "sequence" if sequence_entry else "scalar"
+    _parse_scalar(value)
+    return False, False, "sequence" if sequence_entry else "scalar"
+
+
+def _parse_nested_block(lines, start):
+    """Validate an indented YAML subset and retain only its collection type.
+
+    The bundled tools inspect only top-level fields, but nested metadata still
+    has to be structurally valid. This walks every nested entry, validates its
+    scalar/flow syntax, and enforces indentation transitions without adding a
+    third-party YAML dependency.
+    """
+    cursor = start
+    indent_levels = []
+    previous_allows_child = True
+    block_scalar_indent = None
+    collection = None
+
+    while cursor < len(lines):
+        line = lines[cursor]
+        if not line.strip():
+            cursor += 1
+            continue
+        if line.startswith("\t"):
+            raise FrontmatterError(f"Nested values must use space indentation on line {cursor + 1}")
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line[indent:]
+        if indent == 0:
+            break
+        if stripped.startswith("#"):
+            cursor += 1
+            continue
+
+        if block_scalar_indent is not None:
+            if indent > block_scalar_indent:
+                cursor += 1
+                continue
+            block_scalar_indent = None
+
+        if not indent_levels:
+            indent_levels.append([indent, None])
+            collection = [] if stripped == "-" or stripped.startswith(("- ", "-\t")) else {}
+        elif indent > indent_levels[-1][0]:
+            if not previous_allows_child:
+                raise FrontmatterError(f"Unexpected indentation on line {cursor + 1}")
+            indent_levels.append([indent, None])
+        elif indent < indent_levels[-1][0]:
+            while indent_levels and indent < indent_levels[-1][0]:
+                indent_levels.pop()
+            if not indent_levels or indent != indent_levels[-1][0]:
+                raise FrontmatterError(f"Inconsistent indentation on line {cursor + 1}")
+
+        previous_allows_child, is_block_scalar, entry_kind = _validate_nested_entry(
+            stripped,
+            cursor + 1,
+        )
+        if indent_levels[-1][1] is None:
+            indent_levels[-1][1] = entry_kind
+        elif indent_levels[-1][1] != entry_kind:
+            raise FrontmatterError(f"Mixed collection types on line {cursor + 1}")
+        if is_block_scalar:
+            block_scalar_indent = indent
+        cursor += 1
+
+    return collection, cursor
+
+
 def parse_frontmatter(frontmatter_text):
     """Parse top-level Skill fields without requiring PyYAML.
 
-    Nested values are retained as opaque dictionaries because the bundled
-    validator only needs top-level key names plus scalar name/description.
+    Nested values are validated and retained as opaque collections because the
+    bundled tools only inspect top-level key names plus scalar name/description.
     """
     lines = frontmatter_text.splitlines()
     result = {}
@@ -184,13 +318,8 @@ def parse_frontmatter(frontmatter_text):
             continue
 
         if not raw_value.strip() or raw_value.lstrip().startswith("#"):
-            cursor = index + 1
-            while cursor < len(lines) and (
-                not lines[cursor].strip() or lines[cursor][:1].isspace()
-            ):
-                cursor += 1
-            result[key] = {} if cursor > index + 1 else None
-            index = cursor
+            value, index = _parse_nested_block(lines, index + 1)
+            result[key] = value
             continue
 
         result[key] = _parse_scalar(raw_value)
