@@ -12,6 +12,8 @@
 
 ## 2026-09
 
+- **09-18 搜索命中层级（Issue #4650，用户授权实施）**：全局 Ctrl+F 普通与当前命中原本同色，且两模式底色与内容表面接近。增强普通命中，新增当前命中的独立金色背景与深色文字；全局保留下划线，文件预览与编辑器保留描边，统一消费搜索语义 token。旧 ID 与显式主题覆盖保留。方向授权不等于最终实机验收。落点：`DESIGN.md §10`、`themes/colors.ts`、颜色冻结快照与 `searchHighlightContrast.test.ts`。
+
 - **09-09** **用量历史 pi 标记改为青绿**——所有者试用后认为 Codex 蓝色与 pi 紫色不易区分，指定 pi 改用青绿。仅用量历史 harness 表的 pi 三处标记改为 `--usage-model-1`，随 Light/Dark 使用已有青绿值；Claude 陶土橙和 Codex 蓝色保留。替代本日上一条 pi 紫色选择，不修改全局 `--engine-badge-pi` 或模型配色。
 
 - **09-09** **用量历史 harness 改用已有引擎身份色**——所有者要求 Claude 品牌偏橙、Codex 蓝色，pi 可自选但不用红色。替代本日早先的青绿 / 靛蓝 / 琥珀方案：复用 `--engine-badge-cc` / `--engine-badge-codex` / `--engine-badge-pi`，分别为陶土橙 / 蓝 / 紫；三种标记位置同步，沿用这些身份 Token 的 Light/Dark 固定值合同。仅扩展这些既有 Token 在用量历史 Agent/harness 表中的消费范围，不改 Token 值、模型配色或其他功能。当前规则见 `usage-history-charts.md`。

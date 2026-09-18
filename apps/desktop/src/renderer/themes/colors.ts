@@ -488,13 +488,21 @@ registerColor('sidebar-action-icon', {
   dark: '0 0% 45%',
 }, 'Silver #a3a3a3 — hover action icons');
 registerColor('search-match-bg', {
-  light: '53 100% 89%',
-  dark: '40 33% 16%',
-}, '#fff8c5 — Primer attention-muted');
+  light: '45 100% 70%',
+  dark: '40 55% 21%',
+}, 'Search matches — distinct from surrounding content surfaces');
 registerColor('search-match-fg', {
   light: '0 0% 15%',
   dark: '0 0% 90%',
 }, 'Near-black #262626 — text inherit');
+registerColor('search-match-active-bg', {
+  light: '34 100% 55%',
+  dark: '42 100% 65%',
+}, 'Current search match — stronger than other matches');
+registerColor('search-match-active-fg', {
+  light: '0 0% 10%',
+  dark: '0 0% 10%',
+}, 'Current search match text and outline on the gold fill');
 
 // UpdateBanner — Relaunch button (White Pill variant)
 registerColor('update-btn-border', {

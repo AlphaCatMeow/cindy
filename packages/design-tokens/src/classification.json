@@ -1,9 +1,9 @@
 {
   "source": "apps/desktop/src/renderer/themes/colors.ts",
   "generatedBy": "packages/design-tokens/src/classify.ts",
-  "snapshotCount": 541,
+  "snapshotCount": 543,
   "categories": {
-    "literal": 265,
+    "literal": 267,
     "alias": 240,
     "hsl-triplet": 6,
     "runtime-derived-or-protected": 30
@@ -1076,6 +1076,22 @@
     },
     {
       "id": "search-match-fg",
+      "category": "literal",
+      "destination": "reference-candidate",
+      "lightKind": "hsl-triplet",
+      "darkKind": "hsl-triplet",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "search-match-active-bg",
+      "category": "literal",
+      "destination": "reference-candidate",
+      "lightKind": "hsl-triplet",
+      "darkKind": "hsl-triplet",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "search-match-active-fg",
       "category": "literal",
       "destination": "reference-candidate",
       "lightKind": "hsl-triplet",
