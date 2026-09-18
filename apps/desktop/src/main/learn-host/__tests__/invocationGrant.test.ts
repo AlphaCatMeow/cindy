@@ -21,7 +21,9 @@ describe('Learn invocation grant', () => {
 
   it.each([
     ['/learn', { input: '', sourceKind: 'session' }],
+    ['/Learn', { input: '', sourceKind: 'session' }],
     ['/learn release flow', { input: 'release flow', sourceKind: 'freetext' }],
+    ['/LEARN Preserve Release Case', { input: 'Preserve Release Case', sourceKind: 'freetext' }],
     [
       '/skill:learn hub:team:release-notes keep checks',
       {
@@ -31,8 +33,26 @@ describe('Learn invocation grant', () => {
         hubCatalogScope: 'team',
       },
     ],
+    [
+      '/SKILL:LEARN hub:market:release-notes keep checks',
+      {
+        input: 'keep checks',
+        sourceKind: 'hub',
+        hubSlug: 'release-notes',
+        hubCatalogScope: 'market',
+      },
+    ],
   ])('parses direct Learn invocation %s', (text, expected) => {
     expect(parseDirectLearnInvocation(text)).toEqual(expected);
+  });
+
+  it.each([
+    '/learner',
+    '/learning release flow',
+    '/skill:learner release flow',
+    'please inspect /Learn docs',
+  ])('rejects text that is not a direct Learn invocation: %s', (text) => {
+    expect(parseDirectLearnInvocation(text)).toBeNull();
   });
 
   it('rejects ordinary messages and mismatched tool arguments without consuming the grant', async () => {
@@ -66,7 +86,7 @@ describe('Learn invocation grant', () => {
   it('consumes each persisted user invocation only once', async () => {
     const consume = createPersistentConsumer(async () => ({
       messageId: 'message-1',
-      text: '/learn release flow',
+      text: '/Learn release flow',
     }));
     const request = {
       callerSessionId: 'session-1',

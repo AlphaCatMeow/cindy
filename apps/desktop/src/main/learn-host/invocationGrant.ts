@@ -39,7 +39,10 @@ function normalizeInput(value: string): string {
 export function parseDirectLearnInvocation(
   text: string,
 ): Omit<StartSkillLearningParams, 'callerSessionId'> | null {
-  const command = /^\/(?:skill:)?learn(?:\s+([\s\S]*))?$/.exec(text.trim());
+  // Slash-skill dispatch resolves names case-insensitively. Keep the grant
+  // parser on the same rule so an invocation accepted as the Learn Skill is
+  // also accepted when that Skill calls the privileged host tool.
+  const command = /^\/(?:skill:)?learn(?:\s+([\s\S]*))?$/i.exec(text.trim());
   if (!command) return null;
 
   const arg = (command[1] ?? '').trim();
