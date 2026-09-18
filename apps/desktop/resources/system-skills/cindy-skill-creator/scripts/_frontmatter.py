@@ -1,7 +1,10 @@
 """Frontmatter parsing backed by the vendored PyYAML runtime."""
 
+import math
 import re
 import sys
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -70,8 +73,43 @@ def split_frontmatter(content):
     return match.group(1), match.end()
 
 
-def _reject_duplicate_mapping_keys(node, visited=None):
-    """Match js-yaml's default duplicate-key rejection before construction."""
+def _js_number_key(value):
+    """Return JavaScript's property-key spelling for a YAML number."""
+    try:
+        number = float(value)
+    except OverflowError:
+        return "-Infinity" if value < 0 else "Infinity"
+    if math.isnan(number):
+        return "NaN"
+    if math.isinf(number):
+        return "-Infinity" if number < 0 else "Infinity"
+    if number == 0:
+        return "0"
+    magnitude = abs(number)
+    if 1e-6 <= magnitude < 1e21:
+        return format(Decimal(repr(number)), "f")
+    return re.sub(r"e([+-])0+(\d+)$", r"e\1\2", repr(number).lower())
+
+
+def _js_scalar_key(value):
+    """Mirror js-yaml 3's String(keyNode) mapping-key identity."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return _js_number_key(value)
+    if isinstance(value, datetime):
+        normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return f"date:{normalized.astimezone(timezone.utc).isoformat()}"
+    if isinstance(value, date):
+        normalized = datetime.combine(value, time.min, tzinfo=timezone.utc)
+        return f"date:{normalized.isoformat()}"
+    return str(value)
+
+
+def _reject_duplicate_mapping_keys(loader, node, visited=None):
+    """Match js-yaml's duplicate check using each scalar's constructed value."""
     if visited is None:
         visited = set()
     identity = id(node)
@@ -83,26 +121,32 @@ def _reject_duplicate_mapping_keys(node, visited=None):
         keys = set()
         for key_node, value_node in node.value:
             if isinstance(key_node, ScalarNode):
-                key = (key_node.tag, key_node.value)
+                key = _js_scalar_key(loader.construct_object(key_node, deep=True))
                 if key in keys:
                     raise FrontmatterError(
                         f"Duplicate mapping key '{key_node.value}' on line {key_node.start_mark.line + 1}"
                     )
                 keys.add(key)
-            _reject_duplicate_mapping_keys(key_node, visited)
-            _reject_duplicate_mapping_keys(value_node, visited)
+            _reject_duplicate_mapping_keys(loader, key_node, visited)
+            _reject_duplicate_mapping_keys(loader, value_node, visited)
     elif isinstance(node, SequenceNode):
         for value_node in node.value:
-            _reject_duplicate_mapping_keys(value_node, visited)
+            _reject_duplicate_mapping_keys(loader, value_node, visited)
 
 
 def parse_frontmatter(frontmatter_text):
+    loader = None
     try:
-        root = yaml.compose(frontmatter_text, Loader=FrontmatterLoader)
+        loader = FrontmatterLoader(frontmatter_text)
+        root = loader.get_single_node()
         if root is not None:
-            _reject_duplicate_mapping_keys(root)
-        return yaml.load(frontmatter_text, Loader=FrontmatterLoader)
+            _reject_duplicate_mapping_keys(loader, root)
+            return loader.construct_document(root)
+        return None
     except FrontmatterError:
         raise
     except yaml.YAMLError as exc:
         raise FrontmatterError(str(exc)) from exc
+    finally:
+        if loader is not None:
+            loader.dispose()

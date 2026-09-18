@@ -420,6 +420,23 @@ metadata:
     assert.notEqual(scientificNumber.status, 0);
     assert.match(scientificNumber.stdout, /Description must be a string, got float/);
 
+    for (const duplicateKeys of [
+      "  true: first\n  TRUE: second",
+      "  1: first\n  01: second",
+      "  1: first\n  1.0: second",
+      '  "true": first\n  true: second',
+    ]) {
+      fs.writeFileSync(
+        path.join(skillDir, "SKILL.md"),
+        `---\nname: yaml-regression\ndescription: duplicate keys\nmetadata:\n${duplicateKeys}\n---\n`,
+      );
+      const duplicate = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+        encoding: "utf8",
+      });
+      assert.notEqual(duplicate.status, 0);
+      assert.match(duplicate.stdout, /Duplicate mapping key/);
+    }
+
     fs.writeFileSync(
       path.join(skillDir, "SKILL.md"),
       "---\nname: yaml-regression\ndescription: invalid\0value\n---\n",

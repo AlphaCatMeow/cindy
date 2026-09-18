@@ -19,7 +19,7 @@ const MANIFEST_FILE = '.cindy-system-skills.json';
 const VERSIONS_DIRECTORY = '.versions';
 const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
 /** Increment whenever shipped built-in Skill bytes change between releases. */
-export const BUILT_IN_SKILLS_BUNDLE_VERSION = 8;
+export const BUILT_IN_SKILLS_BUNDLE_VERSION = 9;
 
 export interface BuiltInSkillDescriptor {
   name: string;
