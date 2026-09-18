@@ -991,7 +991,10 @@ describe('device-link controller mirror — end-to-end scenarios', () => {
     }
   });
 
-  it.each([false, true])('propagates remote pagination loading synchronously to the rendered light state (fails=%s)', async (fails) => {
+  it.each([
+    { older: true, fails: false }, { older: true, fails: true },
+    { older: false, fails: false }, { older: false, fails: true },
+  ])('only propagates pagination loading to the rendered light state (older=$older, fails=$fails)', async ({ older, fails }) => {
     const s = sid();
     host.enableHistoryView();
     const rows = Array.from({ length: 30 }, (_, index) => dbMessage(s, String(index), 'visible',
@@ -1016,23 +1019,24 @@ describe('device-link controller mirror — end-to-end scenarios', () => {
     // MessageStream subscribes to this view while its parent reads the light
     // store. Check both at the same notification, before any React scheduling.
     const unsubscribe = view.subscribe(() => {
-      const loading = view.getSnapshot().loading;
+      const loading = view.getSnapshot().loading && older;
       expect(makerChatStore.getSnapshot(s).isLoadingMore).toBe(loading);
       expect(makerChatStore.getLightSnapshot(s).isLoadingMore).toBe(loading);
       observed.push(loading);
     });
     try {
-      const result = makerChatStore.loadOlderMessages(s).then(
+      const result = (older ? makerChatStore.loadOlderMessages(s) : view.refresh()).then(
         (advanced) => ({ advanced }),
         (error: Error) => ({ error: error.message }),
       );
-      expect(observed).toEqual([true]);
+      expect(view.getSnapshot().loading).toBe(true);
+      expect(observed).toEqual([older]);
       expect(view.getSnapshot().items).toBe(previousItems);
-      expect(makerChatStore.getLightSnapshot(s).isLoadingMore).toBe(true);
+      expect(makerChatStore.getLightSnapshot(s).isLoadingMore).toBe(older);
       release();
-      expect(await result).toEqual(fails ? { error: 'page unavailable' } : { advanced: true });
-      expect(observed).toEqual([true, false]);
-      expect(view.getSnapshot().items).toHaveLength(fails ? 20 : 30);
+      expect(await result).toEqual(!older ? { advanced: undefined } : fails ? { error: 'page unavailable' } : { advanced: true });
+      expect(observed).toEqual([older, false]);
+      expect(view.getSnapshot().items).toHaveLength(fails || !older ? 20 : 30);
       expect(makerChatStore.getLightSnapshot(s).isLoadingMore).toBe(false);
     } finally {
       unsubscribe();

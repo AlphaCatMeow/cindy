@@ -10966,7 +10966,7 @@ function createRemoteHistoryView(sessionId: string) {
         mergeMessages(available, state.messages.filter((message) => !message.cacheHydrated), { addOnly: true }),
         new Set(available.filter((message) => message.role === 'user').map((message) => message.clientId)),
       ),
-      hasMoreMessages: snapshot.hasMore, isLoadingMore: snapshot.loading,
+      hasMoreMessages: snapshot.hasMore, isLoadingMore: view.isLoadingOlder(),
       oldestMessageId: snapshot.nextCursor,
       historyWindowHasIsland: false,
     }));
