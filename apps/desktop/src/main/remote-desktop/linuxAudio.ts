@@ -51,7 +51,14 @@ export class LinuxDesktopAudio {
   start(): void {
     this.stop();
     this.failed = false;
-    const child = this.launch();
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = this.launch();
+    } catch {
+      // Audio is optional: surface failure through read(), never abort the video offer.
+      this.failed = true;
+      return;
+    }
     this.child = child;
     this.lastRead = Date.now();
     this.lastData = this.lastRead;

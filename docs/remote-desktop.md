@@ -509,6 +509,9 @@ monitor as 48 kHz stereo float PCM. The trusted capture renderer schedules at mo
 stream; it never connects to local speakers. Main retains at most 100 ms of PCM,
 checks the exact capture window and opted-in video lease on every read, and stops
 the child on disconnect, capture failure, a stalled producer or absent consumer.
+Native audio launch/read failures clean up only audio resources: the video answer,
+connected video/control channel and lease remain valid. A later offer starts a new
+audio capture; callbacks from a retired capture cannot affect its replacement.
 This does not add audio to the compatibility JPEG transport.
 
 Linux host mute uses PipeWire `softMute` on the playback branch, retaining the

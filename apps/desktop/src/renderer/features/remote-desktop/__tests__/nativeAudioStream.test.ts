@@ -38,7 +38,7 @@ it('deinterleaves bounded stereo PCM and erases sources and polling on stop', as
   const h = setup();
   const pcm = new Uint8Array(new Float32Array([0.5, -0.25, NaN, 2]).buffer);
   const read = vi.fn(async () => pcm);
-  const owner = await nativeAudioStream(read, () => true, vi.fn());
+  const owner = await nativeAudioStream(read, () => true);
   expect([...h.channels[0]]).toEqual([0.5, 0]);
   expect([...h.channels[1]]).toEqual([-0.25, 1]);
   owner.stop();
@@ -58,7 +58,6 @@ it('discards a read that completes after authorization ends', async () => {
         finish = resolve;
       }),
     () => valid,
-    vi.fn(),
   );
   const rejected = expect(pending).rejects.toThrow('DESKTOP_AUDIO_UNAVAILABLE');
   await Promise.resolve();

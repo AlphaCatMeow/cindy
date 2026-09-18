@@ -2,7 +2,6 @@
 export async function nativeAudioStream(
   read: () => Promise<Uint8Array>,
   current: () => boolean,
-  failed: () => void,
 ): Promise<{ track: MediaStreamTrack; stop(): void }> {
   const context = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
   const destination = context.createMediaStreamDestination();
@@ -58,7 +57,6 @@ export async function nativeAudioStream(
       timer = setTimeout(() => void poll(), 20);
     } catch {
       stop();
-      if (current()) failed();
     }
   };
   try {

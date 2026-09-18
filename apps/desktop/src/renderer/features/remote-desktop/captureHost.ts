@@ -248,20 +248,21 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
         }
         stream = captured;
         if (command.nativeAudio && command.settings?.audio && api.nativeAudio) {
-          const value = await nativeAudioStream(
-            () => api.nativeAudio!(lease),
-            () => current === generation,
-            () => {
-              stop();
-              void api.stop().catch(() => {});
-            },
-          );
-          if (current !== generation) {
-            value.stop();
-            return;
+          try {
+            const value = await nativeAudioStream(
+              () => api.nativeAudio!(lease),
+              () => current === generation,
+            );
+            if (current !== generation) {
+              value.stop();
+              return;
+            }
+            audio = value;
+            captured.addTrack(value.track);
+          } catch {
+            // Optional audio owns only its resources; video and the lease stay alive.
+            if (current !== generation) return;
           }
-          audio = value;
-          captured.addTrack(value.track);
         }
         stream = captured;
         const rtc = new RTCPeerConnection({

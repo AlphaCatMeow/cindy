@@ -16,6 +16,33 @@ function fixture() {
 }
 afterEach(() => vi.useRealTimers());
 
+it('contains synchronous launch failure and can start again without retaining old callbacks', () => {
+  const old = fixture().child;
+  const next = fixture().child;
+  const launch = vi
+    .fn()
+    .mockReturnValueOnce(old)
+    .mockImplementationOnce(() => {
+      throw new Error('spawn failed');
+    })
+    .mockReturnValueOnce(next);
+  const capture = new LinuxDesktopAudio(launch);
+  try {
+    capture.start();
+    expect(() => capture.start()).not.toThrow();
+    expect(old.kill).toHaveBeenCalledOnce();
+    expect(() => capture.read()).toThrow('DESKTOP_AUDIO_UNAVAILABLE');
+    capture.start();
+    old.emit('error', new Error('late error'));
+    old.emit('exit');
+    next.stdout.write(Buffer.alloc(8, 42));
+    expect([...capture.read()]).toEqual(Array(8).fill(42));
+    expect(next.kill).not.toHaveBeenCalled();
+  } finally {
+    capture.stop();
+  }
+});
+
 it('retains sample alignment across chunks and bounds history to 100 ms', () => {
   const { child, capture } = fixture();
   try {

@@ -72,6 +72,8 @@ function setup() {
   let command!: (value: any) => void;
   const reply = vi.fn(async () => {});
   const api = {
+    stop: vi.fn(async () => {}),
+    nativeAudio: vi.fn(async () => new Uint8Array(0)),
     onCommand: (callback: typeof command) => {
       command = callback;
       return () => {};
@@ -80,7 +82,7 @@ function setup() {
     reply,
   };
   disposers.push(startDesktopCaptureHost(api as any));
-  const offer = (audio = true, overlay = true) =>
+  const offer = (audio = true, overlay = true, nativeAudio = false) =>
     command({
       id: 'offer',
       op: 'offer',
@@ -89,11 +91,90 @@ function setup() {
       attemptId: 'attempt',
       sourceId: 'screen:1',
       nativeCapture: true,
+      nativeAudio,
       cursorOverlay: overlay,
       settings: { audio, fps: 30 },
     });
-  return { video, nativeStop, peers, capture, reply, offer, stop: () => command({ op: 'stop' }) };
+  return {
+    api,
+    video,
+    nativeStop,
+    peers,
+    capture,
+    reply,
+    offer,
+    stop: () => command({ op: 'stop' }),
+  };
 }
+
+function nativeSound() {
+  const sound = media().sound;
+  const close = vi.fn(async () => {});
+  vi.stubGlobal(
+    'AudioContext',
+    class {
+      close = close;
+      async resume() {}
+      createMediaStreamDestination() {
+        return { stream: { getTracks: () => [sound], getAudioTracks: () => [sound] } };
+      }
+    },
+  );
+  return { sound, close };
+}
+
+it.each(['startup', 'connected'] as const)(
+  'isolates %s native audio failure from video and the lease',
+  async (phase) => {
+    const h = setup();
+    const audio = nativeSound();
+    if (phase === 'startup') h.api.nativeAudio.mockRejectedValueOnce(new Error('audio failed'));
+    h.offer(true, true, true);
+    await flush();
+    expect(h.reply).toHaveBeenCalledWith('offer', 'answer');
+    if (phase === 'connected') {
+      h.api.nativeAudio.mockRejectedValueOnce(new Error('audio failed'));
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    expect(audio.sound.stop).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
+    expect(h.peers[0].close).not.toHaveBeenCalled();
+    expect(h.nativeStop).not.toHaveBeenCalled();
+    expect(h.video.video.stop).not.toHaveBeenCalled();
+    expect(h.api.stop).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['resolve', 'reject'] as const)(
+  'fences late native audio startup %s after a replacement offer',
+  async (outcome) => {
+    const h = setup();
+    const old = nativeSound();
+    let resolve!: (bytes: Uint8Array<ArrayBuffer>) => void;
+    let reject!: (error: Error) => void;
+    h.api.nativeAudio.mockImplementationOnce(
+      () =>
+        new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        }),
+    );
+    h.offer(true, true, true);
+    await flush();
+    const current = nativeSound();
+    h.offer(true, true, true);
+    await flush();
+    if (outcome === 'resolve') resolve(new Uint8Array(0));
+    else reject(new Error('old audio failed'));
+    await flush();
+    expect(old.sound.stop).toHaveBeenCalledOnce();
+    expect(current.sound.stop).not.toHaveBeenCalled();
+    expect(h.peers).toHaveLength(1);
+    expect(h.peers[0].close).not.toHaveBeenCalled();
+    expect(h.api.stop).not.toHaveBeenCalled();
+    expect(h.reply).toHaveBeenCalledTimes(1);
+  },
+);
 
 it.each(['rejected', 'missing', 'without-overlay'])(
   'keeps video after %s audio and restores only its audio sender when permission becomes ready',
