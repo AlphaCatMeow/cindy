@@ -57,7 +57,16 @@ function createSymlinkedSkill() {
   fs.mkdirSync(path.dirname(exposedDir), { recursive: true });
   fs.writeFileSync(
     path.join(actualDir, 'SKILL.md'),
-    ['---', 'name: lark-drive', '---', '', '# Lark Drive', '', 'Original content', ''].join('\n'),
+    [
+      '---',
+      'name: lark-drive',
+      '---',
+      '',
+      '# Lark Drive',
+      '',
+      'Original content',
+      '',
+    ].join('\n'),
     'utf-8',
   );
   fs.mkdirSync(path.join(actualDir, 'references'));
@@ -78,52 +87,26 @@ describe('scanAllSkills', () => {
     tempRoots.push(root);
     const builtIn = path.join(root, 'user-data', 'system-skills', 'cindy-skill-creator');
     const userSkill = path.join(root, 'home', '.agents', 'skills', 'cindy-skill-creator');
-    for (const [skillPath, description] of [
-      [builtIn, 'Cindy copy'],
-      [userSkill, 'User copy'],
-    ] as const) {
+    for (const [skillPath, description] of [[builtIn, 'Cindy copy'], [userSkill, 'User copy']] as const) {
       fs.mkdirSync(skillPath, { recursive: true });
-      fs.writeFileSync(
-        path.join(skillPath, 'SKILL.md'),
-        `---\nname: cindy-skill-creator\ndescription: ${description}\n---\nBody\n`,
-      );
+      fs.writeFileSync(path.join(skillPath, 'SKILL.md'), `---\nname: cindy-skill-creator\ndescription: ${description}\n---\nBody\n`);
     }
-    const maker = {
-      listCustomizations: vi.fn(async () => ({
-        errors: [],
-        items: [
-          {
-            engine: 'codex' as const,
-            kind: 'skill',
-            scope: 'user',
-            name: 'cindy-skill-creator',
-            description: 'User copy',
-            absolutePath: userSkill,
-            mdPath: path.join(userSkill, 'SKILL.md'),
-            files: [],
-          },
-        ],
-      })),
-    } as unknown as Maker;
+    const maker = { listCustomizations: vi.fn(async () => ({ errors: [], items: [{
+      engine: 'codex' as const,
+      kind: 'skill',
+      scope: 'user',
+      name: 'cindy-skill-creator',
+      description: 'User copy',
+      absolutePath: userSkill,
+      mdPath: path.join(userSkill, 'SKILL.md'),
+      files: [],
+    }] })) } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {},
-      maker,
-      [],
-      [
-        {
-          name: 'cindy-skill-creator',
-          absolutePath: builtIn,
-          nativeClaudePath: path.join(
-            root,
-            'user-data',
-            'claude-home',
-            'skills',
-            'cindy-skill-creator',
-          ),
-        },
-      ],
-    );
+    const result = await scanAllSkills({}, maker, [], [{
+      name: 'cindy-skill-creator',
+      absolutePath: builtIn,
+      nativeClaudePath: path.join(root, 'user-data', 'claude-home', 'skills', 'cindy-skill-creator'),
+    }]);
 
     expect(result.skills).toHaveLength(2);
     expect(result.skills.find((skill) => skill.builtIn)).toMatchObject({
@@ -145,10 +128,7 @@ describe('scanAllSkills', () => {
     tempRoots.push(root);
     const builtIn = path.join(root, 'shared-system-skills', 'learn');
     fs.mkdirSync(builtIn, { recursive: true });
-    fs.writeFileSync(
-      path.join(builtIn, 'SKILL.md'),
-      '---\nname: learn\ndescription: Learn\n---\nBody\n',
-    );
+    fs.writeFileSync(path.join(builtIn, 'SKILL.md'), '---\nname: learn\ndescription: Learn\n---\nBody\n');
     const items = (['codex', 'pi'] as const).map((engine) => ({
       engine,
       kind: 'skill' as const,
@@ -163,18 +143,11 @@ describe('scanAllSkills', () => {
       listCustomizations: vi.fn(async () => ({ errors: [], items })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {},
-      maker,
-      [],
-      [
-        {
-          name: 'learn',
-          absolutePath: builtIn,
-          nativeClaudePath: path.join(root, 'claude-home', 'skills', 'learn'),
-        },
-      ],
-    );
+    const result = await scanAllSkills({}, maker, [], [{
+      name: 'learn',
+      absolutePath: builtIn,
+      nativeClaudePath: path.join(root, 'claude-home', 'skills', 'learn'),
+    }]);
 
     expect(result.skills).toHaveLength(1);
     expect(result.skills[0]).toMatchObject({
@@ -189,10 +162,7 @@ describe('scanAllSkills', () => {
   it('projects the registry slug joined by physical path without replacing native directory names', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-registry-slug-'));
     tempRoots.push(root);
-    const paths = [
-      path.join(root, '.agents', 'skills', 'Foo'),
-      path.join(root, '.claude', 'skills', 'foo'),
-    ];
+    const paths = [path.join(root, '.agents', 'skills', 'Foo'), path.join(root, '.claude', 'skills', 'foo')];
     for (const skillPath of paths) {
       fs.mkdirSync(skillPath, { recursive: true });
       fs.writeFileSync(path.join(skillPath, 'SKILL.md'), '---\nname: fixture\n---\nFixture');
@@ -202,27 +172,16 @@ describe('scanAllSkills', () => {
       { skillName: 'foo', installPath: paths[0], entry },
       { skillName: 'different-skill', installPath: paths[1], entry },
     ]);
-    const maker = {
-      listCustomizations: vi.fn(async () => ({
-        errors: [],
-        items: paths.map((absolutePath) => ({
-          engine: 'claude-code',
-          kind: 'skill',
-          scope: 'user',
-          name: 'fixture',
-          absolutePath,
-          mdPath: path.join(absolutePath, 'SKILL.md'),
-          files: [],
-        })),
-      })),
-    } as unknown as Maker;
+    const maker = { listCustomizations: vi.fn(async () => ({ errors: [], items: paths.map((absolutePath) => ({
+      engine: 'claude-code', kind: 'skill', scope: 'user', name: 'fixture', absolutePath,
+      mdPath: path.join(absolutePath, 'SKILL.md'), files: [],
+    })) })) } as unknown as Maker;
     const result = await scanAllSkills({}, maker);
     expect(result.skills).toHaveLength(2);
     for (const [index, skillPath] of paths.entries()) {
       const physical = fs.realpathSync(skillPath);
       expect(result.skills.find((skill) => skill.absolutePath === physical)).toMatchObject({
-        name: path.basename(physical),
-        registryEntry: entry,
+        name: path.basename(physical), registryEntry: entry,
         registrySkillName: index === 0 ? 'foo' : 'different-skill',
       });
     }
@@ -238,22 +197,10 @@ describe('scanAllSkills', () => {
     fs.mkdirSync(path.dirname(alias), { recursive: true });
     fs.writeFileSync(path.join(source, 'SKILL.md'), '---\nname: example\n---\nExample');
     fs.symlinkSync(source, alias, process.platform === 'win32' ? 'junction' : 'dir');
-    const maker = {
-      listCustomizations: vi.fn(async () => ({
-        errors: [],
-        items: [
-          {
-            engine: 'pi',
-            kind: 'skill',
-            scope: 'user',
-            name: 'example',
-            absolutePath: alias,
-            mdPath: path.join(alias, 'SKILL.md'),
-            files: [],
-          },
-        ],
-      })),
-    } as unknown as Maker;
+    const maker = { listCustomizations: vi.fn(async () => ({ errors: [], items: [{
+      engine: 'pi', kind: 'skill', scope: 'user', name: 'example', absolutePath: alias,
+      mdPath: path.join(alias, 'SKILL.md'), files: [],
+    }] })) } as unknown as Maker;
     const result = await scanAllSkills({}, maker, [stateRoot]);
     expect(result.skills).toHaveLength(1);
     expect(result.skills[0]).toMatchObject({ managedByPlugin: true, canUninstall: false });
@@ -281,12 +228,9 @@ describe('scanAllSkills', () => {
       })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {
-        projects: [{ projectRoot, hash: 'abcd1234' }],
-      },
-      maker,
-    );
+    const result = await scanAllSkills({
+      projects: [{ projectRoot, hash: 'abcd1234' }],
+    }, maker);
 
     expect(maker.listCustomizations).toHaveBeenCalledWith({
       workingDirs: [projectRoot],
@@ -366,24 +310,22 @@ describe('scanAllSkills', () => {
       })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {
-        projects: [
-          { projectRoot: firstRoot, hash: 'first123' },
-          { projectRoot: secondRoot, hash: 'second456' },
-        ],
-      },
-      maker,
-    );
+    const result = await scanAllSkills({
+      projects: [
+        { projectRoot: firstRoot, hash: 'first123' },
+        { projectRoot: secondRoot, hash: 'second456' },
+      ],
+    }, maker);
 
     expect(result.skills).toHaveLength(2);
     expect(result.skills.map((skill) => skill.projectHash).sort()).toEqual([
       'first123',
       'second456',
     ]);
-    expect(result.skills.map((skill) => skill.projectRoot).sort()).toEqual(
-      [firstRoot, secondRoot].sort(),
-    );
+    expect(result.skills.map((skill) => skill.projectRoot).sort()).toEqual([
+      firstRoot,
+      secondRoot,
+    ].sort());
   });
 
   it('maps a canonical scanner workingDir back to the original symlink project root', async () => {
@@ -398,28 +340,23 @@ describe('scanAllSkills', () => {
     const maker = {
       listCustomizations: vi.fn(async () => ({
         errors: [],
-        items: [
-          {
-            engine: 'pi',
-            kind: 'skill',
-            scope: 'repo',
-            name: 'pi-demo',
-            absolutePath: skillDir,
-            mdPath: path.join(skillDir, 'SKILL.md'),
-            workingDir: canonicalRoot,
-            runtimeStatus: 'discovered',
-            files: [],
-          },
-        ],
+        items: [{
+          engine: 'pi',
+          kind: 'skill',
+          scope: 'repo',
+          name: 'pi-demo',
+          absolutePath: skillDir,
+          mdPath: path.join(skillDir, 'SKILL.md'),
+          workingDir: canonicalRoot,
+          runtimeStatus: 'discovered',
+          files: [],
+        }],
       })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {
-        projects: [{ projectRoot, hash: 'linked123' }],
-      },
-      maker,
-    );
+    const result = await scanAllSkills({
+      projects: [{ projectRoot, hash: 'linked123' }],
+    }, maker);
 
     expect(result.skills[0]).toMatchObject({
       scope: 'project',
@@ -455,23 +392,18 @@ describe('scanAllSkills', () => {
       })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {
-        projects: [
-          { projectRoot, hash: 'real1234' },
-          { projectRoot: linkedRoot, hash: 'link5678' },
-        ],
-      },
-      maker,
-    );
+    const result = await scanAllSkills({
+      projects: [
+        { projectRoot, hash: 'real1234' },
+        { projectRoot: linkedRoot, hash: 'link5678' },
+      ],
+    }, maker);
 
-    expect(result.skills.map((skill) => skill.projectHash).sort()).toEqual([
-      'link5678',
-      'real1234',
-    ]);
-    expect(result.skills.map((skill) => skill.projectRoot).sort()).toEqual(
-      [linkedRoot, projectRoot].sort(),
-    );
+    expect(result.skills.map((skill) => skill.projectHash).sort()).toEqual(['link5678', 'real1234']);
+    expect(result.skills.map((skill) => skill.projectRoot).sort()).toEqual([
+      linkedRoot,
+      projectRoot,
+    ].sort());
     realpathSyncSpy.mockRestore();
   });
 
@@ -480,12 +412,9 @@ describe('scanAllSkills', () => {
       listCustomizations: vi.fn(async () => ({ errors: [], items: [] })),
     } as unknown as Maker;
 
-    await scanAllSkills(
-      {
-        projects: [{ projectRoot: 'relative/project', hash: 'badroot' }],
-      },
-      maker,
-    );
+    await scanAllSkills({
+      projects: [{ projectRoot: 'relative/project', hash: 'badroot' }],
+    }, maker);
 
     expect(maker.listCustomizations).toHaveBeenCalledWith({
       workingDirs: [],
@@ -562,28 +491,23 @@ describe('scanAllSkills', () => {
     const maker = {
       listCustomizations: vi.fn(async () => ({
         errors: [],
-        items: [
-          {
-            engine: 'pi',
-            kind: 'skill',
-            scope: 'repo',
-            name: 'pi-demo',
-            absolutePath: skillDir,
-            mdPath: path.join(skillDir, 'SKILL.md'),
-            workingDir: projectRoot,
-            runtimeStatus: 'discovered',
-            files: [],
-          },
-        ],
+        items: [{
+          engine: 'pi',
+          kind: 'skill',
+          scope: 'repo',
+          name: 'pi-demo',
+          absolutePath: skillDir,
+          mdPath: path.join(skillDir, 'SKILL.md'),
+          workingDir: projectRoot,
+          runtimeStatus: 'discovered',
+          files: [],
+        }],
       })),
     } as unknown as Maker;
 
-    const result = await scanAllSkills(
-      {
-        projects: [{ projectRoot, hash: 'pi123456' }],
-      },
-      maker,
-    );
+    const result = await scanAllSkills({
+      projects: [{ projectRoot, hash: 'pi123456' }],
+    }, maker);
 
     expect(result.skills[0]).toMatchObject({
       engine: 'pi',
@@ -610,9 +534,7 @@ describe('scanAllSkills', () => {
       entries: [{ name: 'SKILL.md', kind: 'file' }],
     });
     await expect(readSkillRawFile({ filePath: skillMd })).resolves.toMatchObject({ success: true });
-    await expect(
-      writeSkillFile({ filePath: skillMd, content: '# Updated Pi Demo\n' }),
-    ).resolves.toEqual({
+    await expect(writeSkillFile({ filePath: skillMd, content: '# Updated Pi Demo\n' })).resolves.toEqual({
       success: true,
     });
     expect(fs.readFileSync(skillMd, 'utf-8')).toBe('# Updated Pi Demo\n');
@@ -630,27 +552,19 @@ describe('scanAllSkills', () => {
     fs.writeFileSync(notes, 'notes\n', 'utf-8');
     fs.writeFileSync(outside, 'private\n', 'utf-8');
 
-    await expect(
-      readSkillContent({ mdPath: skillMd, attestedRoot: builtInRoot }),
-    ).resolves.toMatchObject({
+    await expect(readSkillContent({ mdPath: skillMd, attestedRoot: builtInRoot })).resolves.toMatchObject({
       success: true,
       content: '\n# Learn\n',
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: builtInRoot, attestedRoot: builtInRoot }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: builtInRoot, attestedRoot: builtInRoot })).resolves.toMatchObject({
       success: true,
       entries: expect.arrayContaining([{ name: 'SKILL.md', kind: 'file' }]),
     });
-    await expect(
-      readSkillSiblingFile({ filePath: notes, attestedRoot: builtInRoot }),
-    ).resolves.toMatchObject({
+    await expect(readSkillSiblingFile({ filePath: notes, attestedRoot: builtInRoot })).resolves.toMatchObject({
       success: true,
       content: 'notes\n',
     });
-    await expect(
-      readSkillRawFile({ filePath: skillMd, attestedRoot: builtInRoot }),
-    ).resolves.toMatchObject({
+    await expect(readSkillRawFile({ filePath: skillMd, attestedRoot: builtInRoot })).resolves.toMatchObject({
       success: true,
       content: expect.stringContaining('# Learn'),
     });
@@ -658,9 +572,7 @@ describe('scanAllSkills', () => {
     if (canLinkFile) {
       const escape = path.join(builtInRoot, 'escape.txt');
       fs.symlinkSync(outside, escape, 'file');
-      await expect(
-        readSkillSiblingFile({ filePath: escape, attestedRoot: builtInRoot }),
-      ).resolves.toMatchObject({
+      await expect(readSkillSiblingFile({ filePath: escape, attestedRoot: builtInRoot })).resolves.toMatchObject({
         success: false,
         error: 'path is not under a recognized skills directory',
       });
@@ -719,12 +631,10 @@ describe('skill file access', () => {
     fs.writeFileSync(outsideMd, '# Outside\n', 'utf-8');
     fs.symlinkSync(outsideMd, exposedMd, 'file');
 
-    await expect(
-      writeSkillFile({
-        filePath: exposedMd,
-        content: '# Changed\n',
-      }),
-    ).resolves.toEqual({
+    await expect(writeSkillFile({
+      filePath: exposedMd,
+      content: '# Changed\n',
+    })).resolves.toEqual({
       success: false,
       error: 'refusing to write through a symbolic link',
     });
@@ -740,48 +650,37 @@ describe('skill file access', () => {
     const targetSkill = path.join(skillRoot, 'target');
     const aliasSkill = path.join(skillRoot, 'alias');
     fs.mkdirSync(targetSkill, { recursive: true });
-    fs.writeFileSync(
-      path.join(targetSkill, 'SKILL.md'),
-      '---\nname: target\n---\n# Target\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(targetSkill, 'SKILL.md'), '---\nname: target\n---\n# Target\n', 'utf-8');
     fs.symlinkSync(targetSkill, aliasSkill, process.platform === 'win32' ? 'junction' : 'dir');
 
     const maker = {
       listCustomizations: vi.fn(async () => ({
         errors: [],
-        items: [
-          {
-            engine: 'pi',
-            kind: 'skill',
-            scope: 'repo',
-            name: 'target',
-            absolutePath: aliasSkill,
-            mdPath: path.join(aliasSkill, 'SKILL.md'),
-            workingDir: projectRoot,
-            runtimeStatus: 'discovered',
-            files: [],
-          },
-        ],
+        items: [{
+          engine: 'pi',
+          kind: 'skill',
+          scope: 'repo',
+          name: 'target',
+          absolutePath: aliasSkill,
+          mdPath: path.join(aliasSkill, 'SKILL.md'),
+          workingDir: projectRoot,
+          runtimeStatus: 'discovered',
+          files: [],
+        }],
       })),
     } as unknown as Maker;
-    const scanned = await scanAllSkills(
-      {
-        projects: [{ projectRoot, hash: 'pi-alias' }],
-      },
-      maker,
-    );
+    const scanned = await scanAllSkills({
+      projects: [{ projectRoot, hash: 'pi-alias' }],
+    }, maker);
     expect(scanned.skills[0]).toMatchObject({
       absolutePath: fs.realpathSync(targetSkill),
       discoveredPath: aliasSkill,
     });
 
-    await expect(
-      renameLocalSkill({
-        absolutePath: scanned.skills[0].discoveredPath,
-        newName: 'renamed-alias',
-      }),
-    ).resolves.toMatchObject({ success: false });
+    await expect(renameLocalSkill({
+      absolutePath: scanned.skills[0].discoveredPath,
+      newName: 'renamed-alias',
+    })).resolves.toMatchObject({ success: false });
     expect(fs.existsSync(aliasSkill)).toBe(true);
     expect(fs.existsSync(path.join(skillRoot, 'renamed-alias'))).toBe(false);
     expect(fs.readFileSync(path.join(targetSkill, 'SKILL.md'), 'utf-8')).toBe(
@@ -799,12 +698,10 @@ describe('skill file access', () => {
     fs.writeFileSync(outsideMd, '---\nname: outside\n---\n# Outside\n', 'utf-8');
     fs.symlinkSync(outsideMd, path.join(skillDir, 'SKILL.md'), 'file');
 
-    await expect(
-      renameLocalSkill({
-        absolutePath: skillDir,
-        newName: 'renamed-linked-md',
-      }),
-    ).resolves.toMatchObject({ success: false });
+    await expect(renameLocalSkill({
+      absolutePath: skillDir,
+      newName: 'renamed-linked-md',
+    })).resolves.toMatchObject({ success: false });
     expect(fs.existsSync(skillDir)).toBe(true);
     expect(fs.existsSync(path.join(skillRoot, 'renamed-linked-md'))).toBe(false);
     expect(fs.readFileSync(outsideMd, 'utf-8')).toBe('---\nname: outside\n---\n# Outside\n');
@@ -824,21 +721,11 @@ describe('skill file access', () => {
 
     const exposedSkillMd = path.join(exposedSkill, 'SKILL.md');
     const exposedNotes = path.join(exposedSkill, 'notes.txt');
-    await expect(readSkillContent({ mdPath: exposedSkillMd })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(listSkillFolderChildren({ dirPath: exposedSkill })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(readSkillSiblingFile({ filePath: exposedNotes })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(readSkillRawFile({ filePath: exposedSkillMd })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(
-      writeSkillFile({ filePath: exposedSkillMd, content: '# Changed\n' }),
-    ).resolves.toMatchObject({ success: false });
+    await expect(readSkillContent({ mdPath: exposedSkillMd })).resolves.toMatchObject({ success: false });
+    await expect(listSkillFolderChildren({ dirPath: exposedSkill })).resolves.toMatchObject({ success: false });
+    await expect(readSkillSiblingFile({ filePath: exposedNotes })).resolves.toMatchObject({ success: false });
+    await expect(readSkillRawFile({ filePath: exposedSkillMd })).resolves.toMatchObject({ success: false });
+    await expect(writeSkillFile({ filePath: exposedSkillMd, content: '# Changed\n' })).resolves.toMatchObject({ success: false });
     expect(fs.readFileSync(path.join(outsideSkill, 'SKILL.md'), 'utf-8')).toBe('# Outside\n');
   });
 
@@ -856,24 +743,17 @@ describe('skill file access', () => {
 
     const exposedSkill = path.join(exposedRoot, '.pi', 'skills', 'escape');
     const exposedSkillMd = path.join(exposedSkill, 'SKILL.md');
-    await expect(readSkillContent({ mdPath: exposedSkillMd })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(listSkillFolderChildren({ dirPath: exposedSkill })).resolves.toMatchObject({
-      success: false,
-    });
-    await expect(
-      writeSkillFile({
-        filePath: exposedSkillMd,
-        content: '# Changed\n',
-      }),
-    ).resolves.toMatchObject({ success: false });
+    await expect(readSkillContent({ mdPath: exposedSkillMd })).resolves.toMatchObject({ success: false });
+    await expect(listSkillFolderChildren({ dirPath: exposedSkill })).resolves.toMatchObject({ success: false });
+    await expect(writeSkillFile({
+      filePath: exposedSkillMd,
+      content: '# Changed\n',
+    })).resolves.toMatchObject({ success: false });
     expect(fs.readFileSync(path.join(nestedSkill, 'SKILL.md'), 'utf-8')).toBe('# Outside\n');
   });
 
   it('follows a supported skill path symlink across detail, files panel, and editor access', async () => {
-    const { actualSkillMd, exposedDir, exposedPricingJson, exposedSkillMd } =
-      createSymlinkedSkill();
+    const { actualSkillMd, exposedDir, exposedPricingJson, exposedSkillMd } = createSymlinkedSkill();
 
     const grantedRoot = resolveExistingSkillPathForGrant(exposedDir);
     expect(grantedRoot).toBe(fs.realpathSync.native(exposedDir));
@@ -903,21 +783,15 @@ describe('skill file access', () => {
       content: '{"tier":"internal"}\n',
     });
     fs.writeFileSync(path.join(exposedDir, '.env'), 'TOKEN=secret\n', 'utf-8');
-    await expect(
-      readSkillSiblingFile({ filePath: path.join(exposedDir, '.env') }),
-    ).resolves.toMatchObject({
+    await expect(readSkillSiblingFile({ filePath: path.join(exposedDir, '.env') })).resolves.toMatchObject({
       success: false,
       error: 'path is excluded from SkillHub packages',
     });
-    await expect(
-      readSkillRawFile({ filePath: path.join(exposedDir, '.env') }),
-    ).resolves.toMatchObject({
+    await expect(readSkillRawFile({ filePath: path.join(exposedDir, '.env') })).resolves.toMatchObject({
       success: false,
       error: 'path is excluded from SkillHub packages',
     });
-    await expect(
-      writeSkillFile({ filePath: path.join(exposedDir, '.env'), content: 'TOKEN=changed\n' }),
-    ).resolves.toEqual({
+    await expect(writeSkillFile({ filePath: path.join(exposedDir, '.env'), content: 'TOKEN=changed\n' })).resolves.toEqual({
       success: false,
       error: 'path is excluded from SkillHub packages',
     });
@@ -926,9 +800,7 @@ describe('skill file access', () => {
       content: expect.stringContaining('Original content'),
     });
 
-    await expect(
-      writeSkillFile({ filePath: exposedSkillMd, content: '# Updated\n' }),
-    ).resolves.toEqual({
+    await expect(writeSkillFile({ filePath: exposedSkillMd, content: '# Updated\n' })).resolves.toEqual({
       success: true,
     });
 
@@ -939,41 +811,21 @@ describe('skill file access', () => {
     const { exposedDir } = createSymlinkedSkill();
     fs.writeFileSync(path.join(exposedDir, '.cca-bindings.json'), '{"task":"demo"}\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.cca-state', 'task'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.cca-state', 'task', 'current-goal.md'),
-      'goal\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.cca-state', 'task', 'current-goal.md'), 'goal\n', 'utf-8');
     fs.writeFileSync(path.join(exposedDir, '.env'), 'TOKEN=secret\n', 'utf-8');
     fs.writeFileSync(path.join(exposedDir, '.envrc'), 'export TOKEN=secret\n', 'utf-8');
     fs.writeFileSync(path.join(exposedDir, '.npmrc'), '//registry/:_authToken=secret\n', 'utf-8');
-    fs.writeFileSync(
-      path.join(exposedDir, '.netrc'),
-      'machine example.com password secret\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.netrc'), 'machine example.com password secret\n', 'utf-8');
     fs.writeFileSync(path.join(exposedDir, '.pypirc'), '[pypi]\npassword=secret\n', 'utf-8');
     fs.writeFileSync(path.join(exposedDir, '.DS_Store'), 'metadata', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.ssh'), { recursive: true });
     fs.writeFileSync(path.join(exposedDir, '.ssh', 'id_rsa'), 'private key\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.aws'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.aws', 'credentials'),
-      'aws_secret_access_key=secret\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.aws', 'credentials'), 'aws_secret_access_key=secret\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.docker'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.docker', 'config.json'),
-      '{"auths":{"example.com":{}}}\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.docker', 'config.json'), '{"auths":{"example.com":{}}}\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.gem'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.gem', 'credentials'),
-      ':rubygems_api_key: secret\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.gem', 'credentials'), ':rubygems_api_key: secret\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.config', 'gcloud'), { recursive: true });
     fs.writeFileSync(
       path.join(exposedDir, '.config', 'gcloud', 'application_default_credentials.json'),
@@ -983,19 +835,11 @@ describe('skill file access', () => {
     fs.mkdirSync(path.join(exposedDir, '.kube'), { recursive: true });
     fs.writeFileSync(path.join(exposedDir, '.kube', 'config'), 'token: secret\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.config', 'gh'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.config', 'gh', 'hosts.yml'),
-      'oauth_token: secret\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.config', 'gh', 'hosts.yml'), 'oauth_token: secret\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.azure'), { recursive: true });
     fs.writeFileSync(path.join(exposedDir, '.azure', 'accessTokens.json'), '[]\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, '.config', 'tool'), { recursive: true });
-    fs.writeFileSync(
-      path.join(exposedDir, '.config', 'tool', 'settings.json'),
-      '{"fixture":true}\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(exposedDir, '.config', 'tool', 'settings.json'), '{"fixture":true}\n', 'utf-8');
     fs.mkdirSync(path.join(exposedDir, 'node_modules', 'pkg'), { recursive: true });
 
     const result = await listSkillFolderChildren({ dirPath: exposedDir });
@@ -1020,64 +864,41 @@ describe('skill file access', () => {
       ]),
     );
 
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'gcloud') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'gcloud') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.docker') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.docker') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.gem') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.gem') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.kube') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.kube') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'gh') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'gh') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.azure') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.azure') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config') })).resolves.toMatchObject({
       success: true,
       entries: [{ name: 'tool', kind: 'dir' }],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'tool') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(exposedDir, '.config', 'tool') })).resolves.toMatchObject({
       success: true,
       entries: [{ name: 'settings.json', kind: 'file' }],
     });
-    await expect(
-      readSkillSiblingFile({
-        filePath: path.join(
-          exposedDir,
-          '.config',
-          'gcloud',
-          'application_default_credentials.json',
-        ),
-      }),
-    ).resolves.toMatchObject({
+    await expect(readSkillSiblingFile({
+      filePath: path.join(exposedDir, '.config', 'gcloud', 'application_default_credentials.json'),
+    })).resolves.toMatchObject({
       success: false,
       error: 'path is excluded from SkillHub packages',
     });
@@ -1094,21 +915,13 @@ describe('skill file access', () => {
       'utf-8',
     );
     fs.mkdirSync(path.join(commandDir, '.config', 'tool'), { recursive: true });
-    fs.writeFileSync(
-      path.join(commandDir, '.config', 'tool', 'settings.json'),
-      '{"fixture":true}\n',
-      'utf-8',
-    );
+    fs.writeFileSync(path.join(commandDir, '.config', 'tool', 'settings.json'), '{"fixture":true}\n', 'utf-8');
 
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(commandDir, '.config', 'gcloud') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(commandDir, '.config', 'gcloud') })).resolves.toMatchObject({
       success: true,
       entries: [],
     });
-    await expect(
-      listSkillFolderChildren({ dirPath: path.join(commandDir, '.config', 'tool') }),
-    ).resolves.toMatchObject({
+    await expect(listSkillFolderChildren({ dirPath: path.join(commandDir, '.config', 'tool') })).resolves.toMatchObject({
       success: true,
       entries: [{ name: 'settings.json', kind: 'file' }],
     });
