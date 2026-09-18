@@ -16,7 +16,10 @@ const mockState = vi.hoisted(() => ({
   },
   learnEnabled: true,
   learnController: {} as object | null,
-  consumeLearnInvocationGrant: vi.fn(async (_request: unknown) => ({ ok: true as const })),
+  consumeLearnInvocationGrant: vi.fn(async (
+    _request: unknown,
+    _sessionInstanceId: string | undefined,
+  ) => ({ ok: true as const })),
   capturedProvidersConfig: null as null | Record<string, unknown>,
 }));
 
@@ -101,8 +104,8 @@ vi.mock('../../learn-host/index.js', () => ({
 }));
 
 vi.mock('../../learn-host/invocationGrant.js', () => ({
-  consumeLearnInvocationGrant: (request: unknown) =>
-    mockState.consumeLearnInvocationGrant(request),
+  consumeLearnInvocationGrant: (request: unknown, sessionInstanceId: string | undefined) =>
+    mockState.consumeLearnInvocationGrant(request, sessionInstanceId),
 }));
 
 vi.mock('../../localDb/chatHistoryReader.js', () => ({
@@ -247,8 +250,8 @@ describe('collab send outcome semantics', () => {
     });
   });
 
-  it('authorizes Learn only when the active slash-command winner is Cindy built-in Learn', async () => {
-    const attestCindyLearnSkillForSession = vi.fn(async () => false);
+  it('authorizes Learn only for the live local Session instance bound to its dispatch grant', async () => {
+    const isCurrentLocalSessionInstance = vi.fn(() => false);
     createDesktopMcpProviders({
       botCapabilities,
       getMakerMemoryManager: vi.fn(),
@@ -256,7 +259,7 @@ describe('collab send outcome semantics', () => {
       pluginRegistry: { isEnabled: () => true } as never,
       resolveIOSSimulatorAccess: () => ({ allowed: true }),
       invokeRemote: vi.fn(),
-      attestCindyLearnSkillForSession,
+      isCurrentLocalSessionInstance,
     });
     const xdtHelper = mockState.capturedProvidersConfig?.xdtHelper as {
       authorizeSkillLearning: (input: {
@@ -276,15 +279,15 @@ describe('collab send outcome semantics', () => {
       ok: false,
       errorCode: 'USER_REQUEST_REQUIRED',
     });
-    expect(attestCindyLearnSkillForSession).toHaveBeenLastCalledWith(
+    expect(isCurrentLocalSessionInstance).toHaveBeenLastCalledWith(
       'session-1',
       'instance-1',
     );
     expect(mockState.consumeLearnInvocationGrant).not.toHaveBeenCalled();
 
-    attestCindyLearnSkillForSession.mockResolvedValue(true);
+    isCurrentLocalSessionInstance.mockReturnValue(true);
     await expect(xdtHelper.authorizeSkillLearning(request, context)).resolves.toEqual({ ok: true });
-    expect(mockState.consumeLearnInvocationGrant).toHaveBeenCalledWith(request);
+    expect(mockState.consumeLearnInvocationGrant).toHaveBeenCalledWith(request, 'instance-1');
   });
 
   it('reports enable_collab_mode delegate_task created-and-dispatched distinctly', async () => {

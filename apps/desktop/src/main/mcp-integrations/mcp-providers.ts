@@ -110,11 +110,11 @@ export interface DesktopMcpProvidersDeps {
     sessionId: string,
     sessionInstanceId: string,
   ) => GhostGrantLiveSessionState | null;
-  /** Confirms that this Session's actual slash-command winner is Cindy's built-in Learn Skill. */
-  attestCindyLearnSkillForSession?: (
+  /** Reject stale, remote, or already-closed Session tool contexts. */
+  isCurrentLocalSessionInstance?: (
     sessionId: string,
     sessionInstanceId: string | undefined,
-  ) => Promise<boolean>;
+  ) => boolean;
   /** 把工具结果图片转成文字描述（视觉桥，最佳努力）。缺失 = 不处理。
    *  返回结构区分「有意跳过」(skipped:true, 视觉桥未开/模型不命中, 不告警)与
    *  「真正尝试但失败」(skipped:false + null, 计入 attemptedCount 供告警)。 */
@@ -398,17 +398,17 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
             message: 'Cindy Learn is not ready yet.',
           };
         }
-        if (!await deps.attestCindyLearnSkillForSession?.(
+        if (!deps.isCurrentLocalSessionInstance?.(
           request.callerSessionId,
           context.sessionInstanceId,
         )) {
           return {
             ok: false,
             errorCode: 'USER_REQUEST_REQUIRED',
-            message: 'Cindy Learn is not the active /learn Skill for this task.',
+            message: 'Cindy Learn is not authorized for this task instance.',
           };
         }
-        return consumeLearnInvocationGrant(request);
+        return consumeLearnInvocationGrant(request, context.sessionInstanceId);
       },
       skillLearning: async ({
         callerSessionId,

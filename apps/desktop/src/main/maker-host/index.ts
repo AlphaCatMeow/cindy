@@ -1,5 +1,5 @@
 import { registerCodexTextOnlyPolicy } from './codex-text-only-policy.js';
-import { isCindyLearnSkillEnabled, readDisabledSkillPaths } from '../skillhub/activationPreferences';
+import { readDisabledSkillPaths } from '../skillhub/activationPreferences';
 import { cindyMakeManager } from '../cindy-make/manager.js';
 import { makeSourceRoot } from '../cindy-make/sourcePaths.js';
 import { clearCodexAccountUsageSnapshot } from '../usageBroadcaster.js';
@@ -80,10 +80,6 @@ import {
   type BotProfileRuntimeSnapshot,
 } from '../maker-ipc/botProfileRuntime.js';
 import { collectBotOwnSkillMounts } from '../maker-ipc/botSkillService.js';
-import {
-  builtInSkillDescriptors,
-  markCindyBuiltInAgentSkills,
-} from './built-in-skills.js';
 import { buildBotMcpCatalog } from './botMcpCatalog.js';
 import { createBotCapabilityService, type BotCapabilityServiceDeps, type BotCapabilityUpdate } from '../maker-ipc/botCapabilityService.js';
 import {
@@ -938,42 +934,16 @@ export function getMaker(): Maker {
       pluginRegistry,
       resolveIOSSimulatorAccess,
       invokeRemote: remoteInvoke,
-      attestCindyLearnSkillForSession: async (
+      isCurrentLocalSessionInstance: (
         sessionId: string,
         sessionInstanceId: string | undefined,
       ) => {
         const session = _maker?.getSession(sessionId);
-        if (
-          !sessionInstanceId
-          || !session
-          || session.instanceId !== sessionInstanceId
-          || session.remoteHostId
-          || !isCindyLearnSkillEnabled()
-        ) {
-          return false;
-        }
-        const result = session.agentKind === 'claude-code'
-          ? await _maker!.listAgentRuntimeSkills(session.agentKind, {
-            workingDir: session.workDir,
-            sessionId,
-            runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || (
-              process.env.XDT_USER_DATA_DIR && !app.isPackaged
-                ? path.join(app.getPath('userData'), 'claude-home')
-                : path.join(os.homedir(), '.claude')
-            ),
-          })
-          : await _maker!.listAgentSkills(session.agentKind, {
-            workingDir: session.workDir,
-            sessionId,
-          });
-        if (result.errors?.length) return false;
-        const skills = markCindyBuiltInAgentSkills(
-          result.skills,
-          builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),
-        );
-        const learnCandidates = skills.filter((skill) => skill.name.toLowerCase() === 'learn');
-        return learnCandidates.length > 0
-          && learnCandidates.every((skill) => skill.builtIn === true);
+        return Boolean(sessionInstanceId
+          && session
+          && session.instanceId === sessionInstanceId
+          && session.getStatus() === 'active'
+          && !session.remoteHostId);
       },
       // 只读活跃 Session 的运行时真相。权限切换是 runtime-first、DB-second，
       // 因此插件过户自动放行不得回退 sessions.permission_mode；会话不再 active

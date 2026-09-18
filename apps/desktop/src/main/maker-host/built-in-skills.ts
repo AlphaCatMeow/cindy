@@ -10,6 +10,7 @@ import {
 } from '../../shared/cindyBuiltInSkills';
 import { withSkillMutation } from '../skillhub/sharedMutationLease';
 import { atomicWriteFileSync, readAtomicFileSync } from '../utils/atomicWriteFile';
+import { atomicReplaceWindowsDirectoryEntry } from '../windowsAtomicRename.js';
 
 export const BUILT_IN_SKILL_CREATOR_NAME = CINDY_SKILL_CREATOR_NAME;
 export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
@@ -35,6 +36,7 @@ export interface PrepareBuiltInSkillsOptions {
   homeDir?: string;
   bundleVersion?: number;
   withSharedMutation?: typeof withSkillMutation;
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry;
 }
 
 export interface PrepareBuiltInSkillsResult {
@@ -51,6 +53,7 @@ export interface RefreshBuiltInClaudeSkillLinksOptions {
   homeDir?: string;
   descriptors?: readonly BuiltInSkillDescriptor[];
   withSharedMutation?: typeof withSkillMutation;
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry;
 }
 
 export interface RefreshBuiltInSharedSkillLinksOptions {
@@ -59,7 +62,10 @@ export interface RefreshBuiltInSharedSkillLinksOptions {
   homeDir?: string;
   descriptors?: readonly BuiltInSkillDescriptor[];
   withSharedMutation?: typeof withSkillMutation;
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry;
 }
+
+type AtomicReplaceDirectoryEntry = (source: string, destination: string) => Promise<void>;
 
 export interface RefreshBuiltInClaudeSkillLinksResult {
   changed: boolean;
@@ -362,6 +368,7 @@ async function ensureSkillEntry(
   appDataDir?: string,
   desiredTarget = descriptor.absolutePath,
   additionalManagedTargets: readonly string[] = [],
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry,
 ): Promise<{ changed: boolean; warning?: string; targetPath?: string }> {
   await fsp.mkdir(path.dirname(linkPath), { recursive: true });
 
@@ -400,25 +407,21 @@ async function ensureSkillEntry(
       )
     ) {
       const replacement = `${linkPath}.next-${randomUUID()}`;
-      const backup = `${linkPath}.previous-${randomUUID()}`;
       await fsp.symlink(
         desiredTarget,
         replacement,
         process.platform === 'win32' ? 'junction' : 'dir',
       );
-      let movedExisting = false;
       try {
-        await fsp.rename(linkPath, backup);
-        movedExisting = true;
-        await fsp.rename(replacement, linkPath);
+        await replaceDirectoryEntry(
+          replacement,
+          linkPath,
+          replaceDirectoryEntryAtomically,
+        );
       } catch (error) {
         await fsp.rm(replacement, { force: true }).catch(() => undefined);
-        if (movedExisting && !fs.existsSync(linkPath)) {
-          await fsp.rename(backup, linkPath).catch(() => undefined);
-        }
         throw error;
       }
-      await fsp.rm(backup, { force: true });
       return { changed: true, targetPath: desiredTarget };
     }
     return {
@@ -511,6 +514,24 @@ function samePath(left: string, right: string): boolean {
   return normalizeForCompare(left) === normalizeForCompare(right);
 }
 
+async function replaceDirectoryEntry(
+  replacement: string,
+  destination: string,
+  replaceAtomically?: AtomicReplaceDirectoryEntry,
+): Promise<void> {
+  const destinationExists = await fsp.lstat(destination)
+    .then(() => true)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    });
+  if (destinationExists && (process.platform === 'win32' || replaceAtomically)) {
+    await (replaceAtomically ?? atomicReplaceWindowsDirectoryEntry)(replacement, destination);
+    return;
+  }
+  await fsp.rename(replacement, destination);
+}
+
 function activeBundleTarget(root: string, bundle: string): string {
   return path.join(root, VERSIONS_DIRECTORY, bundle);
 }
@@ -542,7 +563,11 @@ async function readActiveBundle(root: string): Promise<string | null> {
   return segments[0];
 }
 
-async function switchActiveBundle(root: string, bundle: string): Promise<boolean> {
+async function switchActiveBundle(
+  root: string,
+  bundle: string,
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry,
+): Promise<boolean> {
   const target = activeBundleTarget(root, bundle);
   if (!(await fsp.stat(target).catch(() => null))?.isDirectory()) {
     throw new Error(`built-in Skill bundle is unavailable: ${target}`);
@@ -551,35 +576,16 @@ async function switchActiveBundle(root: string, bundle: string): Promise<boolean
 
   const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
   const replacement = `${activePath}.next-${randomUUID()}`;
-  const backup = `${activePath}.previous-${randomUUID()}`;
   await fsp.symlink(target, replacement, process.platform === 'win32' ? 'junction' : 'dir');
   try {
-    // POSIX replaces a symlink atomically. Windows may reject replacing an
-    // existing directory junction, in which case the fallback still changes
-    // every Agent through this one pointer rather than one projection at a time.
-    await fsp.rename(replacement, activePath);
-  } catch (firstError) {
-    const activeEntryExists = await fsp.lstat(activePath).then(() => true).catch(() => false);
-    if (!activeEntryExists) {
-      await fsp.rm(replacement, { force: true }).catch(() => undefined);
-      throw firstError;
-    }
-    let movedExisting = false;
-    try {
-      await fsp.rename(activePath, backup);
-      movedExisting = true;
-      await fsp.rename(replacement, activePath);
-    } catch (error) {
-      await fsp.rm(replacement, { force: true }).catch(() => undefined);
-      const activeEntryExistsAfterFailure = await fsp.lstat(activePath)
-        .then(() => true)
-        .catch(() => false);
-      if (movedExisting && !activeEntryExistsAfterFailure) {
-        await fsp.rename(backup, activePath).catch(() => undefined);
-      }
-      throw error;
-    }
-    await fsp.rm(backup, { force: true }).catch(() => undefined);
+    await replaceDirectoryEntry(
+      replacement,
+      activePath,
+      replaceDirectoryEntryAtomically,
+    );
+  } catch (error) {
+    await fsp.rm(replacement, { force: true }).catch(() => undefined);
+    throw error;
   }
   return true;
 }
@@ -597,6 +603,7 @@ async function ensureSharedEntry(
   homeDir: string,
   legacyUserDataDir: string,
   appDataDir?: string,
+  replaceDirectoryEntryAtomically?: AtomicReplaceDirectoryEntry,
 ): Promise<{ changed: boolean; warning?: string; targetPath?: string }> {
   return ensureSkillEntry(
     descriptor,
@@ -604,6 +611,9 @@ async function ensureSharedEntry(
     true,
     legacyUserDataDir,
     appDataDir,
+    undefined,
+    [],
+    replaceDirectoryEntryAtomically,
   );
 }
 
@@ -624,6 +634,7 @@ async function refreshBuiltInSharedSkillLinksUnlocked(
         homeDir,
         options.userDataDir,
         options.appDataDir,
+        options.replaceDirectoryEntryAtomically,
       );
       changed = linked.changed || changed;
       if (linked.warning) warnings.push(linked.warning);
@@ -746,6 +757,7 @@ async function refreshBuiltInClaudeSkillLinksUnlocked(
         options.appDataDir,
         claudeRuntimeTarget,
         [sharedPath, claudePalettePath],
+        options.replaceDirectoryEntryAtomically,
       );
       changed = linked.changed || changed;
       if (linked.warning) warnings.push(linked.warning);
@@ -937,6 +949,7 @@ async function projectBuiltInSkillLinksUnlocked(
     appDataDir: options.appDataDir,
     homeDir,
     descriptors,
+    replaceDirectoryEntryAtomically: options.replaceDirectoryEntryAtomically,
   });
   const claude = await refreshBuiltInClaudeSkillLinksUnlocked({
     userDataDir: options.userDataDir,
@@ -944,6 +957,7 @@ async function projectBuiltInSkillLinksUnlocked(
     homeDir,
     descriptors,
     allowUnresolvedManagedSharedTarget,
+    replaceDirectoryEntryAtomically: options.replaceDirectoryEntryAtomically,
   });
   return {
     changed: shared.changed || claude.changed,
@@ -1025,7 +1039,11 @@ export async function prepareBuiltInSkills(
       }
       if (committedBundleVerified) {
         try {
-          changed = await switchActiveBundle(root, committedBundle) || changed;
+          changed = await switchActiveBundle(
+            root,
+            committedBundle,
+            options.replaceDirectoryEntryAtomically,
+          ) || changed;
         } catch (error) {
           warnings.push(
             `could not recover the committed built-in Skill bundle: ${error instanceof Error ? error.message : String(error)}`,
@@ -1169,7 +1187,7 @@ export async function prepareBuiltInSkills(
       }
       await writeManifest(root, nextManifest);
       manifestAdvanced = true;
-      await switchActiveBundle(root, activeBundle);
+      await switchActiveBundle(root, activeBundle, options.replaceDirectoryEntryAtomically);
       changed = true;
       projectionSafe = true;
     } catch (error) {
@@ -1179,7 +1197,11 @@ export async function prepareBuiltInSkills(
         try {
           await writeManifest(root, manifest);
           if (manifest.schemaVersion === 3) {
-            await switchActiveBundle(root, manifest.activeBundle!);
+            await switchActiveBundle(
+              root,
+              manifest.activeBundle!,
+              options.replaceDirectoryEntryAtomically,
+            );
           } else {
             await removeActiveBundlePointer(root);
           }

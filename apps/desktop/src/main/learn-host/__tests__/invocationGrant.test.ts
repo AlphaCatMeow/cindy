@@ -6,18 +6,37 @@ import {
 } from '../invocationGrant.js';
 
 describe('Learn invocation grant', () => {
+  const grant = (sessionInstanceId = 'instance-1') => ({
+    version: 1 as const,
+    sessionInstanceId,
+    resolvedSkillPath: '/cindy/system-skills/v10/learn/SKILL.md',
+  });
   const createPersistentConsumer = (
-    readLatest: () => Promise<{ messageId: string; text: string }>,
+    readLatest: () => Promise<{
+      messageId: string;
+      text: string;
+      grant?: ReturnType<typeof grant> | null;
+    }>,
     consumed = new Set<string>(),
-  ) => createLearnInvocationGrantConsumer(
-    readLatest,
-    async (sessionId, messageId) => {
-      const key = `${sessionId}\0${messageId}`;
-      if (consumed.has(key)) return false;
-      consumed.add(key);
-      return true;
-    },
-  );
+    sessionInstanceId = 'instance-1',
+  ) => {
+    const consume = createLearnInvocationGrantConsumer(
+      async () => {
+        const latest = await readLatest();
+        return {
+          ...latest,
+          grant: latest.grant === undefined ? grant(sessionInstanceId) : latest.grant,
+        };
+      },
+      async (sessionId, messageId) => {
+        const key = `${sessionId}\0${messageId}`;
+        if (consumed.has(key)) return false;
+        consumed.add(key);
+        return true;
+      },
+    );
+    return (request: Parameters<typeof consume>[0]) => consume(request, sessionInstanceId);
+  };
 
   it.each([
     ['/learn', { input: '', sourceKind: 'session' }],
@@ -99,6 +118,34 @@ describe('Learn invocation grant', () => {
       ok: false,
       errorCode: 'USER_REQUEST_REQUIRED',
     });
+  });
+
+  it('rejects invocations without a main-attested dispatch snapshot', async () => {
+    const consume = createPersistentConsumer(async () => ({
+      messageId: 'message-1',
+      text: '/learn release flow',
+      grant: null,
+    }));
+
+    await expect(consume({
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext',
+    })).resolves.toMatchObject({ ok: false, errorCode: 'USER_REQUEST_REQUIRED' });
+  });
+
+  it('binds a dispatch snapshot to the exact in-memory Session instance', async () => {
+    const consume = createPersistentConsumer(async () => ({
+      messageId: 'message-1',
+      text: '/learn release flow',
+      grant: grant('old-instance'),
+    }));
+
+    await expect(consume({
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext',
+    })).resolves.toMatchObject({ ok: false, errorCode: 'USER_REQUEST_REQUIRED' });
   });
 
   it('rejects a persisted invocation after the consumer is recreated', async () => {

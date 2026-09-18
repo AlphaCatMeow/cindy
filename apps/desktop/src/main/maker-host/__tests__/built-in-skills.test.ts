@@ -39,7 +39,29 @@ function fixture() {
     _names: readonly string[],
     operation: () => Promise<T>,
   ): Promise<T> => operation();
-  return { bundledRoot, source, userDataDir, appDataDir, homeDir, withSharedMutation };
+  const replaceDirectoryEntryAtomically = process.platform === 'win32'
+    ? async (replacement: string, destination: string) => {
+      // Unit-test adapter only. The native helper has a dedicated Windows smoke
+      // test; keep these filesystem fixtures independent from Electron's app stub.
+      const previousTarget = await fs.promises.readlink(destination);
+      await fs.promises.unlink(destination);
+      try {
+        await fs.promises.rename(replacement, destination);
+      } catch (error) {
+        await fs.promises.symlink(previousTarget, destination, 'junction');
+        throw error;
+      }
+    }
+    : undefined;
+  return {
+    bundledRoot,
+    source,
+    userDataDir,
+    appDataDir,
+    homeDir,
+    withSharedMutation,
+    ...(replaceDirectoryEntryAtomically ? { replaceDirectoryEntryAtomically } : {}),
+  };
 }
 
 async function prepareAndProjectBuiltInSkills(
@@ -432,17 +454,15 @@ describe('built-in Skills', () => {
     const initialCreatorBytes = fs.realpathSync(initial.descriptors[0]!.absolutePath);
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
 
-    const originalRename = fs.promises.rename.bind(fs.promises);
-    vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
-      if (String(destination) === activePath && String(source).includes('.active.next-')) {
-        throw new Error('blocked active pointer switch');
-      }
-      await originalRename(source, destination);
-    });
-
     const failed = await prepareBuiltInSkills({
       ...input,
       bundleVersion: BUILT_IN_SKILLS_BUNDLE_VERSION + 1,
+      replaceDirectoryEntryAtomically: async (replacement, destination) => {
+        expect(replacement).toContain('.active.next-');
+        expect(destination).toBe(activePath);
+        expect(fs.existsSync(activePath)).toBe(true);
+        throw new Error('blocked active pointer switch');
+      },
     });
 
     expect(failed.projectionSafe).toBe(true);

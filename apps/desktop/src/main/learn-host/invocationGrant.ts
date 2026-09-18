@@ -19,6 +19,14 @@ export type LearnInvocationGrantResult =
 interface LatestUserInvocation {
   messageId: string;
   text: string;
+  grant: CindyLearnInvocationGrant | null;
+}
+
+/** Main-owned snapshot of the Skill winner captured for one accepted user turn. */
+export interface CindyLearnInvocationGrant {
+  version: 1;
+  sessionInstanceId: string;
+  resolvedSkillPath: string;
 }
 
 type ReadLatestUserInvocation = (
@@ -28,6 +36,7 @@ type ReadLatestUserInvocation = (
 type ConsumeUserInvocation = (
   sessionId: string,
   messageId: string,
+  sessionInstanceId: string,
 ) => Promise<boolean>;
 
 const messageRowid = sql<number>`"messages"."rowid"`;
@@ -77,8 +86,11 @@ function matchesInvocation(
 export function createLearnInvocationGrantConsumer(
   readLatestUserInvocation: ReadLatestUserInvocation,
   consumeUserInvocation: ConsumeUserInvocation,
-): (request: StartSkillLearningParams) => Promise<LearnInvocationGrantResult> {
-  return async (request) => {
+): (
+  request: StartSkillLearningParams,
+  sessionInstanceId: string | undefined,
+) => Promise<LearnInvocationGrantResult> {
+  return async (request, sessionInstanceId) => {
     let latest: LatestUserInvocation | null;
     try {
       latest = await readLatestUserInvocation(request.callerSessionId);
@@ -90,7 +102,15 @@ export function createLearnInvocationGrantConsumer(
       };
     }
     const invocation = latest ? parseDirectLearnInvocation(latest.text) : null;
-    if (!latest || !invocation || !matchesInvocation(invocation, request)) {
+    if (
+      !latest
+      || !invocation
+      || !sessionInstanceId
+      || latest.grant?.version !== 1
+      || latest.grant.sessionInstanceId !== sessionInstanceId
+      || !latest.grant.resolvedSkillPath
+      || !matchesInvocation(invocation, request)
+    ) {
       return {
         ok: false,
         errorCode: 'USER_REQUEST_REQUIRED',
@@ -102,6 +122,7 @@ export function createLearnInvocationGrantConsumer(
       consumed = await consumeUserInvocation(
         request.callerSessionId,
         latest.messageId,
+        sessionInstanceId,
       );
     } catch (error) {
       return {
@@ -121,6 +142,24 @@ export function createLearnInvocationGrantConsumer(
   };
 }
 
+function parseLearnInvocationGrant(agentMeta: string | null): CindyLearnInvocationGrant | null {
+  if (!agentMeta) return null;
+  try {
+    const value = (JSON.parse(agentMeta) as { cindyLearnInvocation?: unknown }).cindyLearnInvocation;
+    if (!value || typeof value !== 'object') return null;
+    const grant = value as Partial<CindyLearnInvocationGrant>;
+    return grant.version === 1
+      && typeof grant.sessionInstanceId === 'string'
+      && grant.sessionInstanceId.length > 0
+      && typeof grant.resolvedSkillPath === 'string'
+      && grant.resolvedSkillPath.length > 0
+      ? grant as CindyLearnInvocationGrant
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readLatestUserInvocation(
   sessionId: string,
 ): Promise<LatestUserInvocation | null> {
@@ -129,7 +168,7 @@ async function readLatestUserInvocation(
     throw Object.assign(new Error('DbClient not ready'), { code: 'HOST_NOT_READY' });
   }
   const [row] = await dbClient.drizzle
-    .select({ id: messages.id, content: messages.content })
+    .select({ id: messages.id, content: messages.content, agentMeta: messages.agentMeta })
     .from(messages)
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
     .where(
@@ -147,12 +186,14 @@ async function readLatestUserInvocation(
   return {
     messageId: row.id,
     text: visibleMessageTextForConversationSearch('user', row.content),
+    grant: parseLearnInvocationGrant(row.agentMeta),
   };
 }
 
 async function consumeUserInvocation(
   sessionId: string,
   messageId: string,
+  sessionInstanceId: string,
 ): Promise<boolean> {
   const dbClient = tryGetDbClient();
   if (!dbClient) {
@@ -175,8 +216,11 @@ async function consumeUserInvocation(
                 json_type(agent_meta) = 'object'
                 AND json_type(agent_meta, '$.cindyLearnInvocationConsumed') IS NULL
               ELSE 0
-            END`,
-    [messageId, sessionId],
+            END
+        AND json_extract(agent_meta, '$.cindyLearnInvocation.version') = 1
+        AND json_extract(agent_meta, '$.cindyLearnInvocation.sessionInstanceId') = ?
+        AND json_type(agent_meta, '$.cindyLearnInvocation.resolvedSkillPath') = 'text'`,
+    [messageId, sessionId, sessionInstanceId],
   );
   return result.changes === 1;
 }
