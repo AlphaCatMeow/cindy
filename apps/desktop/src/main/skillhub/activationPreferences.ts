@@ -7,6 +7,7 @@ import { createOverrideSettingsFile } from '../maker-host/override-settings-file
 import {
   BUILT_IN_LEARN_SKILL_NAME,
   builtInSkillDescriptors,
+  canonicalBuiltInSkillActivationPath,
 } from '../maker-host/built-in-skills';
 
 /** Device/profile-local user intent; independent of cloud installs and account changes. */
@@ -20,6 +21,11 @@ export function skillActivationKey(source: string): string {
   let resolved = path.resolve(source);
   try { resolved = fs.realpathSync.native(resolved); } catch { /* Allow cleanup after removal. */ }
   if (path.basename(resolved).toLowerCase() === 'skill.md') resolved = path.dirname(resolved);
+  resolved = canonicalBuiltInSkillActivationPath(
+    resolved,
+    app.getPath('userData'),
+    app.getPath('appData'),
+  );
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 

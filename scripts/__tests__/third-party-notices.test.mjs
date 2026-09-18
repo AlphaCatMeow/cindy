@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -306,5 +308,75 @@ test("all shipped desktop notices inventory the bundled skill creator", () => {
     const notice = read(file).replace(/\r\n/g, "\n");
     assert.ok(notice.includes(license), `${file} includes the Apache text`);
     assert.match(notice, /OpenAI Codex skill-creator \(adapted\)/);
+  }
+});
+
+test("all shipped desktop notices inventory the Skill creator's vendored PyYAML", () => {
+  const license = read(
+    "apps/desktop/resources/system-skills/cindy-skill-creator/scripts/_vendor/PyYAML-LICENSE.txt",
+  ).replace(/\r\n/g, "\n").trim();
+  for (const artifact of ["desktop-win", "desktop-macos", "desktop-linux"]) {
+    const notice = read(`docs/legal/notices/${artifact}.txt`).replace(/\r\n/g, "\n");
+    assert.ok(notice.includes(license), `${artifact} includes the PyYAML MIT text`);
+    const sbom = JSON.parse(read(`docs/legal/notices/sbom/${artifact}.spdx.json`));
+    const component = sbom.packages.find(
+      pkg => pkg.name === "PyYAML (vendored pure-Python runtime)",
+    );
+    assert.ok(component, `${artifact} inventories PyYAML`);
+    assert.equal(component.versionInfo, "6.0.3");
+    assert.equal(component.licenseDeclared, "MIT");
+  }
+  for (const file of ["apps/desktop/resources/THIRD-PARTY-NOTICES.txt", "docs/legal/notices/THIRD-PARTY-NOTICES.txt"]) {
+    const notice = read(file).replace(/\r\n/g, "\n");
+    assert.ok(notice.includes(license), `${file} includes the PyYAML MIT text`);
+    assert.match(notice, /PyYAML \(vendored pure-Python runtime\)/);
+  }
+});
+
+test("the bundled Skill validator accepts standard multiline YAML without external packages", t => {
+  const candidates = [
+    ["python3", []],
+    ["python", []],
+    ["py", ["-3"]],
+  ];
+  const python = candidates.find(([command, prefix]) => {
+    const probe = spawnSync(command, [...prefix, "-S", "-c", "print('cindy-python')"], {
+      encoding: "utf8",
+    });
+    return probe.status === 0 && probe.stdout.trim() === "cindy-python";
+  });
+  if (!python) {
+    t.skip("Python 3 is unavailable");
+    return;
+  }
+
+  const skillDir = fs.mkdtempSync(path.join(os.tmpdir(), "cindy-skill-validator-"));
+  try {
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---
+name: yaml-regression
+description: "Create and update
+  skills safely"
+metadata:
+  owner: "Cindy
+    team"
+  labels: [creator, validation]
+---
+# YAML regression
+`,
+    );
+    const [command, prefix] = python;
+    const validator = path.join(
+      repoRoot,
+      "apps/desktop/resources/system-skills/cindy-skill-creator/scripts/quick_validate.py",
+    );
+    const result = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /Skill is valid!/);
+  } finally {
+    fs.rmSync(skillDir, { recursive: true, force: true });
   }
 });

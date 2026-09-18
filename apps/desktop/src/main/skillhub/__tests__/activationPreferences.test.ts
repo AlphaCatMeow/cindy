@@ -45,7 +45,7 @@ describe('Skill activation preferences', () => {
     await reloaded.setCindySkillEnabled(b, true);
     expect(reloaded.readDisabledSkillPaths()).toEqual([]);
   });
-  it('reports the built-in Learn Skill activation state from its stable physical path', async () => {
+  it('reports the built-in Learn Skill activation state from its stable identity', async () => {
     const prefs = await import('../activationPreferences');
     const descriptors = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root);
     const learn = descriptors.find((descriptor) => descriptor.name === 'learn')!;
@@ -54,6 +54,45 @@ describe('Skill activation preferences', () => {
     expect(prefs.isCindyLearnSkillEnabled()).toBe(false);
     await prefs.setCindySkillEnabled(learn.absolutePath, true);
     expect(prefs.isCindyLearnSkillEnabled()).toBe(true);
+  });
+  it('keeps built-in activation intent across immutable bundle revisions', async () => {
+    const prefs = await import('../activationPreferences');
+    const versions = path.join(root, 'Cindy', 'shared-system-skills', '.versions');
+    const oldSkill = path.join(
+      versions,
+      'v6-0123456789abcdef-11111111-1111-1111-1111-111111111111',
+      'learn',
+    );
+    const newSkill = path.join(
+      versions,
+      'v7-fedcba9876543210-22222222-2222-2222-2222-222222222222',
+      'learn',
+    );
+    fs.mkdirSync(oldSkill, { recursive: true });
+    fs.mkdirSync(newSkill, { recursive: true });
+
+    expect(prefs.skillActivationKey(oldSkill)).toBe(prefs.skillActivationKey(newSkill));
+    await prefs.setCindySkillEnabled(oldSkill, false);
+    expect(prefs.isCindySkillEnabled(newSkill)).toBe(false);
+    await prefs.setCindySkillEnabled(newSkill, true);
+  });
+  it('does not canonicalize a user-owned directory that resembles a built-in version', async () => {
+    const prefs = await import('../activationPreferences');
+    const versions = path.join(root, 'project', '.versions');
+    const oldSkill = path.join(
+      versions,
+      'v6-0123456789abcdef-11111111-1111-1111-1111-111111111111',
+      'learn',
+    );
+    const newSkill = path.join(
+      versions,
+      'v7-fedcba9876543210-22222222-2222-2222-2222-222222222222',
+      'learn',
+    );
+    fs.mkdirSync(oldSkill, { recursive: true });
+    fs.mkdirSync(newSkill, { recursive: true });
+
+    expect(prefs.skillActivationKey(oldSkill)).not.toBe(prefs.skillActivationKey(newSkill));
   });
   it('also disables native runtime projections when the Cindy built-in Skill is disabled', async () => {
     const prefs = await import('../activationPreferences');

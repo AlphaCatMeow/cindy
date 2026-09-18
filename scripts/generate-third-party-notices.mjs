@@ -718,6 +718,19 @@ function buildDesktopCommonEntries(apacheText, sharpPackageNames) {
     }),
   );
 
+  // PyYAML — vendored pure-Python parser used by the bundled Skill tools.
+  entries.push(
+    bundledComponent({
+      name: "PyYAML (vendored pure-Python runtime)",
+      version: "6.0.3",
+      license: "MIT",
+      url: "https://github.com/yaml/pyyaml/tree/6.0.3",
+      licenseText: readBundledLicense(
+        "apps/desktop/resources/system-skills/cindy-skill-creator/scripts/_vendor/PyYAML-LICENSE.txt",
+      ),
+    }),
+  );
+
   // pi coding agent — 运行时从 CDN 下载到 userData，不进入安装包
   entries.push(
     bundledComponent({

@@ -73,13 +73,21 @@ afterEach(() => {
 });
 
 describe('built-in Skills', () => {
-  it('materializes versioned bytes at a stable path and exposes them through the shared root', async () => {
+  it('materializes immutable versioned bytes and exposes the active version', async () => {
     const input = fixture();
     const first = await prepareAndProjectBuiltInSkills(input);
     const descriptor = builtInSkillDescriptors(input.userDataDir, input.appDataDir)[0]!;
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(root, '.cindy-system-skills.json'), 'utf8'),
+    );
     const link = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
     expect(first.changed).toBe(true);
     expect(first.warnings).toEqual([]);
+    expect(manifest).toMatchObject({ schemaVersion: 3, bundleVersion: 7 });
+    expect(descriptor.absolutePath).toBe(
+      path.join(root, '.versions', manifest.activeBundle, 'cindy-skill-creator'),
+    );
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(descriptor.absolutePath));
     expect(fs.realpathSync(descriptor.nativeClaudePath)).toBe(
       fs.realpathSync(descriptor.absolutePath),
@@ -100,18 +108,26 @@ describe('built-in Skills', () => {
 
     fs.writeFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), '# Tampered\n');
     const repaired = await prepareAndProjectBuiltInSkills(input);
+    const repairedDescriptor = repaired.descriptors.find(
+      (item) => item.name === 'cindy-skill-creator',
+    )!;
     expect(repaired.changed).toBe(true);
-    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
+    expect(repairedDescriptor.absolutePath).not.toBe(descriptor.absolutePath);
+    expect(fs.readFileSync(path.join(repairedDescriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       '# Creator',
     );
+    expect(fs.existsSync(path.join(descriptor.absolutePath, 'SKILL.md'))).toBe(true);
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
-    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 7 });
+    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 8 });
     expect(updated.changed).toBe(true);
-    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
+    const updatedDescriptor = updated.descriptors.find(
+      (item) => item.name === 'cindy-skill-creator',
+    )!;
+    expect(fs.readFileSync(path.join(updatedDescriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       'Updated',
     );
-    expect(fs.realpathSync(link)).toBe(fs.realpathSync(descriptor.absolutePath));
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(updatedDescriptor.absolutePath));
   });
 
   it('does not let an older or conflicting bundle overwrite newer shared bytes', async () => {
@@ -138,10 +154,7 @@ describe('built-in Skills', () => {
     const input = fixture();
     const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
     const descriptor = newer.descriptors[0]!;
-    const manifestPath = path.join(
-      path.dirname(descriptor.absolutePath),
-      '.cindy-system-skills.json',
-    );
+    const manifestPath = path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.cindy-system-skills.json');
     const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
     fs.writeFileSync(manifestPath, '{ invalid json');
     fs.writeFileSync(
@@ -160,10 +173,7 @@ describe('built-in Skills', () => {
     const input = fixture();
     const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
     const descriptor = newer.descriptors[0]!;
-    const manifestPath = path.join(
-      path.dirname(descriptor.absolutePath),
-      '.cindy-system-skills.json',
-    );
+    const manifestPath = path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.cindy-system-skills.json');
     const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
     fs.unlinkSync(manifestPath);
 
@@ -178,10 +188,7 @@ describe('built-in Skills', () => {
     const input = fixture();
     const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 5 });
     const descriptor = newer.descriptors[0]!;
-    const manifestPath = path.join(
-      path.dirname(descriptor.absolutePath),
-      '.cindy-system-skills.json',
-    );
+    const manifestPath = path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.cindy-system-skills.json');
     const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
     fs.renameSync(manifestPath, `${manifestPath}.bak`);
     fs.writeFileSync(
@@ -207,12 +214,9 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
     );
 
-    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 7 });
-    const manifestPath = path.join(
-      path.dirname(partial.descriptors[0]!.absolutePath),
-      '.cindy-system-skills.json',
-    );
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(6);
+    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+    const manifestPath = path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.cindy-system-skills.json');
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(7);
     expect(partial.warnings.join('\n')).toContain('missing SKILL.md');
     expect(
       fs.readFileSync(path.join(partial.descriptors[0]!.absolutePath, 'SKILL.md'), 'utf8'),
@@ -222,9 +226,9 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
       path.join(input.bundledRoot, 'learn', 'SKILL.md'),
     );
-    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 7 });
+    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
     expect(retried.warnings).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(7);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(8);
     expect(
       fs.readFileSync(
         path.join(
@@ -236,35 +240,109 @@ describe('built-in Skills', () => {
     ).toBe('Learn v2\n');
   });
 
-  it('restores the complete previous bundle when the final directory swap fails', async () => {
+  it('keeps the active bundle readable when publishing a new version directory fails', async () => {
     const input = fixture();
     const initial = await prepareBuiltInSkills(input);
     const creator = initial.descriptors.find((descriptor) => descriptor.name === 'cindy-skill-creator')!;
     const learn = initial.descriptors.find((descriptor) => descriptor.name === 'learn')!;
-    const root = path.dirname(creator.absolutePath);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
     const manifestPath = path.join(root, '.cindy-system-skills.json');
     const initialManifest = fs.readFileSync(manifestPath, 'utf8');
+    const initialActiveBundle = JSON.parse(initialManifest).activeBundle as string;
     const initialCreator = fs.readFileSync(path.join(creator.absolutePath, 'SKILL.md'), 'utf8');
     const initialLearn = fs.readFileSync(path.join(learn.absolutePath, 'SKILL.md'), 'utf8');
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
     fs.writeFileSync(path.join(input.bundledRoot, 'learn', 'SKILL.md'), 'Learn v2\n');
 
-    const pending = path.join(path.dirname(root), `.${path.basename(root)}.pending`);
+    const versionsRoot = path.join(root, '.versions');
     const originalRename = fs.promises.rename.bind(fs.promises);
+    let activeBundleWasReadable = false;
     vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
-      if (source === pending && destination === root) throw new Error('blocked final swap');
+      if (
+        path.dirname(String(source)) === versionsRoot &&
+        path.basename(String(source)).endsWith('.pending') &&
+        path.dirname(String(destination)) === versionsRoot
+      ) {
+        activeBundleWasReadable = fs.existsSync(path.join(creator.absolutePath, 'SKILL.md'));
+        throw new Error('blocked version publish');
+      }
       await originalRename(source, destination);
     });
 
-    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 7 });
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
 
     expect(failed.changed).toBe(false);
-    expect(failed.warnings.join('\n')).toContain('blocked final swap');
+    expect(failed.warnings.join('\n')).toContain('blocked version publish');
+    expect(activeBundleWasReadable).toBe(true);
     expect(fs.readFileSync(manifestPath, 'utf8')).toBe(initialManifest);
     expect(fs.readFileSync(path.join(creator.absolutePath, 'SKILL.md'), 'utf8')).toBe(initialCreator);
     expect(fs.readFileSync(path.join(learn.absolutePath, 'SKILL.md'), 'utf8')).toBe(initialLearn);
-    expect(fs.existsSync(pending)).toBe(false);
-    expect(fs.existsSync(path.join(path.dirname(root), `.${path.basename(root)}.backup`))).toBe(false);
+    expect(fs.readdirSync(versionsRoot)).toEqual([initialActiveBundle]);
+  });
+
+  it('keeps the previous version active when the manifest pointer switch fails', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const creator = initial.descriptors.find((descriptor) => descriptor.name === 'cindy-skill-creator')!;
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const versionsRoot = path.join(root, '.versions');
+    const manifestPath = path.join(root, '.cindy-system-skills.json');
+    const initialManifest = fs.readFileSync(manifestPath, 'utf8');
+    const initialActiveBundle = JSON.parse(initialManifest).activeBundle as string;
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
+
+    const originalRename = fs.renameSync.bind(fs);
+    vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+      if (String(destination) === manifestPath && String(source).endsWith('.tmp')) {
+        throw new Error('blocked manifest switch');
+      }
+      originalRename(source, destination);
+    });
+
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+
+    expect(failed.changed).toBe(false);
+    expect(failed.warnings.join('\n')).toContain('blocked manifest switch');
+    expect(fs.readFileSync(manifestPath, 'utf8')).toBe(initialManifest);
+    expect(fs.readFileSync(path.join(creator.absolutePath, 'SKILL.md'), 'utf8')).not.toContain(
+      'Creator v2',
+    );
+    expect(failed.descriptors[0]!.absolutePath).toBe(creator.absolutePath);
+    expect(fs.readdirSync(versionsRoot)).toEqual([initialActiveBundle]);
+  });
+
+  it('creates a durable empty manifest before publishing the first version', async () => {
+    const input = fixture();
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const manifestPath = path.join(root, '.cindy-system-skills.json');
+    const originalRename = fs.renameSync.bind(fs);
+    let manifestWrites = 0;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+      if (String(destination) === manifestPath && String(source).endsWith('.tmp')) {
+        manifestWrites += 1;
+        if (manifestWrites === 2) throw new Error('blocked first activation');
+      }
+      originalRename(source, destination);
+    });
+
+    const failed = await prepareBuiltInSkills(input);
+
+    expect(failed.changed).toBe(false);
+    expect(failed.warnings.join('\n')).toContain('blocked first activation');
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8'))).toEqual({
+      schemaVersion: 2,
+      bundleVersion: 0,
+      fingerprints: {},
+    });
+
+    rename.mockRestore();
+    const retried = await prepareBuiltInSkills(input);
+    expect(retried.changed).toBe(true);
+    expect(retried.warnings).toEqual([]);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8'))).toMatchObject({
+      schemaVersion: 3,
+      bundleVersion: 7,
+    });
   });
 
   it('keeps a user-owned same-name Skill while retaining the Cindy copy', async () => {
