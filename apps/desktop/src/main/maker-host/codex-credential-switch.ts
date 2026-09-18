@@ -210,6 +210,13 @@ export function isCodexThreadModelProviderIdentityMismatch(
   const actualIsAppliedCustomProviderIdentity = isAppliedCodexCustomProviderIdentity(
     actualThreadModelProviderId,
   );
+  // Older app-server versions may report the logical provider id directly
+  // (for example `openai`) instead of Cindy's materialized `cindy_openai`
+  // alias. When the target logical route is the same provider, that raw id is
+  // a matching identity; only a route crossing needs a rebuild.
+  const actualMatchesTargetLogicalProvider =
+    actualThreadModelProviderId !== null &&
+    actualThreadModelProviderId === nextProviderId;
   // The app-server may report a provider id that is not one of Cindy's
   // materialized identities (for example `openai`, Azure, or a custom provider).
   // It is still a sticky thread identity. Treating those ids as unknown lets a
@@ -218,6 +225,7 @@ export function isCodexThreadModelProviderIdentityMismatch(
   // A missing id is the only case where there is no identity to compare.
   return (
     !actualIsAppliedCustomProviderIdentity &&
+    !actualMatchesTargetLogicalProvider &&
     actualThreadModelProviderId !== null &&
     expectedThreadModelProviderId !== null &&
     actualThreadModelProviderId !== expectedThreadModelProviderId
