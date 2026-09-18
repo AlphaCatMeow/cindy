@@ -54,8 +54,11 @@ import { listCustomMcpRuntimeGenerations } from './custom-mcp-store.js';
 
 import { createMessage } from '../localDb/ipc/messages.js';
 import { createCindyMakeMcpProvider } from '../cindy-make/mcpProvider.js';
+import { captureMakeHistoryStore } from '../cindy-make/historyOwner.js';
+import { captureMakeHistoryCompletion } from '../cindy-make/historyCapture.js';
+import { captureDataOwnerBroadcastScope, isDataOwnerBroadcastScopeCurrent } from '../device-link/broadcast-tap.js';
 import {
-  commitCindyMakeChanges,
+  collectCindyMakeChanges,
   createCindyMakeCompletionTracker,
 } from '../cindy-make/completion.js';
 import { isCindyMakeWorktreePath } from '../cindy-make/taskWorkspace.js';
@@ -1067,28 +1070,38 @@ export function getMaker(): Maker {
       collectFacts: async (sessionId) => {
         const userData = app.getPath('userData');
         const meta = await _maker?.getSessionMeta(sessionId);
-        // Only a worktree Cindy created for this task may be committed on the
-        // task's behalf; anything else is not a Cindy Make workspace.
+        // Finalize only the managed task branch; official/personal integration is a separate action.
         if (!meta?.workDir || !isCindyMakeWorktreePath(userData, meta.workDir)) {
           throw new Error('session working directory is not a Cindy Make worktree');
         }
         const env = await createMakeToolchainEnvironment(userData);
-        const title = meta.title?.trim();
         return cindyMakeManager.withProject(makeSourceRoot(userData), () =>
-          commitCindyMakeChanges(
-            (args) =>
-              runSourceGit(env.processEnvironment(), args, meta.workDir, AbortSignal.timeout(60_000)),
-            `Cindy Make: ${title || sessionId}`,
+          collectCindyMakeChanges(
+            (args, cwd, indexFile) =>
+              runSourceGit(
+                { ...env.processEnvironment(), ...(indexFile ? { GIT_INDEX_FILE: indexFile } : {}) },
+                args, cwd, AbortSignal.timeout(60_000),
+              ),
+            userData,
+            meta.workDir,
           ),
         );
       },
-      persist: (sessionId, meta) =>
-        createMessage(sessionId, {
-          clientId: randomUUID(),
+      persist: async (sessionId, meta) => {
+        const scope = captureDataOwnerBroadcastScope();
+        const history = captureMakeHistoryStore();
+        const session = await _maker?.getSessionMeta(sessionId);
+        if (!isDataOwnerBroadcastScopeCurrent(scope)) return;
+        const clientId = randomUUID();
+        await createMessage(sessionId, {
+          clientId,
           role: 'assistant',
           content: '',
           agentMeta: { cindyMakeCompletion: meta },
-        }).then(() => undefined),
+        });
+        if (isDataOwnerBroadcastScopeCurrent(scope) && session?.workDir)
+          captureMakeHistoryCompletion(history, path.basename(session.workDir), clientId, meta);
+      },
       logger: desktopMakerLogger,
     });
     const cindyMakeProvider = createCindyMakeMcpProvider({
