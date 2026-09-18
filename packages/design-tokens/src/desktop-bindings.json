@@ -3310,7 +3310,8 @@
         "tooltip-text": "themes.solarized-light.tooltip-text",
         "update-btn-border": "themes.solarized-light.update-btn-border",
         "update-btn-text": "themes.solarized-light.update-btn-text",
-        "form-field-hint": "themes.solarized-light.form-field-hint"
+        "form-field-hint": "themes.solarized-light.form-field-hint",
+        "search-match-bg": "themes.solarized-light.search-match-bg"
       },
       "retained": {},
       "type": "light"

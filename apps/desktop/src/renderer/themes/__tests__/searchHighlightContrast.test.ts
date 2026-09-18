@@ -21,10 +21,9 @@ describe('Search highlight contrast', () => {
     expect(contrastRatio(active, color(theme, 'search-match-bg'))).toBeGreaterThanOrEqual(1.4);
   });
 
-  it.each(['default-light', 'default-dark', 'cindy-light', 'cindy-dark'])(
-    '%s keeps ordinary matches readable and visible on content surfaces',
-    (id) => {
-      const theme = builtinThemes[id];
+  it.each(Object.values(builtinThemes))(
+    '$id keeps ordinary matches readable and visible on content surfaces',
+    (theme) => {
       const background = color(theme, 'search-match-bg');
       expect(contrastRatio(background, color(theme, 'search-match-fg'))).toBeGreaterThanOrEqual(4.5);
       for (const surface of ['surface', 'surface-elevated']) {
