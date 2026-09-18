@@ -91,6 +91,7 @@ import { useRemoteDesktopSafety } from "./useRemoteDesktopSafety";
 import { useVideoSettingsPreference } from "./useVideoSettingsPreference";
 import { PermissionGuide } from "./PermissionGuide";
 import { RemoteDesktopBackButton } from "./RemoteDesktopBackButton";
+import { RemoteDesktopWindows } from "./RemoteDesktopWindows";
 import { RemoteDesktopNetworkStatus } from "./RemoteDesktopNetworkStatus";
 import type { DesktopNetworkStats } from "./networkStats";
 import {
@@ -233,6 +234,10 @@ export default function RemoteDesktopScreen() {
   const connecting = useRef(false);
   const ready = useRef(false);
   const streaming = useRef(false);
+  // A relay route can briefly disappear while this viewer's RTC stream lives.
+  // Keep only this lease for at most 8 s (host lease is 12 s); never reset links
+  // shared by other tasks or devices to recover a desktop viewer.
+  const transientFailureAt = useRef<number | null>(null);
   const mediaAttempt = useRef<string | null>(null);
   const receiveWindow = useRef({
     since: Date.now(),
@@ -245,6 +250,10 @@ export default function RemoteDesktopScreen() {
   const unlockFrame = useRef<((presented: boolean) => void) | null>(null);
   const inputBusy = useRef<string | null>(null);
   const [lease, setLease] = useState<RemoteDesktopLease | null>(null);
+  const [windowsOpen, setWindowsOpen] = useState(false);
+  useEffect(() => {
+    setWindowsOpen(false);
+  }, [lease?.lease, lease?.controlling, focused]);
   const [viewerDisplayApplied, setViewerDisplayApplied] = useState(false);
   const [viewerViewport, setViewerViewport] = useState({ width: 0, height: 0 });
   const viewportGeneration = useRef(0);
@@ -509,6 +518,7 @@ export default function RemoteDesktopScreen() {
       timing.current?.("stopped");
       timing.current = null;
       generation.current++;
+      transientFailureAt.current = null;
       unlockFrame.current?.(false);
       unlockFrame.current = null;
       presentation.current = false;
@@ -748,6 +758,17 @@ export default function RemoteDesktopScreen() {
               capsRef.current = { deviceId, value: result };
               setHostCaps({ deviceId, value: result });
               if (supportsAutoUnlock(result.platform)) {
+                // Linux capture may be unavailable until its locker releases the session.
+                if (result.platform === "linux") {
+                  return securityRef.current.maybeUnlock(async () => {
+                    if (
+                      current !== generation.current ||
+                      !focusedRef.current ||
+                      !recovery.current.enabled
+                    )
+                      throw new Error("CREDENTIAL_CANCELLED");
+                  });
+                }
                 const firstFrame = new Promise<boolean>((resolve) => {
                   unlockFrame.current = resolve;
                 });
@@ -981,6 +1002,7 @@ export default function RemoteDesktopScreen() {
           // when a local transition timed out, retry a release or restore the
           // local bit so a held key cannot stay down behind a view-only phone.
           if (active.current !== current || presentation.current) return;
+          transientFailureAt.current = null;
           if (result.controlling === false) {
             // startInput can still be settling while this heartbeat was in
             // flight. Clearing a pending take-control here would leave later
@@ -998,6 +1020,14 @@ export default function RemoteDesktopScreen() {
             applyConfirmedControl(current, true);
         })
         .catch((cause) => {
+          if (active.current !== current) return;
+          if (
+            streaming.current &&
+            remoteDesktopErrorCode(cause) === "DEVICE_OFFLINE"
+          ) {
+            transientFailureAt.current ??= Date.now();
+            if (Date.now() - transientFailureAt.current < 8000) return;
+          }
           // A missing reply does not prove renewal failed; the next interval
           // retries within the lease. Explicit host revocation still stops us.
           if (
@@ -1180,8 +1210,23 @@ export default function RemoteDesktopScreen() {
     t,
   ]);
   useEffect(() => {
-    if (link.status !== "online" && !presentation.current) pause();
-    else if (!active.current) void connectRef.current();
+    if (link.status !== "online" && !presentation.current) {
+      if (!active.current || !streaming.current) {
+        pause();
+        return;
+      }
+      transientFailureAt.current ??= Date.now();
+      const lease = active.current;
+      const timer = setTimeout(
+        () => {
+          if (active.current === lease && linkRef.current.status !== "online")
+            pause();
+        },
+        Math.max(0, 8000 - (Date.now() - transientFailureAt.current)),
+      );
+      return () => clearTimeout(timer);
+    }
+    if (!active.current) void connectRef.current();
   }, [link.status, pause]);
 
   const onMessage = (event: WebViewMessageEvent) => {
@@ -1678,6 +1723,21 @@ export default function RemoteDesktopScreen() {
           .map((code) => ({ kind: "key", code, down: false })),
       ],
     });
+  const workspaceAction = (
+    action: "workspaceLeft" | "workspaceRight" | "omarchyMenu",
+  ) => {
+    if (!lease?.controlling) return;
+    const current = active.current;
+    void request({ op: "windowAction", action, lease: lease.lease }).catch(
+      () => {
+        if (active.current === current)
+          Alert.alert(
+            t(`remoteDesktop.${action}`),
+            t("remoteDesktop.settingFailed"),
+          );
+      },
+    );
+  };
   const button = (
     label: string,
     onPress: () => void,
@@ -1957,6 +2017,20 @@ export default function RemoteDesktopScreen() {
               top={edgePadding.paddingTop + spacing.sm}
             />
           )}
+          {windowsOpen &&
+            focused &&
+            lease?.controlling &&
+            caps?.windowActions && (
+              <RemoteDesktopWindows
+                key={lease.lease}
+                lease={lease.lease}
+                request={request}
+                caption={deviceName}
+                landscape={landscape}
+                topInset={edgePadding.paddingTop}
+                onClose={() => setWindowsOpen(false)}
+              />
+            )}
           {(operations || Platform.OS === "ios") && (
             <View
               pointerEvents="box-none"
@@ -1976,6 +2050,7 @@ export default function RemoteDesktopScreen() {
             >
               <RemoteDesktopPanel
                 toolbarOnLeft={toolbarOnLeft}
+                toolbarActionCount={caps?.omarchyMenu ? 5 : 4}
                 visible={operations && focused}
                 landscape={landscape}
                 topInset={edgePadding.paddingTop}
@@ -2122,20 +2197,55 @@ export default function RemoteDesktopScreen() {
           >
             <RemoteDesktopToolbar
               landscape={landscape}
+              onWorkspaceLeft={
+                caps?.workspaceNavigation
+                  ? () => workspaceAction("workspaceLeft")
+                  : undefined
+              }
+              onWorkspaceRight={
+                caps?.workspaceNavigation
+                  ? () => workspaceAction("workspaceRight")
+                  : undefined
+              }
+              onOmarchyMenu={
+                caps?.omarchyMenu
+                  ? () => workspaceAction("omarchyMenu")
+                  : undefined
+              }
               canControl={Boolean(lease?.controlling)}
               keyboard={keyboard}
               operations={operations}
-              onWindows={() =>
+              onWindows={() => {
+                if (caps?.windowActions) {
+                  setOperations(false);
+                  Keyboard.dismiss();
+                  setKeyboard(false);
+                  setWindowsOpen(true);
+                  return;
+                }
                 shortcut(
                   caps?.platform === "darwin"
                     ? ["ControlLeft", "ArrowUp"]
                     : ["MetaLeft", "Tab"],
-                )
-              }
+                );
+              }}
               onDesktop={() =>
-                shortcut(
-                  caps?.platform === "darwin" ? ["F11"] : ["MetaLeft", "KeyD"],
-                )
+                caps?.windowActions && lease?.controlling
+                  ? void request({
+                      op: "windowAction",
+                      action: "desktop",
+                      lease: lease.lease,
+                    }).catch(() =>
+                      Alert.alert(
+                        t("remoteDesktop.showDesktop"),
+                        t("remoteDesktop.settingFailed"),
+                      ),
+                    )
+                  : shortcut(
+                      caps?.platform === "darwin"
+                        ? ["F11"]
+                        : ["MetaLeft", "KeyD"],
+                    )
               }
               onKeyboard={() => {
                 setOperations(false);

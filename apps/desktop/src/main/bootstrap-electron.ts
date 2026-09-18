@@ -3972,7 +3972,7 @@ const createWindow = () => {
       restoreFullscreen: shouldRestoreMacFullscreen,
     });
     refreshWindowsAppBadge();
-    if (!app.isPackaged) markDesktopDevWindowReady();
+    if (!app.isPackaged) markDesktopDevWindowReady(mainWindow.webContents.getOSProcessId());
     void runComputerUseSmokeIfRequested();
     // 资源用量窗口不应与主窗口首帧争 CPU。主窗口可见后再后台完成 BrowserWindow、
     // renderer 和首份进程快照预热；回调绑定当代主窗口，重建/退出后不会创建孤儿窗。

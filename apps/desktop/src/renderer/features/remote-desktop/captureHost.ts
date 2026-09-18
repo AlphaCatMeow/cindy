@@ -9,9 +9,15 @@ import {
 } from '@cindy/device-link';
 import type { DesktopCaptureApi } from '../../../shared/remoteDesktop';
 import { nativeCaptureStream } from './nativeCaptureStream';
+import { PortalCaptureStream } from './portalCaptureStream';
+import { nativeAudioStream } from './nativeAudioStream';
 
 /** Runs exclusively in the isolated capture renderer; never import into the chat entry. */
 export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
+  const portal = new PortalCaptureStream(() => {
+    stop();
+    void api.stop().catch(() => {});
+  });
   let peer: RTCPeerConnection | null = null;
   let stream: MediaStream | null = null;
   let generation = 0;
@@ -19,6 +25,7 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
   let latestCursor: RemoteDesktopCursor | null | undefined;
   let cursorTimer: ReturnType<typeof setInterval> | null = null;
   let native: Awaited<ReturnType<typeof nativeCaptureStream>> | null = null;
+  let audio: Awaited<ReturnType<typeof nativeAudioStream>> | null = null;
   let recoverCapture: (() => void) | null = null;
   let activeLease: string | null = null;
   let attemptId: string | undefined;
@@ -44,6 +51,8 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
     cursorTimer = null;
     native?.stop();
     native = null;
+    audio?.stop();
+    audio = null;
     recoverCapture = null;
     activeLease = null;
     if (heartbeat) clearInterval(heartbeat);
@@ -54,6 +63,20 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
     stream = null;
   };
   const unsubscribe = api.onCommand((command) => {
+    if (command.op === 'prepare') {
+      if (command.portalCapture && command.lease) portal.prepare(command.lease);
+      return;
+    }
+    if (command.op === 'frame') {
+      try {
+        void api
+          .reply(command.id, command.lease ? portal.frame(command.lease) : null)
+          .catch(() => {});
+      } catch {
+        void api.reply(command.id, { error: 'DESKTOP_VIDEO_UNAVAILABLE' }).catch(() => {});
+      }
+      return;
+    }
     if (command.op === 'ice') {
       const rtc = peer,
         current = generation;
@@ -115,9 +138,10 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
       command.op !== 'offer' ||
       !command.lease ||
       !command.sdp ||
-      (!command.sourceId && !command.nativeCapture)
+      (!command.sourceId && !command.nativeCapture && !command.portalCapture)
     )
       return;
+    if (!command.portalCapture) portal.stop();
     const current = generation;
     const lease = command.lease;
     activeLease = lease;
@@ -166,7 +190,9 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
             (value) => {
               if (current === generation) latestCursor = value;
             },
-            command.cursorOverlay ? (command.settings?.fps ?? 30) : 15,
+            command.cursorOverlay || command.continuousNativeCapture
+              ? (command.settings?.fps ?? 30)
+              : 15,
           );
           if (current !== generation) {
             result.stop();
@@ -176,7 +202,8 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
           return result.stream;
         };
         let captured: MediaStream;
-        if (command.cursorOverlay) {
+        if (command.portalCapture) captured = await portal.capture(lease);
+        else if (command.cursorOverlay) {
           // Chromium in our runtime exposes no cursor constraint. Use the
           // cursor-free native video while retaining the normal audio track.
           let audioSource: MediaStream | null = null;
@@ -207,6 +234,23 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
         if (current !== generation) {
           captured.getTracks().forEach((track) => track.stop());
           return;
+        }
+        stream = captured;
+        if (command.nativeAudio && command.settings?.audio && api.nativeAudio) {
+          const value = await nativeAudioStream(
+            () => api.nativeAudio!(lease),
+            () => current === generation,
+            () => {
+              stop();
+              void api.stop().catch(() => {});
+            },
+          );
+          if (current !== generation) {
+            value.stop();
+            return;
+          }
+          audio = value;
+          captured.addTrack(value.track);
         }
         if (command.settings?.audio && !captured.getAudioTracks().length) {
           captured.getTracks().forEach((track) => track.stop());
@@ -388,5 +432,6 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
   return () => {
     unsubscribe();
     stop();
+    portal.stop();
   };
 }

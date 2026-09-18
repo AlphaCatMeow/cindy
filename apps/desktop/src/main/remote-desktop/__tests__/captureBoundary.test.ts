@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DESKTOP_LOCAL } from '../../../shared/remoteDesktop';
+import { DESKTOP_LOCAL, type DesktopHostCommand } from '../../../shared/remoteDesktop';
 
 const h = vi.hoisted(() => ({
+  wayland: false,
+  hyprland: false,
+  linuxInput: false,
+  linuxAudio: false,
+  audioRead: vi.fn(() => new Uint8Array(8)),
+  audioStart: vi.fn(),
+  audioStop: vi.fn(),
+  hyprlandFrame: vi.fn(async () => 'anBlZw=='),
+  hyprlandStop: vi.fn(),
   handlers: new Map<string, any>(),
   screenHandlers: new Map<string, any>(),
   geometryMatches: vi.fn(() => true),
@@ -24,9 +33,47 @@ const h = vi.hoisted(() => ({
   input: vi.fn(),
   viewHeartbeat: vi.fn(),
   hostInput: vi.fn(),
+  startInput: vi.fn(async () => {}),
   iceConfig: vi.fn(async (): Promise<any[]> => [
     { urls: ['turn:relay.example.test:3478'], username: 'temporary', credential: 'test-only' },
   ]),
+}));
+vi.mock('../waylandCapture', async (original) => ({
+  ...(await original<typeof import('../waylandCapture')>()),
+  isWaylandDesktop: () => h.wayland,
+}));
+vi.mock('../linuxInput', () => ({ readLinuxDesktopInputSupport: async () => h.linuxInput }));
+vi.mock('../linuxDesktop', () => ({
+  supportsLinuxDisplay: () => h.hyprland,
+  supportsLinuxLock: () => false,
+  waitForLinuxDisplay: vi.fn(),
+  linuxMonitors: async () => [
+    { name: 'eDP-2', width: 2560, height: 1600, scale: 1.6, transform: 0 },
+  ],
+  linuxMonitor: vi.fn(),
+  linuxDisplay: () => ({ id: 'hyprland:eDP-2', name: 'eDP-2', width: 1600, height: 1000 }),
+}));
+vi.mock('../linuxCapture', () => ({ readLinuxCursorSupport: async () => false }));
+vi.mock('../linuxAudio', () => ({
+  supportsLinuxAudio: () => h.linuxAudio,
+  LinuxDesktopAudio: class {
+    start = h.audioStart;
+    stop = h.audioStop;
+    read = h.audioRead;
+  },
+}));
+vi.mock('../linuxMute', () => ({
+  supportsLinuxMute: () => false,
+  LinuxDesktopMute: class {
+    async set() {}
+  },
+}));
+vi.mock('../hyprlandCapture', () => ({
+  supportsHyprlandCapture: () => h.hyprland,
+  HyprlandCapture: class {
+    frame = h.hyprlandFrame;
+    stop = h.hyprlandStop;
+  },
 }));
 vi.mock('../../lifecycle', () => ({
   onQuit: (name: string, fn: () => unknown, phase = 'sync') => h.quit.set(name, { fn, phase }),
@@ -137,6 +184,7 @@ vi.mock('../inputHost', () => ({
     }
     stop = vi.fn();
     input = h.hostInput;
+    start = h.startInput;
   },
   readDesktopDisplayModes: vi.fn(),
   setDesktopDisplayMode: vi.fn(),
@@ -149,6 +197,9 @@ vi.mock('../permissions', () => ({
       h.permissionDeps = deps;
     }
     dismiss() {}
+    async read() {
+      return {};
+    }
   },
 }));
 vi.mock('../windowsHost', () => ({
@@ -184,6 +235,15 @@ const offer = () =>
   h.deps.offer({ lease: h.lease, display: { id: '1' } }, 'sdp', undefined, false, 'attempt');
 beforeEach(() => {
   vi.useFakeTimers();
+  h.wayland = false;
+  h.hyprland = false;
+  h.linuxInput = false;
+  h.linuxAudio = false;
+  h.audioRead.mockClear();
+  h.audioStart.mockClear();
+  h.audioStop.mockClear();
+  h.hyprlandFrame.mockClear();
+  h.hyprlandStop.mockClear();
   h.handlers.clear();
   h.screenHandlers.clear();
   h.geometryMatches.mockReset().mockReturnValue(true);
@@ -630,4 +690,212 @@ it('does not advertise or select Windows overlays without a ready native service
   expect(command.nativeCapture).toBe(false);
   h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
   await pending;
+});
+
+it('keeps Wayland authorization and relay frames alive across bounded offer retries', async () => {
+  h.wayland = true;
+  const frame = h.deps.frame('wayland-portal', false, 'lease');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  expect(owner.send.mock.calls[0][1]).toMatchObject({ op: 'prepare', lease: 'lease' });
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, null);
+  await expect(frame).resolves.toBeNull();
+  const offer = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp');
+  const rejected = expect(offer).rejects.toThrow('DESKTOP_VIDEO_TIMEOUT');
+  await flush();
+  await vi.advanceTimersByTimeAsync(18_000);
+  await rejected;
+  expect(owner.dead).toBe(false);
+  expect(owner.send.mock.calls.at(-1)[1]).toMatchObject({ op: 'stop' });
+  const fallback = h.deps.frame('wayland-portal', false, 'lease');
+  await flush();
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, 'anBlZw==');
+  await expect(fallback).resolves.toBe('anBlZw==');
+  expect(h.windows).toHaveLength(1);
+  expect(
+    owner.send.mock.calls.filter(
+      ([, command]: [string, DesktopHostCommand]) => command.op === 'prepare',
+    ),
+  ).toHaveLength(1);
+  h.deps.stopVideo();
+  expect(owner.dead).toBe(true);
+});
+
+it('only grants the system-selected Wayland surface once, and never to a replacement lease', async () => {
+  h.wayland = true;
+  let select!: (sources: any[]) => void;
+  h.source = new Promise((resolve) => {
+    select = resolve;
+  });
+  const frame = h.deps.frame('wayland-portal', false, 'lease');
+  const rejected = expect(frame).rejects.toThrow('DESKTOP_VIDEO_STOPPED');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  const handler = owner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+  const callback = vi.fn();
+  handler({ frame: owner.mainFrame, videoRequested: true, audioRequested: false }, callback);
+  expect(callback).not.toHaveBeenCalled();
+  const duplicate = vi.fn();
+  handler({ frame: owner.mainFrame, videoRequested: true, audioRequested: false }, duplicate);
+  expect(duplicate).toHaveBeenCalledWith({});
+  h.deps.stopVideo();
+  h.lease = 'replacement';
+  select([{ id: 'screen:0:0', display_id: '' }]);
+  await flush();
+  await rejected;
+  expect(callback).toHaveBeenCalledExactlyOnceWith({});
+  expect(owner.dead).toBe(true);
+});
+
+it('accepts empty PipeWire display IDs only through the authorized portal selection', async () => {
+  h.wayland = true;
+  const source = { id: 'screen:0:0', display_id: '' };
+  h.source = Promise.resolve([source]);
+  const frame = h.deps.frame('wayland-portal', false, 'lease');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  const handler = owner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+  const denied = vi.fn();
+  handler({ frame: {}, videoRequested: true }, denied);
+  expect(denied).toHaveBeenCalledWith({});
+  const callback = vi.fn();
+  handler({ frame: owner.mainFrame, videoRequested: true, audioRequested: false }, callback);
+  await flush();
+  expect(callback).toHaveBeenCalledExactlyOnceWith({ video: source });
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, null);
+  await frame;
+});
+
+it('settles a Wayland offer timeout even if its capture owner disappears before peer cleanup', async () => {
+  h.wayland = true;
+  const pending = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp');
+  const rejected = expect(pending).rejects.toThrow('DESKTOP_VIDEO_TIMEOUT');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  owner.send.mockImplementation(() => {
+    throw new Error('destroyed');
+  });
+  await vi.advanceTimersByTimeAsync(18_000);
+  await rejected;
+  expect(owner.dead).toBe(true);
+});
+
+it('uses native Hyprland capture for video and relay without opening a portal picker', async () => {
+  h.wayland = h.hyprland = true;
+  // Source enumeration would never resolve: neither transport may depend on it.
+  h.source = new Promise(() => {});
+  await expect(h.deps.frame('wayland-portal', false, 'lease')).resolves.toBe('anBlZw==');
+  expect(h.windows).toHaveLength(0);
+  await expect(h.deps.frame('wayland-portal', false, 'wrong')).rejects.toThrow(
+    'DESKTOP_LEASE_EXPIRED',
+  );
+  expect(h.hyprlandFrame).toHaveBeenCalledTimes(1);
+  const result = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const command = h.owner.send.mock.calls.at(-1)[1];
+  expect(command).toMatchObject({
+    op: 'offer',
+    nativeCapture: true,
+    continuousNativeCapture: true,
+  });
+  expect(() => structuredClone(command)).not.toThrow();
+  expect(command.portalCapture).toBeUndefined();
+  await expect(h.handlers.get(DESKTOP_LOCAL.NATIVE_FRAME)(event(), 'lease')).resolves.toBe(
+    'anBlZw==',
+  );
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
+  await expect(result).resolves.toBe('answer');
+  h.deps.stopVideo();
+  expect(h.hyprlandStop).toHaveBeenCalled();
+});
+
+it('advertises native Wayland geometry to existing viewers without a 16:9 placeholder', async () => {
+  h.wayland = h.hyprland = true;
+  const settings = await import('../../device-link/settings-store');
+  const { screen } = await import('electron');
+  vi.spyOn(settings, 'readDeviceLinkSettings').mockReturnValue({
+    remoteDesktopEnabled: true,
+    remoteControlEnabled: true,
+  } as any);
+  vi.spyOn(screen, 'getAllDisplays').mockReturnValue([
+    { id: 1, bounds: { x: 0, y: 0, width: 1600, height: 1000 } },
+  ] as any);
+  expect((await h.deps.capabilities()).displays).toEqual([
+    { id: 'hyprland:eDP-2', name: 'eDP-2', width: 1600, height: 1000 },
+  ]);
+});
+
+it.each([true, false])(
+  'advertises Linux control only after the native protocol probe succeeds: %s',
+  async (supported) => {
+    const platform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      h.wayland = h.hyprland = true;
+      h.linuxInput = supported;
+      const settings = await import('../../device-link/settings-store');
+      const { screen } = await import('electron');
+      vi.spyOn(settings, 'readDeviceLinkSettings').mockReturnValue({
+        remoteDesktopEnabled: true,
+        remoteControlEnabled: true,
+      } as any);
+      vi.spyOn(screen, 'getAllDisplays').mockReturnValue([
+        { id: 1, bounds: { x: 0, y: 0, width: 1600, height: 1000 } },
+      ] as any);
+      expect((await h.deps.capabilities()).canControl).toBe(supported);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: platform });
+    }
+  },
+);
+
+it.each([false, true])(
+  'refuses native input outside the full Hyprland surface: %s',
+  async (hyprland) => {
+    const platform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      h.wayland = true;
+      h.hyprland = hyprland;
+      h.linuxInput = !hyprland;
+      h.startInput.mockClear();
+      await expect(h.deps.startInput('wayland-portal')).rejects.toThrow(
+        'DESKTOP_INPUT_UNSUPPORTED',
+      );
+      expect(h.startInput).not.toHaveBeenCalled();
+      h.hyprland = h.linuxInput = true;
+      await h.deps.startInput('wayland-portal');
+      expect(h.startInput).toHaveBeenCalledExactlyOnceWith('wayland-portal');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: platform });
+    }
+  },
+);
+
+it('binds Linux audio to the exact capture window, opted-in video lease and stop', async () => {
+  h.wayland = h.hyprland = h.linuxAudio = true;
+  const result = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp', {
+    audio: true,
+  });
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const command = h.owner.send.mock.calls.at(-1)[1];
+  expect(command.nativeAudio).toBe(true);
+  expect(h.audioStart).toHaveBeenCalledOnce();
+  const read = h.handlers.get(DESKTOP_LOCAL.NATIVE_AUDIO);
+  expect(read(event(), 'lease')).toHaveLength(8);
+  expect(() => read(event({ mainFrame: {} }), 'lease')).toThrow('PERMISSION_DENIED');
+  expect(() => read(event(), 'old-lease')).toThrow('PERMISSION_DENIED');
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
+  await result;
+  const owner = h.owner;
+  h.deps.stopVideo();
+  expect(h.audioStop).toHaveBeenCalled();
+  expect(() => read(event(owner), 'lease')).toThrow('PERMISSION_DENIED');
+  expect(h.audioRead).toHaveBeenCalledOnce();
 });

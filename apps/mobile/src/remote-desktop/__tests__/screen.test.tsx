@@ -212,6 +212,8 @@ vi.mock("lucide-react-native", () => ({
   createLucideIcon: () => () => null,
   Clipboard: () => null,
   ArrowLeft: () => null,
+  ArrowRight: () => null,
+  Menu: () => null,
   RotateCw: () => null,
   Volume2: () => null,
   VolumeX: () => null,
@@ -448,6 +450,32 @@ describe("remote desktop controls", () => {
     expect(host.textContent).toContain("remoteDesktop.connectionTimeout");
   });
 
+  it("uses advertised Omarchy actions instead of the legacy desktop buttons", async () => {
+    const original = fixture.invoke.getMockImplementation()!;
+    fixture.invoke.mockImplementation(async (...args) => {
+      const result = await original(...args);
+      return args[2][0].op === "capabilities"
+        ? {
+            ...result,
+            platform: "linux",
+            workspaceNavigation: true,
+            omarchyMenu: true,
+          }
+        : result;
+    });
+    await connect();
+    for (const action of ["workspaceLeft", "workspaceRight", "omarchyMenu"])
+      await act(async () => button(action).click());
+    expect(requests().filter((r) => r.op === "windowAction")).toEqual(
+      ["workspaceLeft", "workspaceRight", "omarchyMenu"].map((action) => ({
+        op: "windowAction",
+        action,
+        lease: "lease",
+      })),
+    );
+    expect(button("showDesktop")).toBeNull();
+    expect(button("allWindows")).toBeNull();
+  });
   it("retries an initial capabilities timeout normally on a legacy host", async () => {
     const original = fixture.invoke.getMockImplementation()!;
     let attempts = 0;
@@ -1055,7 +1083,6 @@ describe("remote desktop controls", () => {
   it.each([
     ["android", "darwin"],
     ["ios", "win32"],
-    ["ios", "linux"],
     ["ios", undefined],
   ])(
     "hides unsupported unlock settings for %s / %s while retaining exit locking",
@@ -1225,6 +1252,27 @@ describe("remote desktop controls", () => {
     expect(requests().filter((r) => r.op === "stop")).toEqual([
       { op: "stop", lease: "lease", lockScreen: true },
     ]);
+  });
+  it("prepares Linux unlock before capture without waiting for a first frame", async () => {
+    fixture.hostPlatform = "linux";
+    let finish!: () => void;
+    const prompt = vi.fn();
+    fixture.maybeUnlock.mockImplementationOnce(async (beforeAuthentication) => {
+      await beforeAuthentication!();
+      prompt();
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await act(async () => {
+      fixture.message!({ nativeEvent: { data: '{"type":"ready"}' } });
+    });
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(requests().some((r) => r.op === "start")).toBe(false);
+    await act(async () => {
+      finish();
+    });
+    expect(requests().filter((r) => r.op === "start")).toHaveLength(1);
   });
   it.each(["framePresented", "streaming"])(
     "prepares authentication alongside capture and waits for %s before Face ID",
@@ -2022,6 +2070,60 @@ describe("remote desktop controls", () => {
     expect(fixture.invoke).toHaveBeenCalledTimes(1);
     expect(requests().some((r) => r.op === "start")).toBe(false);
   });
+  it("keeps live video through a brief relay route interruption", async () => {
+    await connect();
+    act(() =>
+      fixture.message!({
+        nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+      }),
+    );
+    fixture.status = "offline";
+    act(() => root.render(<RemoteDesktopScreen />));
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(0);
+    fixture.status = "online";
+    await act(async () => root.render(<RemoteDesktopScreen />));
+    await act(async () => vi.advanceTimersByTimeAsync(9000));
+    expect(requests().filter((r) => r.op === "start")).toHaveLength(1);
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(0);
+  });
+  it("bounds offline video grace and still obeys explicit host revocation", async () => {
+    await connect();
+    act(() =>
+      fixture.message!({
+        nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+      }),
+    );
+    fixture.status = "offline";
+    act(() => root.render(<RemoteDesktopScreen />));
+    await act(async () => vi.advanceTimersByTimeAsync(8100));
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
+  });
+  it.each(["DEVICE_OFFLINE", "ACCESS_REVOKED"])(
+    "limits transient heartbeat handling to offline errors: %s",
+    async (code) => {
+      await connect();
+      act(() =>
+        fixture.message!({
+          nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+        }),
+      );
+      const original = fixture.invoke.getMockImplementation()!;
+      fixture.invoke.mockImplementation((...args) =>
+        args[2][0].op === "heartbeat"
+          ? Promise.reject(Object.assign(new Error(code), { code }))
+          : original(...args),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(3100));
+      expect(requests().filter((r) => r.op === "stop")).toHaveLength(
+        code === "DEVICE_OFFLINE" ? 0 : 1,
+      );
+      if (code === "DEVICE_OFFLINE") {
+        await act(async () => vi.advanceTimersByTimeAsync(9000));
+        expect(requests().some((r) => r.op === "stop")).toBe(true);
+      }
+    },
+  );
   it("renews again after a lost heartbeat reply without replacing the live lease", async () => {
     await connect();
     const original = fixture.invoke.getMockImplementation()!;
