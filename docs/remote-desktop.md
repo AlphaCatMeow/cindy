@@ -543,7 +543,12 @@ configurations are rejected rather than being silently replaced. Live scratch
 output tests cover resize, EOF, heartbeat timeout and SIGTERM cleanup.
 
 Linux clipboard transfer uses the existing bounded portable-format path and an
-opaque content generation. Reads refuse a locked or unknown login session.
+opaque content generation. Native reads and writes refuse a locked or unknown
+compositor session; logind's advisory `LockedHint` does not prove it is unlocked.
+Clipboard reads recheck after each subprocess result. Window lists and actions
+use the same compositor probe, including after asynchronous dispatch preparation
+and before returning titles. These checks also apply to Quickshell, independently
+of whether its locker supports automatic password unlock.
 Hyprland reads use bounded `wl-paste` calls, so an unfocused Cindy window can
 read the actual system clipboard. A bundled data-control writer offers text,
 HTML, RTF and PNG together, without subprocess arguments or temporary files

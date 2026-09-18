@@ -26,6 +26,7 @@ function fixture(lua = false) {
     return 'ok';
   });
   const openMenu = vi.fn(async () => {});
+  const unlocked = vi.fn(async () => true);
   const windows = new LinuxWindowActions(
     run,
     async () => ({
@@ -40,11 +41,13 @@ function fixture(lua = false) {
       availableModes: [],
     }),
     openMenu,
+    unlocked,
   );
   return {
     windows,
     run,
     openMenu,
+    unlocked,
     workspace: () => workspace,
     navigate: (next: string) => {
       workspace = next;
@@ -231,3 +234,35 @@ it.each(['workspaceLeft', 'workspaceRight', 'omarchyMenu'] as const)(
     expect(h.openMenu).not.toHaveBeenCalled();
   },
 );
+
+it.each(['list', 'activate', 'desktop', 'workspaceLeft', 'workspaceRight', 'omarchyMenu'] as const)(
+  'refuses %s without reading titles or dispatching when locked',
+  async (action) => {
+    const h = fixture();
+    h.unlocked.mockResolvedValue(false);
+    await expect(h.windows.request(action, '0xabc', 'hyprland:eDP-2', () => true)).rejects.toThrow(
+      'DESKTOP_INPUT_UNAVAILABLE',
+    );
+    expect(h.run).not.toHaveBeenCalled();
+    expect(h.openMenu).not.toHaveBeenCalled();
+  },
+);
+it('discards titles if the session locks while clients are read', async () => {
+  const h = fixture();
+  h.unlocked.mockResolvedValueOnce(true).mockResolvedValue(false);
+  await expect(h.windows.request('list', undefined, 'hyprland:eDP-2', () => true)).rejects.toThrow(
+    'DESKTOP_INPUT_UNAVAILABLE',
+  );
+});
+it('does not dispatch after a syntax probe overlaps a local lock', async () => {
+  const h = fixture();
+  const run = h.run.getMockImplementation()!;
+  h.run.mockImplementation(async (args) => {
+    if (args[0] === 'eval') h.unlocked.mockResolvedValue(false);
+    return run(args);
+  });
+  await expect(
+    h.windows.request('activate', '0xabc', 'hyprland:eDP-2', () => true),
+  ).rejects.toThrow('DESKTOP_INPUT_UNAVAILABLE');
+  expect(h.run.mock.calls.some(([args]) => args[0] === 'dispatch')).toBe(false);
+});

@@ -4,6 +4,7 @@ import { accessSync, constants } from 'node:fs';
 import { promisify } from 'node:util';
 import type { RemoteDesktopWindow } from '@cindy/device-link';
 import { linuxMonitor } from './linuxDesktop';
+import { isLinuxDesktopUnlocked } from './linuxSessionLock';
 
 const exec = promisify(execFile);
 export function supportsOmarchyMenu(): boolean {
@@ -37,7 +38,11 @@ export class LinuxWindowActions {
     private readonly run = invoke,
     private readonly monitor = linuxMonitor,
     private readonly openMenu = openOmarchyMenu,
+    private readonly unlocked = isLinuxDesktopUnlocked,
   ) {}
+  private async requireUnlocked(): Promise<void> {
+    if (!(await this.unlocked())) throw new Error('DESKTOP_INPUT_UNAVAILABLE');
+  }
   private async clients(): Promise<RemoteDesktopWindow[]> {
     const value: unknown = JSON.parse(await this.run(['-j', 'clients']));
     if (!Array.isArray(value) || value.length > 2048) throw new Error('DESKTOP_INPUT_UNAVAILABLE');
@@ -56,7 +61,7 @@ export class LinuxWindowActions {
   private async dispatch(
     name: 'focuswindow' | 'focusmonitor' | 'workspace',
     value: string,
-    check: () => void = () => {},
+    check: () => Promise<void> = () => this.requireUnlocked(),
   ): Promise<void> {
     // Hyprland 0.55+ uses typed Lua dispatchers. Probe syntax without changing
     // configuration; never retry an already-issued action with another syntax.
@@ -64,7 +69,7 @@ export class LinuxWindowActions {
       (value) => value === 'ok',
       () => false,
     );
-    check();
+    await check();
     const field = { focuswindow: 'window', focusmonitor: 'monitor', workspace: 'workspace' }[name];
     if (!field || !/^[A-Za-z0-9_.:+-]{1,128}$/.test(value))
       throw new Error('DESKTOP_INPUT_UNAVAILABLE');
@@ -82,50 +87,52 @@ export class LinuxWindowActions {
     current: () => boolean,
   ): Promise<RemoteDesktopWindow[] | null> {
     const generation = this.generation;
-    const check = () => {
+    const check = async () => {
+      if (generation !== this.generation || !current()) throw new Error('DESKTOP_LEASE_EXPIRED');
+      await this.requireUnlocked();
       if (generation !== this.generation || !current()) throw new Error('DESKTOP_LEASE_EXPIRED');
     };
     const operation = this.tail
       .catch(() => {})
       .then(async () => {
-        check();
+        await check();
         if (action === 'list') {
           const windows = await this.clients();
-          check();
+          await check();
           return windows;
         }
         if (action === 'activate') {
           const windows = await this.clients();
-          check();
+          await check();
           if (!windows.some((window) => window.id === id))
             throw new Error('DESKTOP_INPUT_UNAVAILABLE');
           await this.restore(check);
-          check();
+          await check();
           await this.dispatch('focuswindow', `address:${id}`, check);
-          check();
+          await check();
           return null;
         }
         if (action === 'workspaceLeft' || action === 'workspaceRight' || action === 'omarchyMenu') {
           await this.restore(check);
-          check();
+          await check();
           const selected = await this.monitor(displayId);
-          check();
+          await check();
           await this.dispatch('focusmonitor', selected.name, check);
-          check();
+          await check();
           if (action === 'omarchyMenu') await this.openMenu();
           else await this.dispatch('workspace', action === 'workspaceLeft' ? 'm-1' : 'm+1', check);
-          check();
+          await check();
           return null;
         }
         if (this.desktop) {
           await this.restore(check);
-          check();
+          await check();
           return null;
         }
         const selected = await this.monitor(displayId);
-        check();
+        await check();
         const monitors: Monitor[] = JSON.parse(await this.run(['-j', 'monitors']));
-        check();
+        await check();
         const target = monitors.find((m) => m.name === selected.name);
         if (
           !target ||
@@ -139,19 +146,19 @@ export class LinuxWindowActions {
           temporary: `cindy-desktop-${randomBytes(8).toString('hex')}`,
         };
         await this.dispatch('focusmonitor', target.name, check);
-        check();
+        await check();
         await this.dispatch('workspace', `name:${this.desktop.temporary}`, check);
-        check();
+        await check();
         return null;
       });
     this.tail = operation;
     return operation;
   }
-  private async restore(check: () => void = () => {}): Promise<void> {
+  private async restore(check: () => Promise<void> = () => this.requireUnlocked()): Promise<void> {
     const saved = this.desktop;
     if (!saved) return;
     const monitors: Monitor[] = JSON.parse(await this.run(['-j', 'monitors']));
-    check();
+    await check();
     const selected = monitors.find((m) => m.name === saved.monitor);
     if (selected?.activeWorkspace.name === saved.temporary) {
       await this.dispatch('focusmonitor', saved.monitor, check);

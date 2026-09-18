@@ -1,10 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ locked: false, text: 'text', supported: true, read: vi.fn() }));
-vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
-vi.mock('node:util', () => ({
-  promisify: () => async () => ({ stdout: h.locked ? 'yes' : 'no' }),
-}));
-vi.mock('../linuxDesktop', () => ({ supportsLinuxLock: () => h.supported }));
+const h = vi.hoisted(() => ({ text: 'text', read: vi.fn() }));
 vi.mock('../linuxClipboardNative', () => ({
   readLinuxClipboardSnapshot: async () => {
     h.read();
@@ -14,8 +9,6 @@ vi.mock('../linuxClipboardNative', () => ({
 }));
 import { linuxClipboardVersion } from '../linuxClipboard';
 beforeEach(() => {
-  h.locked = false;
-  h.supported = true;
   h.text = 'text';
   h.read.mockClear();
 });
@@ -25,11 +18,6 @@ it('changes the opaque generation when clipboard contents change', async () => {
   expect(before).toMatch(/^[a-f0-9]{64}$/);
   h.text = 'different';
   expect(await linuxClipboardVersion()).not.toBe(before);
-});
-it('does not read clipboard content while the session is locked', async () => {
-  h.locked = true;
-  await expect(linuxClipboardVersion()).rejects.toThrow('DESKTOP_CLIPBOARD_UNAVAILABLE');
-  expect(h.read).not.toHaveBeenCalled();
 });
 it('bounds content and returns no sampled text in an error', async () => {
   h.text = 'private'.repeat(100000);

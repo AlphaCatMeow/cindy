@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import { accessSync, constants } from 'node:fs';
 import path from 'node:path';
 import type { RemoteClipboardContent } from '@cindy/device-link';
+import { isLinuxDesktopUnlocked } from './linuxSessionLock';
 
 const exec = promisify(execFile);
 export function supportsLinuxClipboard(): boolean {
@@ -18,12 +19,14 @@ export function supportsLinuxClipboard(): boolean {
   }
 }
 async function read(args: string[], maxBuffer: number): Promise<Buffer> {
+  if (!(await isLinuxDesktopUnlocked())) throw new Error('DESKTOP_CLIPBOARD_UNAVAILABLE');
   try {
     const result = await exec('/usr/bin/wl-paste', args, {
       timeout: 2000,
       maxBuffer,
       encoding: 'buffer',
     });
+    if (!(await isLinuxDesktopUnlocked())) throw new Error('DESKTOP_CLIPBOARD_UNAVAILABLE');
     return result.stdout;
   } catch (error) {
     // Empty selection is distinct from failed compositor access. Never propagate
@@ -136,6 +139,7 @@ export async function writeLinuxClipboard(
   current: () => boolean,
 ): Promise<void> {
   const executable = await binary();
+  if (!(await isLinuxDesktopUnlocked())) throw new Error('DESKTOP_CLIPBOARD_UNAVAILABLE');
   if (!current()) throw new Error('DESKTOP_LEASE_EXPIRED');
   const child = spawn(executable, [], { stdio: 'pipe' });
   child.stderr.resume();
@@ -168,6 +172,7 @@ export async function writeLinuxClipboard(
         }) + '\n',
       );
     });
+    if (!(await isLinuxDesktopUnlocked())) throw new Error('DESKTOP_CLIPBOARD_UNAVAILABLE');
     if (!current()) throw new Error('DESKTOP_LEASE_EXPIRED');
     writer?.kill();
     writer = child;
