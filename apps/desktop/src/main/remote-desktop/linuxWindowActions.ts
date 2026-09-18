@@ -99,14 +99,14 @@ export class LinuxWindowActions {
           check();
           if (!windows.some((window) => window.id === id))
             throw new Error('DESKTOP_INPUT_UNAVAILABLE');
-          await this.restore();
+          await this.restore(check);
           check();
-          await this.dispatch('focuswindow', `address:${id}`);
+          await this.dispatch('focuswindow', `address:${id}`, check);
           check();
           return null;
         }
         if (action === 'workspaceLeft' || action === 'workspaceRight' || action === 'omarchyMenu') {
-          await this.restore();
+          await this.restore(check);
           check();
           const selected = await this.monitor(displayId);
           check();
@@ -118,7 +118,7 @@ export class LinuxWindowActions {
           return null;
         }
         if (this.desktop) {
-          await this.restore();
+          await this.restore(check);
           check();
           return null;
         }
@@ -138,23 +138,24 @@ export class LinuxWindowActions {
           original: target.activeWorkspace.id,
           temporary: `cindy-desktop-${randomBytes(8).toString('hex')}`,
         };
-        await this.dispatch('focusmonitor', target.name);
+        await this.dispatch('focusmonitor', target.name, check);
         check();
-        await this.dispatch('workspace', `name:${this.desktop.temporary}`);
+        await this.dispatch('workspace', `name:${this.desktop.temporary}`, check);
         check();
         return null;
       });
     this.tail = operation;
     return operation;
   }
-  private async restore(): Promise<void> {
+  private async restore(check: () => void = () => {}): Promise<void> {
     const saved = this.desktop;
     if (!saved) return;
     const monitors: Monitor[] = JSON.parse(await this.run(['-j', 'monitors']));
+    check();
     const selected = monitors.find((m) => m.name === saved.monitor);
     if (selected?.activeWorkspace.name === saved.temporary) {
-      await this.dispatch('focusmonitor', saved.monitor);
-      await this.dispatch('workspace', String(saved.original));
+      await this.dispatch('focusmonitor', saved.monitor, check);
+      await this.dispatch('workspace', String(saved.original), check);
     }
     this.desktop = undefined;
   }

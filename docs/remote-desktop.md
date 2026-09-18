@@ -423,8 +423,12 @@ viewport placeholder; video/JPEG dimensions describe the selected surface. The
 existing viewer fallback supplies its localized display name.
 
 A lease creates one isolated capture window and starts one system picker. Local
-consent may take up to two minutes, independently of each bounded video RPC. A
-video attempt timing out stops only its peer; it does not reopen the picker.
+consent may take up to two minutes, independently of each bounded video RPC.
+Offers first check the existing frame operation for a ready surface; while it is
+empty, `DESKTOP_CAPTURE_PENDING` keeps the current viewer's existing retry timer
+active without consuming network retry attempts. Mobile allows an additional two
+minutes only for the `wayland-portal` display. A video attempt timing out stops
+only its peer; it does not reopen the picker.
 Subsequent offers clone the same authorized stream, and the existing JPEG frame
 operation snapshots that stream, without enumerating sources again. Frames while
 permission is pending or the video track is muted are empty. Denial stays terminal
@@ -434,12 +438,14 @@ new unattended access grant.
 Explicit stop, lease expiry, host disable/revocation, capture-process failure and
 system sharing termination dispose the capture owner. Every late portal callback
 rechecks both the owner generation and lease. Since Electron does not expose
-cancellation for an in-flight `getSources`, a still-pending picker also blocks a
-second picker after lease replacement; dismiss it before reconnecting. Its result
-cannot authorize the replacement lease.
+cancellation for an in-flight `getSources`, picker exclusivity is scoped to the
+capture generation. A retired picker neither blocks the new owner nor authorizes
+it, and its completion cannot clear the replacement owner's selection state.
 
-This changes Desktop internals only: old phone/desktop viewers retain the existing
-capabilities, lease, offer, ICE and frame protocol. On the portal fallback, Linux input/audio support is
+The existing capabilities, lease, offer, ICE and frame protocol remains intact.
+Older viewers treat pending consent as a video failure and retain their original
+bounded retries; the extended consent window requires the updated viewer.
+On the portal fallback, Linux input/audio support is
 unchanged. X11, macOS and Windows retain their capture paths. No relay reconnect,
 server change, mobile native dependency or runtime fingerprint change is needed.
 

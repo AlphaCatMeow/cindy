@@ -188,6 +188,28 @@ it('opens the Omarchy menu only after focusing the selected monitor and while au
   expect(h.openMenu).toHaveBeenCalledOnce();
 });
 
+it.each(['desktop', 'activate'] as const)(
+  'cancels %s when control is revoked during syntax probing',
+  async (action) => {
+    const h = fixture(true);
+    const original = h.run.getMockImplementation()!;
+    let current = true;
+    h.run.mockImplementation(async (args) => {
+      const result = await original(args);
+      if (args[0] === 'eval' && args[1].startsWith('assert(')) current = false;
+      return result;
+    });
+    await expect(
+      h.windows.request(action, '0xabc', 'hyprland:eDP-2', () => current),
+    ).rejects.toThrow('DESKTOP_LEASE_EXPIRED');
+    expect(
+      h.run.mock.calls.some(
+        ([args]) => args[0] === 'dispatch' || args[1]?.startsWith('hl.dispatch'),
+      ),
+    ).toBe(false);
+  },
+);
+
 it.each(['workspaceLeft', 'workspaceRight', 'omarchyMenu'] as const)(
   'validates %s and cancels it when control is revoked during syntax probing',
   async (action) => {

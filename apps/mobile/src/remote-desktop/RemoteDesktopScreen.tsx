@@ -860,20 +860,26 @@ export default function RemoteDesktopScreen() {
   );
   const connectRef = useRef(connect);
   connectRef.current = connect;
+  const portalAuthorization =
+    caps?.displays.some((display) => display.id === "wayland-portal") === true;
   useEffect(() => {
     if (!focused || appState !== "active" || !showConnectionStatus) return;
     // One deadline spans link setup, automatic retries and first presentation.
     // Background/navigation pauses it; a manual retry starts a fresh budget.
-    const timer = setTimeout(() => {
-      if (
-        alive.current &&
-        focusedRef.current &&
-        AppState.currentState === "active"
-      )
-        fail(new Error("DESKTOP_CONNECTION_TIMEOUT"));
-    }, REMOTE_DESKTOP_CONNECTION_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => {
+        if (
+          alive.current &&
+          focusedRef.current &&
+          AppState.currentState === "active"
+        )
+          fail(new Error("DESKTOP_CONNECTION_TIMEOUT"));
+      },
+      REMOTE_DESKTOP_CONNECTION_TIMEOUT_MS +
+        (portalAuthorization ? 120_000 : 0),
+    );
     return () => clearTimeout(timer);
-  }, [focused, appState, showConnectionStatus, fail]);
+  }, [focused, appState, showConnectionStatus, fail, portalAuthorization]);
   useEffect(() => {
     // Authentication preparation is already running; only the native prompt
     // waits for a frame from this lease. stop() releases cancelled waiters.

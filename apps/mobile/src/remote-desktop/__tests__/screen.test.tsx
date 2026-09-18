@@ -388,6 +388,23 @@ const connect = async () => {
 };
 
 describe("remote desktop controls", () => {
+  it("allows the Wayland consent window while keeping the overall wait bounded", async () => {
+    const original = fixture.invoke.getMockImplementation()!;
+    fixture.invoke.mockImplementation(async (...args) => {
+      const result = await original(...args);
+      if (args[2][0].op === "capabilities")
+        return { ...result, displays: [{ ...display, id: "wayland-portal" }] };
+      return result;
+    });
+    await act(async () => {
+      fixture.message!({ nativeEvent: { data: '{"type":"ready"}' } });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    expect(host.textContent).not.toContain("remoteDesktop.connectionTimeout");
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    expect(host.textContent).toContain("remoteDesktop.connectionTimeout");
+  });
+
   it("bounds repeated failures without renewing the deadline on each retry", async () => {
     fixture.openLink.mockRejectedValue(new Error("INVOKE_TIMEOUT"));
     await act(async () => {

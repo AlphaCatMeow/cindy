@@ -127,9 +127,9 @@ let host: WebContents | null = null;
 const wayland = () => isWaylandDesktop(process.platform, process.env);
 let portalReady: Promise<void> | null = null;
 let portalGrant = false;
-// Electron cannot cancel getSources. Keep a pending picker exclusive even when
-// its lease is revoked; its eventual selection must never grant a replacement.
-let portalSelecting = false;
+// Electron cannot cancel getSources. Exclusivity belongs to its capture owner;
+// a retired owner's late callback must neither grant nor block a replacement.
+let portalSelecting: number | null = null;
 async function ensurePortalCapture(lease: string): Promise<void> {
   if (!remoteDesktop.hasLease(lease)) throw new Error('DESKTOP_LEASE_EXPIRED');
   if (videoLease === lease && portalReady) return portalReady;
@@ -214,6 +214,7 @@ function stopVideo(): void {
   offerGeneration++;
   portalReady = null;
   portalGrant = false;
+  portalSelecting = null;
   videoAttempt = undefined;
   nativeOverlay = false;
   nativeSettings = undefined;
@@ -264,6 +265,12 @@ async function offer(
     preparingOffer = true;
     const generation = offerGeneration;
     try {
+      // Consent has its own bounded lifetime in PortalCaptureStream. Do not
+      // spend an SDP attempt waiting for the local user to choose a surface.
+      const frame = await requestHost({ id: randomUUID(), op: 'frame', lease: lease.lease }, 2000);
+      if (generation !== offerGeneration || !remoteDesktop.hasLease(lease.lease))
+        throw new Error('DESKTOP_LEASE_EXPIRED');
+      if (frame === null) throw new Error('DESKTOP_CAPTURE_PENDING');
       const iceServers = await loadDesktopIceServers();
       if (generation !== offerGeneration || !remoteDesktop.hasLease(lease.lease))
         throw new Error('DESKTOP_LEASE_EXPIRED');
@@ -924,7 +931,7 @@ export function registerRemoteDesktopIpc(
         const lease = videoLease;
         if (
           !portalGrant ||
-          portalSelecting ||
+          portalSelecting === offerGeneration ||
           host !== owner ||
           request.frame !== owner.mainFrame ||
           !request.videoRequested ||
@@ -936,8 +943,8 @@ export function registerRemoteDesktopIpc(
           return;
         }
         portalGrant = false;
-        portalSelecting = true;
         const generation = offerGeneration;
+        portalSelecting = generation;
         void desktopCapturer
           .getSources({
             types: ['screen'],
@@ -965,7 +972,7 @@ export function registerRemoteDesktopIpc(
             }
           })
           .finally(() => {
-            portalSelecting = false;
+            if (portalSelecting === generation) portalSelecting = null;
           });
         return;
       }

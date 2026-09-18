@@ -704,6 +704,8 @@ it('keeps Wayland authorization and relay frames alive across bounded offer retr
   const offer = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp');
   const rejected = expect(offer).rejects.toThrow('DESKTOP_VIDEO_TIMEOUT');
   await flush();
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, 'anBlZw==');
+  await flush();
   await vi.advanceTimersByTimeAsync(18_000);
   await rejected;
   expect(owner.dead).toBe(false);
@@ -742,11 +744,33 @@ it('only grants the system-selected Wayland surface once, and never to a replace
   expect(duplicate).toHaveBeenCalledWith({});
   h.deps.stopVideo();
   h.lease = 'replacement';
+  let selectReplacement!: (sources: any[]) => void;
+  h.source = new Promise((resolve) => {
+    selectReplacement = resolve;
+  });
+  const replacementFrame = h.deps.frame('wayland-portal', false, 'replacement');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const replacementOwner = h.owner;
+  const replacementHandler =
+    replacementOwner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+  const replacementCallback = vi.fn();
+  replacementHandler(
+    { frame: replacementOwner.mainFrame, videoRequested: true, audioRequested: false },
+    replacementCallback,
+  );
+  expect(replacementCallback).not.toHaveBeenCalled();
   select([{ id: 'screen:0:0', display_id: '' }]);
   await flush();
   await rejected;
   expect(callback).toHaveBeenCalledExactlyOnceWith({});
   expect(owner.dead).toBe(true);
+  const source = { id: 'screen:1:0', display_id: '' };
+  selectReplacement([source]);
+  await flush();
+  expect(replacementCallback).toHaveBeenCalledExactlyOnceWith({ video: source });
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), replacementOwner.send.mock.calls.at(-1)[1].id, null);
+  await replacementFrame;
 });
 
 it('accepts empty PipeWire display IDs only through the authorized portal selection', async () => {
@@ -776,12 +800,41 @@ it('settles a Wayland offer timeout even if its capture owner disappears before 
   h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
   await flush();
   const owner = h.owner;
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, 'anBlZw==');
+  await flush();
   owner.send.mockImplementation(() => {
     throw new Error('destroyed');
   });
   await vi.advanceTimersByTimeAsync(18_000);
   await rejected;
   expect(owner.dead).toBe(true);
+});
+
+it('keeps consent outside the offer timeout and starts video after a late selection', async () => {
+  h.wayland = true;
+  const lease = { lease: 'lease', display: { id: 'wayland-portal' } };
+  const waiting = h.deps.offer(lease, 'sdp');
+  const rejected = expect(waiting).rejects.toThrow('DESKTOP_CAPTURE_PENDING');
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, null);
+  await rejected;
+  await vi.advanceTimersByTimeAsync(90_000);
+  expect(owner.dead).toBe(false);
+  expect(
+    owner.send.mock.calls.some(
+      ([, command]: [string, DesktopHostCommand]) => command.op === 'offer',
+    ),
+  ).toBe(false);
+  const next = h.deps.offer(lease, 'sdp');
+  await flush();
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, 'anBlZw==');
+  await flush();
+  expect(owner.send.mock.calls.at(-1)[1].op).toBe('offer');
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls.at(-1)[1].id, 'answer');
+  await expect(next).resolves.toBe('answer');
+  expect(h.windows).toHaveLength(1);
 });
 
 it('uses native Hyprland capture for video and relay without opening a portal picker', async () => {

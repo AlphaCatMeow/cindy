@@ -87,7 +87,7 @@ static void cursor_ready(void *d, struct ext_image_copy_capture_frame_v1 *f) {
                      .width = cc.allocated_width,
                      .height = cc.allocated_height,
                      .format = PNG_FORMAT_RGBA};
-  size_t count = cc.allocated_width * cc.allocated_height;
+  size_t count = (size_t)cc.allocated_width * cc.allocated_height;
   unsigned char *rgba = malloc(count * 4);
   if (!rgba) {
     cc.failed = 1;
