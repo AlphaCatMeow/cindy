@@ -231,6 +231,27 @@ describe('shouldCloseSessionForCredentialSwitch codex mode', () => {
     expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
   });
 
+  it('matches raw source identity for a renamed official preset connection', () => {
+    const preset = BUNDLED_CATALOG.presets!.find((entry) => entry.id === 'openai-api')!;
+    const account = buildUserProvider({
+      id: 'openai-api-account', name: 'OpenAI API account',
+      auth: { method: 'apiKey' },
+      runtimes: { codex: { ...preset.runtimes.codex!, catalogPresetId: preset.id } },
+    }, { modelRegistry: BUNDLED_CATALOG.modelRegistry, presets: BUNDLED_CATALOG.presets });
+    setActiveCatalog({ ...BUNDLED_CATALOG, providers: [...BUNDLED_CATALOG.providers, account] });
+    const input = {
+      agentKind: 'codex',
+      currentProviderId: 'openai-api-account',
+      nextProviderId: 'openai-api-account',
+      currentModel: 'gpt-4.1',
+      nextModel: 'gpt-4.1',
+      currentCodexProxyActive: true,
+      currentCodexThreadModelProviderId: 'openai',
+    } as const;
+    expect(isCodexThreadModelProviderIdentityMismatch(input)).toBe(false);
+    expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
+  });
+
   it('still closes a gateway Codex session when switching to OAuth on a proxy-active host', () => {
     expect(shouldCloseSessionForCredentialSwitch({
       agentKind: 'codex',

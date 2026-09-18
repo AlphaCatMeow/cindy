@@ -1,4 +1,4 @@
-import { isOpenAiSubscriptionProvider, providerCatalogId } from '@cindy/model-providers';
+import { isOpenAiSubscriptionProvider, providerCatalogId, sourceProviderForPreset } from '@cindy/model-providers';
 import {
   canReuseCodexHostForCredentialMode,
   canReuseHostForCredentialMode,
@@ -217,6 +217,7 @@ export function isCodexThreadModelProviderIdentityMismatch(
   const targetRawProviderIds = new Set(
     targetProvider?.models.codex?.flatMap((model) => [
       model.catalogPresetId,
+      model.catalogPresetId ? sourceProviderForPreset(model.catalogPresetId) : undefined,
       model.api === 'azure-openai-responses' ? 'azure' : undefined,
     ].filter((id): id is string => typeof id === 'string')) ?? [],
   );
