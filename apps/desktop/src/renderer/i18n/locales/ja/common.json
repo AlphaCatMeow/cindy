@@ -12153,6 +12153,38 @@
     }
   },
   "billing": {
+    "comparison": {
+      "free": "FREE",
+      "freeUsage": "無料で利用",
+      "priceFromSuffix": "〜",
+      "topup": "必要な分だけチャージ",
+      "topupExpiry": "チャージしたクレジットは無期限",
+      "agent": "Agent の全機能",
+      "apiKey": "自分の API key を使用",
+      "existingSubscription": "既存のサブスクリプションを接続",
+      "localModels": "ローカルモデルに対応",
+      "basicModels": "基本モデルを利用",
+      "subscription": "サブスクリプション",
+      "rollover": "未使用クレジットは{{period}}も利用可能（最大 {{amount}}）",
+      "nextPeriod": {
+        "MONTH": "翌月",
+        "YEAR": "翌年",
+        "OTHER": "次の期間"
+      },
+      "includesFree": "FREE の全機能を含む",
+      "advancedModels": "上位モデルを利用可能に",
+      "managedService": "公式サービス、設定不要",
+      "topupUnlock": "必要な分だけ支払い、上位モデルを利用",
+      "select": "{{name}} を選択",
+      "upgrade": "{{name}} にアップグレード",
+      "downgrade": "{{name}} にダウングレード",
+      "changeUnavailable": "変更不可",
+      "creditMultiple": "{{name}} の {{multiple}} 倍の期間クレジット",
+      "credits": {
+        "MONTH": "毎月 {{amount}} のクレジット",
+        "YEAR": "毎年 {{amount}} のクレジット"
+      }
+    },
     "sidebar": "残高とプラン",
     "settings": {
       "title": "使用量と請求",
@@ -12206,7 +12238,7 @@
       "observedAt": "残高更新: {{date}}",
       "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
-      "progressLabel": "{{label}}の使用量",
+      "progressLabel": "{{label}}の残りの割合",
       "noPlanCredits": "有効なサブスクリプションがないため、プラン残高はありません。",
       "historyUnavailable": "使用履歴が完全ではないため、残りの残高のみ表示しています。",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
@@ -12275,6 +12307,7 @@
     },
     "dialogs": {
       "subscription": {
+        "confirmTitle": "サブスクリプションの確認",
         "title": "サブスクリプションプランを選択"
       },
       "topup": {
@@ -12367,13 +12400,9 @@
       "failedBody": "支払いに失敗しました。しばらくしてからもう一度お試しください。"
     },
     "planChange": {
+      "emptyTitle": "切り替え可能なプランがありません",
       "targetTitle": "サブスクリプションプランの変更",
       "back": "戻る",
-      "upgradeBadge": "アップグレード",
-      "sameLevelBadge": "同じレベル",
-      "downgradeBadge": "ダウングレード",
-      "emptyTitle": "切り替え可能なプランがありません",
-      "emptyDescription": "現在、切り替え可能な他のプランはありません。",
       "quotingTitle": "プラン変更を準備中",
       "quotingBody": "金額と適用時期を確認しています…",
       "quoteTitle": "プラン変更の確認",

@@ -12153,6 +12153,38 @@
     }
   },
   "billing": {
+    "comparison": {
+      "free": "FREE",
+      "freeUsage": "免費使用",
+      "priceFromSuffix": "起",
+      "topup": "按需儲值",
+      "topupExpiry": "儲值點數不過期",
+      "agent": "完整 Agent 功能",
+      "apiKey": "自備 API key",
+      "existingSubscription": "接入現有訂閱",
+      "localModels": "支援本機模型",
+      "basicModels": "可用基礎模型",
+      "subscription": "訂閱方案",
+      "rollover": "剩餘點數可留到{{period}}，最多 {{amount}}",
+      "nextPeriod": {
+        "MONTH": "下個月",
+        "YEAR": "下一年",
+        "OTHER": "下期"
+      },
+      "includesFree": "包含 FREE 全部功能",
+      "advancedModels": "解鎖進階模型",
+      "managedService": "官方服務，免設定",
+      "topupUnlock": "按需付費，解鎖進階模型",
+      "select": "選擇 {{name}}",
+      "upgrade": "升級至 {{name}}",
+      "downgrade": "降級至 {{name}}",
+      "changeUnavailable": "暫不可切換",
+      "creditMultiple": "{{name}} 的 {{multiple}} 倍週期點數",
+      "credits": {
+        "MONTH": "每月 {{amount}} 點數",
+        "YEAR": "每年 {{amount}} 點數"
+      }
+    },
     "sidebar": "餘額與訂閱",
     "settings": {
       "title": "用量和計費",
@@ -12206,7 +12238,7 @@
       "observedAt": "餘額更新於 {{date}}",
       "poolDetail": "已用 {{used}} · 總額 {{total}}",
       "remaining": "剩餘",
-      "progressLabel": "{{label}}使用進度",
+      "progressLabel": "{{label}}剩餘比例",
       "noPlanCredits": "當前無生效訂閱，因此沒有訂閱餘額。",
       "historyUnavailable": "歷史記錄不完整，暫時僅顯示剩餘餘額。",
       "detailsUnavailable": "用量明細暫時不可用，當前僅顯示各類餘額。",
@@ -12275,6 +12307,7 @@
     },
     "dialogs": {
       "subscription": {
+        "confirmTitle": "確認訂閱",
         "title": "選擇訂閱套餐"
       },
       "topup": {
@@ -12367,13 +12400,9 @@
       "failedBody": "支付失敗，請稍後重試或聯絡支援。"
     },
     "planChange": {
+      "emptyTitle": "暫無可切換的套餐",
       "targetTitle": "更改訂閱套餐",
       "back": "上一步",
-      "upgradeBadge": "升級",
-      "sameLevelBadge": "同等級",
-      "downgradeBadge": "降級",
-      "emptyTitle": "暫無可切換的套餐",
-      "emptyDescription": "當前沒有其他可切換的套餐。",
       "quotingTitle": "正在準備套餐變更",
       "quotingBody": "正在確認價格與生效時間…",
       "quoteTitle": "確認套餐變更",
