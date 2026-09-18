@@ -20,10 +20,34 @@
 - 运行时需要持久化秘密时，复用现有 Main／宿主管理的 credential store 或 Electron
   `safeStorage` 边界。不要新增自定义明文凭证文件，也不要把秘密下放给 Renderer、插件
   或不受信任页面。
+- 可信 Node Worker 的显式例外：`node.secretBindings[].oauthSecret` 只能引用本插件
+  已声明的 OAuth key。Host 根据本次 `authAccount`（省略时为默认账号）刷新并注入
+  短期 access token；不得注入 refresh token、返回 Renderer/Agent、写日志或落盘。
+  Worker 启动第三方 CLI 时仅用该次子进程环境传递，不修改全局环境或复用他账号配置。
+  这是高权限 Node 的受审查信任边界，不是系统沙箱或对恶意 Worker 的隔离保证。
+  实现与回归见 [nodeRuntimeBroker.ts](../../apps/desktop/src/main/cindy-brain/nodeRuntimeBroker.ts)
+  和 [nodeRuntimeBroker.test.ts](../../apps/desktop/src/main/cindy-brain/__tests__/nodeRuntimeBroker.test.ts)。
+- 插件自定义的账号昵称、展示偏好和业务配置属于插件数据，使用现有隔离 `/kv`，
+  不扩充 Host OAuth 账号模型、凭证库或专用接口。插件按账号 ID 合并这些数据用于展示
+  和选择账号；传给 Host 的授权身份仍是账号 ID，不能用昵称替代。
 - access token 等只需短期使用的秘密优先保留在内存中。日志、错误、遥测和调试输出不得
   包含凭证明文、完整鉴权头或可直接复用的授权材料。
 - 测试只使用明显无效的假凭证，不读取或复制开发者真实的 `HOME`、Agent home、
   Electron userData 或系统凭证目录。
+
+## Linux Hyprland / Omarchy 凭证后端
+
+- Desktop 在 Electron `ready` 之前为 Hyprland 默认选择 `gnome-libsecret`，避免桌面
+  自动识别失败导致登录回调收到令牌后无法加密保存。桌面身份依次取非空的
+  `XDG_CURRENT_DESKTOP`、`XDG_SESSION_DESKTOP`、`DESKTOP_SESSION`；其他桌面保持
+  Electron 原有选择。实现见
+  [linuxPasswordStore.ts](../../apps/desktop/src/main/linuxPasswordStore.ts)，回归见
+  [linuxPasswordStore.test.ts](../../apps/desktop/src/main/__tests__/linuxPasswordStore.test.ts)。
+- 显式 `--password-store` 优先于此默认值。系统仍需提供可用且已解锁的 Secret Service
+  （例如 GNOME Keyring）；此修复不安装或解锁钥匙串，也不新增明文降级。现有仅限开发版的
+  `XDT_DEV_SAFE_STORAGE_BASIC=1` 调试行为保持不变。
+- 旧版临时处理：完全退出 Cindy 后运行 `cindy --password-store=gnome-libsecret`。
+  实机验收需覆盖登录、退出应用后正常启动仍保持登录，以及 `cindy://` 回调启动路径。
 
 ## macOS safeStorage 钥匙串条目
 
@@ -60,6 +84,9 @@
 | 测试生成物 | `os.tmpdir()` 下通过 `mkdtemp` 创建的独立目录，并在测试结束时清理 |
 | Skill 卸载清理回执 | `app.getPath('userData')/skillhub/uninstall-cleanups/<token>.json`，记录操作 owner、旧文件/注册/偏好身份与完成阶段；跨窗口和重启保留，当前 owner 重试完成后删除，不作为授权凭据 |
 | 跨 profile 的共享 Skill 文件互斥 | `app.getPath('appData')/Cindy/shared-skill-mutation-locks`，仅存文件锁及未完成操作的 token/名称哈希，保证正式版/dev/isolated 共用；短期锁复用既有崩溃回收，持久屏障必须等对应清理完成后删除，读取损坏只阻止相关名称 |
+| 跨 profile 的 worktree 借用租约 | `app.getPath('appData')/Cindy/shared-worktree-runtime-leases`，模拟器工程借用时在原 profile 租约之外发布共享副本；回收器同时读取两处，源目录 I/O 结束后显式释放，释放失败由现有 `.release` 回执重试；不能因进程退出就移除保护 |
+| 旧版 worktree 回收器兼容锁 | 验证 linked worktree 的 Git 元数据与反向链接后，在源目录外的 `<commonGitDir>/worktrees/<id>/locked` 创建 Git 标准锁，避免构建中的 `git clean` 删除保护；旧版删除/池化复用已识别此锁。不覆盖用户锁，仅当最后一个共享借用结束且自建文件身份和内容仍匹配时删除。清理失败在共享租约 `.release` 中保留路径及原文件身份，由现有维护重试；旧回执仍按原身份清理 `.worktree-keep` |
+| 跨 profile 的 worktree 回收日志位置 | `app.getPath('appData')/Cindy/shared-worktree-recycle-journals`，按日志目录哈希登记原 profile 日志位置，启动日志监听和写入回收记录前原子发布；借用方只读目标资源的原始日志，不复制恢复状态、不代替 owner 执行恢复。索引跨重启保留，原日志不存在时不产生回收意图 |
 | 用户明确导出的文件 | 用户选择或任务明确指定的目标路径 |
 
 - 禁止把 `process.cwd()`、仓库根或源码目录作为 userData、凭证目录或临时目录的默认回退。

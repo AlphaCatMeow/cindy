@@ -1,3 +1,4 @@
+import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
 /**
  * NewMakerDraftRoute —— "/cc-agent/new" 路由组件:transient draft,无后端 session。
  * ---------------------------------------------------------------------------
@@ -155,6 +156,7 @@ import { crossAgentConvertService } from '@/lib/crossAgentConvertService';
 import {
   consumeNewMakerDialogueTargetRequest,
   consumeNewMakerFolderPickerRequest,
+  isSameNewMakerDevice,
   readNewMakerDialogueTargetRequest,
   readNewMakerFolderPickerRequest,
 } from './lib/newMakerRouteState';
@@ -1237,15 +1239,17 @@ export function NewMakerDraftRoute() {
     () => hasAnyModelEngineOverride() || hasAnyProviderModelOverride(),
     [modelEnginePrefsVersion, modelPresetVersion],
   );
+  const defaultVisibilityVersion = useModelVisibilityVersion();
   const suggestedDefaultTuple = useMemo(
     () =>
       resolveNewMakerDefaultTuple({
+        isModelEnabled,
         providers: localProviders,
         providersLoading: localProvidersLoading,
         availableAgents: availableVendors,
         availableAgentsLoaded,
       }),
-    [localProviders, localProvidersLoading, availableVendors, availableAgentsLoaded],
+    [localProviders, localProvidersLoading, availableVendors, availableAgentsLoaded, defaultVisibilityVersion],
   );
   useEffect(() => {
     // 远程主机 / device-link 的可用 Harness 与来源属于执行端，不能拿控制端本机登录态替它选。
@@ -2136,8 +2140,10 @@ export function NewMakerDraftRoute() {
    */
   const applyDraftTarget = useCallback(
     (req: DraftTargetRequest) => {
-      const prevDeviceId = effectiveDeviceLinkDeviceId ?? null;
-      const deviceChanged = req.deviceId !== prevDeviceId;
+      const deviceChanged = !isSameNewMakerDevice(req.deviceId, {
+        deviceLinkDeviceId: effectiveDeviceLinkDeviceId,
+        remoteHostId: effectiveRemoteHostId,
+      });
       const workingDirChanged = req.workingDir !== draft.workingDir;
 
       // chip 绑 workingDir;附件绑设备。两者条件不同,见各自函数的注释。
@@ -2261,6 +2267,7 @@ export function NewMakerDraftRoute() {
     },
     [
       effectiveDeviceLinkDeviceId,
+      effectiveRemoteHostId,
       draft.workingDir,
       capabilityAgentKind,
       stripProjectRelativeMentions,
@@ -2268,7 +2275,7 @@ export function NewMakerDraftRoute() {
     ],
   );
 
-  // “对话”分组可能在 /cc-agent/new 已经打开时再次导航到同一路由，组件不会 remount。
+  // 通用新建继承当前任务电脑；“对话”分组还可能在 /cc-agent/new 已经打开时再次导航。
   // 目标因此随 location.state 交给本页消费，而不是让侧栏直接 patch device 字段；无论首次进入
   // 还是重复导航，local ↔ remote / remote A ↔ B / 项目 → 对话都统一经过 applyDraftTarget，
   // mention、路径型附件、远程运行配置和 worktree 三态才不会绕过集中迁移。
@@ -2283,12 +2290,17 @@ export function NewMakerDraftRoute() {
     // 同路由的对话目标是比在途目录恢复更新的用户选择。先推进同一 sequence owner，
     // 让旧 restore completion 只能释放锁，不能把目录重新写回草稿。
     modePickerSelectionSeqRef.current += 1;
-    patchCollab({ enabled: false });
-    applyDraftTarget({
-      deviceId: dialogueTargetRequest.deviceId,
-      deviceName: dialogueTargetRequest.deviceName,
-      workingDir: null,
-    });
+    if (
+      !dialogueTargetRequest.preserveWorkspaceIfSameDevice ||
+      !isSameNewMakerDevice(dialogueTargetRequest.deviceId, getDraft())
+    ) {
+      patchCollab({ enabled: false });
+      applyDraftTarget({
+        deviceId: dialogueTargetRequest.deviceId,
+        deviceName: dialogueTargetRequest.deviceName,
+        workingDir: null,
+      });
+    }
     navigate(`${location.pathname}${location.search}${location.hash}`, {
       replace: true,
       state: consumeNewMakerDialogueTargetRequest(location.state),

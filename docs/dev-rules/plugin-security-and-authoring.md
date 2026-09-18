@@ -115,8 +115,9 @@
 
 ### 3.1 安装与自动更新
 
-- 首次安装只来自四种明确依据：用户导入本地 `.cindy`、明确要求当前 Agent 调用
-  `ghost_forge_install`、用户点击某个市场条目的安装，或服务端为当前 owner 下发
+- 首次安装只来自明确依据：用户导入本地 `.cindy`、明确要求当前 Agent 调用
+  `ghost_forge_install`、用户点击某个市场条目的安装、当前 Agent 按用户请求与既有操作授权
+  调用 `ghost_market_install` 安装选定的缺失插件，或服务端为当前 owner 下发
   `defaultInstall`。安装成功默认启用；插件声明哪些能力不改变
   安装动作是否需要确认，因为安装不设能力确认弹窗。
 - 市场安装账本是后续更新来源的唯一事实：服务端市场按 `pluginId + releaseId` 路由，
@@ -163,9 +164,11 @@
   真正越出沙箱的技能继续使用 receipt 绑定的字节指纹与 Host 状态根快照。不要把审计字段误写成
   全量运行时内容校验，也不要因取消能力确认弹窗而删除现有完整性守门。
 - **Forge 的源码区与 Host 受管根互斥。** `ghost_forge_scaffold` / `ghost_forge_pack` /
-  `ghost_forge_install` 的目标
-  必须是当前会话工作目录里的独立作者目录；命中安装根或状态根一律拒绝，并按 realpath
-  挡住大小写折叠与软链／junction 别名。`ghost_forge_pack` 只负责校验与打包；只有用户明确
+  `ghost_forge_install` 的目标必须是独立作者目录，不得是安装根或状态根；按 realpath
+  挡住大小写折叠与软链／junction 别名。会话工作目录内直接放行；工作目录外走与
+  `ghost_call` 过户相同的会话权限路径（本地 Full Access 自动放行，Auto 交当前会话
+  AI 审阅，Ask 弹确认卡，远程／缺会话／查询失败 fail closed），禁止在 Host 已放行
+  后再因目录边界悄悄硬断。`ghost_forge_pack` 只负责校验与打包；只有用户明确
   要求后调用独立的 `ghost_forge_install` 才安装或更新，不因 scaffold／pack 成功而隐式安装。
 - `skill` 是唯一**越出沙箱**的能力：技能指令由主 Agent 以用户全部权限执行、全局
   生效、不随 workdir 级停用隐藏。其安全边界是**声明一致性**（manifest 里的
@@ -295,14 +298,31 @@
   close／detach 已开始、会话缺失、实例不匹配、查询失败、远程会话均 fail closed。
   对 Codex、Pi 与远端 Claude Code 这类进程外 harness，instance 只作为 opaque MCP route
   identity 写入 Host 生成的 loopback URL；桥接层必须将 URL identity 与注册表中的当前实例
-  严格比对，不匹配直接 401。兼容旧客户端时，缺 instance 的 URL 可继续获得普通会话上下文，
+  严格比对，不匹配直接 401。  兼容旧客户端时，缺 instance 的 URL 可继续获得普通会话上下文，
   但必须剥除 instance 能力，使 Full Access 自动交接继续 fail closed。
+  越界文件系统副作用（cindy-docs / 电脑工具的 `outside_workdir`，以及 Forge 的
+  `forge_source`）在缺少 instance、live grant 读不到或实例已失效时直接拒绝，
+  不得退回仅凭用户确认的放行；附件过户仍可确认。
   自动批准须区分 Full Access 与 AI 审阅来源，不得伪装为用户点击，也不得写入人工目录授权
   记忆。附件自动交接必须写独立 `ghost-tool-grant`，不得写 `ghost-grant`；这是回退兼容
   边界——旧客户端只认识后者，降级时必须 fail closed，不能把新版自动交接误读成人工永久
-  授权。切回 Ask 后新请求恢复确认。Auto 的工作区草稿创建和媒体路径揭示也逐动作送审，
-  审阅期间任务实例、轮次或权限变化时旧 allow 失效。Full Access 旁路**不适用于** workspace 创建、插件
-  Setup、OAuth、Secret／凭证或其它运行时确认边界，也不改变第 3.1 节的安装／更新策略。
+  授权。切回 Ask 后新请求恢复确认。在途插件操作统一沿用当前会话的操作审批：包括工作区
+  草稿创建、工作目录写入、媒体路径揭示，Forge 在工作目录外的打包／骨架，以及
+  cindy-docs / 电脑工具读写工作目录外路径，
+  Full Access 不额外审批，Auto 进入现有统一审阅器，
+  Ask 沿用原确认流程。越界路径的确认与执行绑定裁决时解析到的规范路径，
+  工作目录里的 symlink 不能把真实目标藏成相对路径。MCP 的 `prompt-each-time` 仅限制授权记忆，不得覆盖 Full Access，
+  也不得跳过 Auto 审阅。审批期间实例、权限或调用归属失效时，旧 allow 不可执行。
+  Plan 与操作审批档位正交：Host 副作用须先检查实时 Plan 状态，未知或切换中拒绝；
+  Plan 切换代次也参与审批后和落盘前复核，不能以数据库镜像或切回原状态恢复旧授权。
+  一次性 Plan 的 UI 开关在发送后熄灭，不代表当前 Plan 回合结束；授权判定使用 Provider
+  的执行态，不能只读下一轮开关。Claude Code 本地/SSH 的 Full Access 短路同样不能
+  放行当前 Plan 回合里的非只读工具；显式批准计划后才恢复底层操作审批档位。
+  这不扩大本轮来源/执行范围、不改变跨主机路径归属，不替用户填写 Setup、OAuth、Secret
+  等必要信息，也不改变第 3.1 节的安装／更新策略。自主面板或后台调用不得借用前台会话权限。
+  实现与回归见 [Session.reviewHostPermissionAction](../../packages/maker-core/src/session.ts)、
+  [fsSlot.test.ts](../../apps/desktop/src/main/cindy-brain/__tests__/fsSlot.test.ts) 和
+  [ghostWorkdirGate.test.ts](../../apps/desktop/src/main/mcp-integrations/__tests__/ghostWorkdirGate.test.ts)。
   `dir`／`save_dir` 批准的是裁决时解析到的 canonical realpath 快照；出票必须使用该规范路径
   并在票据库内重新解析核对，路径映射已变化时拒绝并要求重新确认。出票后真正读／写时仍须
   再次核对根与目标真身；保存文件必须排他创建且不跟随最终 symlink，不能让短命票据留下消费期

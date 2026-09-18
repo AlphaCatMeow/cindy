@@ -54,6 +54,16 @@ function readRouter() {
   return fs.readFileSync(ROUTER_PATH, 'utf8');
 }
 
+test('DS-8: every desktop globals.css surface includes its generated token stylesheet', () => {
+  const { surfaces } = buildGeneratedSurfaces(ROOT);
+  const consumers = surfaces.filter(surface => surface.platform === 'desktop'
+    && surface.styleSources.includes('apps/desktop/src/renderer/styles/globals.css'));
+  assert.equal(consumers.length, 6);
+  for (const surface of consumers) {
+    assert.ok(surface.styleSources.includes('apps/desktop/src/renderer/styles/generated/tokens.css'), surface.id);
+  }
+});
+
 function tinySurface(id = 'desktop.test.surface') {
   return {
     id,
@@ -108,6 +118,7 @@ test('extractRouterFacts: 真实 router.tsx 的三类去向逐条钉死', () => 
     '/bots/:botId/direct/:threadId BotDirectMessageView',
     '/bots/:botId/history/:sessionId BotHistorySessionView',
     '/bots/:botId/session/:sessionId BotSessionView',
+    '/bots/list BotsListView',
     '/bots/remote/:deviceId/:botId RemoteBotSessionView',
     '/bots/roster BotRosterView',
     '/cc-agent/:sessionId CCAgentSessionView',
@@ -131,7 +142,7 @@ test('extractRouterFacts: 真实 router.tsx 的三类去向逐条钉死', () => 
   ]);
 
   assert.deepEqual(redirects.map((row) => `${row.path} -> ${row.to}`), [
-    '/ -> /cc-agent',
+    '/ -> (runtime home entry redirect)',
     '/billing -> /settings?tab=billing',
     '/cc-agent -> (runtime session redirect)',
     '/cc-agent/new-dialogue -> /cc-agent/new',
@@ -1006,6 +1017,7 @@ test('renderer 模块图入口双向核对: index.tsx 的参数→入口模块�
   const actualEntries = extractRendererEntries(fs.readFileSync(RENDERER_INDEX_PATH, 'utf8'));
   // 与源码实况钉死:当前 3 个参数各自加载的入口模块。
   assert.deepEqual(Object.fromEntries(actualEntries), {
+    remoteDesktopViewer: './remote-desktop-viewer-entry',
     resourceUsageWindow: './resource-usage-entry',
     sidebarWindow: './sidebar-window-entry',
     ghostPanelWindow: './ghost-panel-window-entry',

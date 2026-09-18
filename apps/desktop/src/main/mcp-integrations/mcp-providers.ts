@@ -1,3 +1,7 @@
+import { getPluginMarketService } from '../plugin-market/service.js';
+import { createProject } from './createProject.js';
+import { createMoveSession } from './moveSession.js';
+import { listProjects, renameProject, removeProject } from './projectManagement.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import type { createBotCapabilityService } from '../maker-ipc/botCapabilityService.js';
 import { routineTools } from '../routines/service.js';
@@ -7,6 +11,7 @@ import { and, eq } from 'drizzle-orm';
 import {
   createLiziMcpProviders,
   resolveLiziMcpSessionContext,
+  setSessionPathAuthorizer,
   type IOSSimulatorMcpAccessDecision,
   type LiziMcpProvider,
   type LiziMcpSessionContext,
@@ -17,6 +22,7 @@ import type { OrcaMcpDeps } from '@cindy/mcps';
 import { createCindyGhostsMcpServer } from 'cindy-tools';
 import type { MakerMemoryManager } from '@cindy/maker-core';
 import {
+  authorizeDesktopSessionPath,
   getCindyGhostsMcpDeps,
   type GhostGrantLiveSessionState,
   type CindyGhostsHostDeps,
@@ -31,6 +37,7 @@ import { getIOSSimulatorMcpDeps } from './ios-simulator.js';
 import { getBrowserMcpDeps } from './browser.js';
 import { getComputerMcpDeps } from './computer.js';
 import { feishuIm, wechatIm } from '../im';
+import { sendFeishuSessionNotification } from '../im/feishu/notificationOrigin';
 import { getSlackToolBridge } from '../hook-control/slackToolBridge.js';
 import { createLogger } from '../logger.js';
 import { getScheduler } from '../scheduler-host/index.js';
@@ -41,6 +48,7 @@ import {
   tryGetBotDelegationService,
   tryGetBotDirectMessageService,
   tryGetOrcaCollabService,
+  isSessionInTurn,
 } from '../maker-ipc/register.js';
 import { createBotProfile } from '../localDb/ipc/bots.js';
 import { submitGithubIssueForSession } from '../github-issue/index.js';
@@ -113,6 +121,9 @@ export interface DesktopMcpProvidersDeps {
 }
 
 export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMcpProvider[] {
+  setSessionPathAuthorizer((request) =>
+    authorizeDesktopSessionPath(request, deps.getLiveSessionGrantState),
+  );
   const { pluginRegistry } = deps;
   let redactSshText: ((snapshot: SshHostSnapshotLike, text: string) => string) | undefined;
   const loadRemoteSsh = async () => {
@@ -191,8 +202,14 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
       // branch-free. Feishu returns 400 with structured `response.data.code/msg`
       // for business errors (rate-limit, invalid text, …); those get folded
       // into `reason` for logging without leaking axios internals to the tool.
-      sendMessage: async (chatId, markdown) => {
+      sendMessage: async (chatId, markdown, notificationSessionId) => {
         try {
+          if (notificationSessionId && chatId === feishuIm.getOwnerOpenId()) {
+            const { messageId, sessionLinked } = await sendFeishuSessionNotification(
+              feishuIm, notificationSessionId, markdown,
+            );
+            return { ok: true, messageId, sessionLinked };
+          }
           const { messageId } = await feishuIm.sendMarkdownText(chatId, markdown);
           return { ok: true, messageId };
         } catch (err) {
@@ -355,6 +372,9 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
     // (LLM 调工具时) registerMakerIpc 早已执行完毕, holder 已 ready。
     xdtHelper: {
       logger: createLogger('mcp/cindy_helper'),
+      createProject,
+      moveSession: createMoveSession(isSessionInTurn),
+      projectManagement: { list: listProjects, rename: renameProject, remove: removeProject },
       resolveSurface: async ({ sessionId }) => {
         const dbClient = tryGetDbClient();
         if (!dbClient) return 'restricted';
@@ -519,7 +539,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
             };
           }
         },
-        getSessionTask: async ({ callerSessionId, taskId }) => {
+        getSessionTask: async ({ callerSessionId, taskId, queuedMessageId }) => {
           const svc = tryGetBotDelegationService();
           if (!svc) {
             return {
@@ -528,9 +548,9 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
               message: 'Session task service not initialized',
             };
           }
-          return svc.getSessionTask(callerSessionId, taskId);
+          return svc.getSessionTask(callerSessionId, taskId, queuedMessageId);
         },
-        stopSessionTask: async ({ callerSessionId, taskId }) => {
+        stopSessionTask: async ({ callerSessionId, taskId, mode }) => {
           const svc = tryGetBotDelegationService();
           if (!svc) {
             return {
@@ -539,10 +559,20 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
               message: 'Session task service not initialized',
             };
           }
-          return svc.stopSessionTask(callerSessionId, taskId);
+          return svc.stopSessionTask(callerSessionId, taskId, mode);
         },
       },
       botMessaging: {
+        checkMessage: async (params) => {
+          const svc = tryGetBotDirectMessageService();
+          if (!svc) return { ok: false, errorCode: 'HOST_NOT_READY', message: 'Teammate messaging is unavailable' };
+          return svc.checkMessage(params);
+        },
+        listAgents: async ({ callerSessionId }) => {
+          const svc = tryGetBotDirectMessageService();
+          if (!svc) return { ok: false, errorCode: 'HOST_NOT_READY', message: 'Teammate service is not ready' };
+          return svc.listAgents(callerSessionId);
+        },
         messageAgent: async (params) => {
           const svc = tryGetBotDirectMessageService();
           if (!svc) {
@@ -590,7 +620,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
         },
       },
       botProfiles: {
-        create: async ({ callerSessionId, name, description, identitySource, welcomeMessage }) => {
+        create: async ({ callerSessionId, name, description, identitySource }) => {
           const dbClient = tryGetDbClient();
           if (!dbClient) {
             return { ok: false, errorCode: 'HOST_NOT_READY', message: 'localDb not ready' };
@@ -615,7 +645,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
               name,
               description,
               identitySource,
-              welcomeMessage,
+              prepareInvitation: true,
             });
             return {
               ok: true,
@@ -772,6 +802,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
       name: 'cindy',
       instance: createCindyGhostsMcpServer(
         getCindyGhostsMcpDeps(ctx, {
+          pluginMarket: getPluginMarketService(),
           getAppVersion: deps.getAppVersion,
           getLiveSessionGrantState: deps.getLiveSessionGrantState,
           createMediaDownloadContext: deps.createMediaDownloadContext,

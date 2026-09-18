@@ -1,3 +1,5 @@
+import { AndroidUpdateSheet } from '@/update/AndroidUpdateSheet';
+import { PeerFileTransport } from '@/device-link/peerFileTransport';
 import { startLocalDiagnostics } from '@/debug/localDiagnostics';
 import {
   DarkTheme as NavigationDarkTheme,
@@ -73,6 +75,8 @@ import {
   isPrecreatedWorktreeRegistrationInFlight,
   recoverPendingPrecreatedWorktrees,
 } from '@/session/precreatedWorktreeRecovery';
+import { IncomingShareBridge } from '@/session/IncomingShareBridge';
+import { HomeEntryProvider, useHomeEntrySplashRelease } from '@/session/HomeEntryProvider';
 
 function NavigationGate() {
   const auth = useAuth();
@@ -100,11 +104,9 @@ function NavigationGate() {
     [mode, colors],
   );
 
-  // auth 恢复是启动闸门链的最后一道门:这里统一释放根部常驻 splash。
-  // 放在 NavigationGate 而不是具体页面,是为了深链冷启动(首屏不是 index)也能释放。
-  useEffect(() => {
-    if (auth.initialized) releaseSplash();
-  }, [auth.initialized, releaseSplash]);
+  // 登录与本机首页偏好就绪、默认入口重定向完成后再释放常驻 splash。
+  // 深链不经过 index；同样在这里释放，避免先露出任务再跳回伙伴。
+  useHomeEntrySplashRelease(releaseSplash);
 
   // 启动链走完 = 本次热更 reload(如果有)确实落地:清掉 reload 闸门记录。
   // 只在目标 update 已成为当前运行版本时才清,判定在 markStartupOtaLaunchSuccess 内。
@@ -139,6 +141,7 @@ function NavigationGate() {
 
   return (
     <NavigationThemeProvider value={navigationTheme}>
+      <IncomingShareBridge />
       {/* Android 专用:splash 覆盖层仍在时状态栏保持浅色;淡出开始后切回主题样式 */}
       {Platform.OS === 'android' ? (
         <StatusBar
@@ -331,8 +334,11 @@ function RootAfterUpdateChannel({ channel }: { channel: UpdateChannel }) {
       {/* 任务完成推送:注册同步 + 通知点击路由 + 前台横幅压制(不渲染 UI) */}
       <PushNotificationsBridge />
       <DeviceLinkProvider>
+        <PeerFileTransport />
         <PrecreatedWorktreeRecoveryBridge />
-        <NavigationGate />
+        <HomeEntryProvider>
+          <NavigationGate />
+        </HomeEntryProvider>
       </DeviceLinkProvider>
     </AuthProvider>
   );
@@ -428,6 +434,7 @@ function RootLayout() {
                 hidden={endpointGate.status === 'error' || forcedUpdate !== null}
               >
                 <ConnectionNoticeProvider>{body}</ConnectionNoticeProvider>
+                <AndroidUpdateSheet />
               </StartupSplashOverlay>
             </MobileLoginHandoffProvider>
           </LocaleProvider>
