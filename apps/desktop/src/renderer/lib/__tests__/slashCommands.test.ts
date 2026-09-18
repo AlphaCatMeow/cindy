@@ -5,6 +5,7 @@ import {
   firstAvailableSlashCommandIndex,
   hasAvailableSlashCommand,
   hasUnavailableProjectSkillPreview,
+  isCindyOfficialSlashCommand,
   isSlashCommandUnavailable,
   mergeCommands,
   nextAvailableSlashCommandIndex,
@@ -116,7 +117,7 @@ describe('rewriteAgentSkillInvocationForDispatch', () => {
 });
 
 describe('filterSlashCommands', () => {
-  it('places a Cindy built-in Skill before ordinary commands in the initial palette', () => {
+  it('places Cindy official entries before ordinary commands in the initial palette', () => {
     const commands = [
       { kind: 'desktop' as const, name: 'help', description: 'Help' },
       {
@@ -125,14 +126,30 @@ describe('filterSlashCommands', () => {
         description: 'Create or update a Cindy Skill',
         source: 'skill' as const,
       },
+      { kind: 'desktop' as const, name: 'learn', description: 'Learn' },
       { kind: 'agent-skill' as const, name: 'release-notes', source: 'skill' as const },
     ];
 
     expect(filterSlashCommands(commands, '').map((command) => command.name)).toEqual([
       'cindy-skill-creator',
+      'learn',
       'help',
       'release-notes',
     ]);
+  });
+
+  it('recognizes only the Desktop /learn command as official', () => {
+    expect(isCindyOfficialSlashCommand({
+      kind: 'desktop',
+      name: 'learn',
+      description: 'Learn',
+    })).toBe(true);
+    expect(isCindyOfficialSlashCommand({
+      kind: 'agent-skill',
+      name: 'learn',
+      description: 'My Learn workflow',
+      source: 'skill',
+    })).toBe(false);
   });
 
   it('matches command names by case-insensitive containment', () => {

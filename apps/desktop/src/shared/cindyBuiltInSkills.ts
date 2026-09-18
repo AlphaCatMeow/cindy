@@ -1,5 +1,7 @@
 export const CINDY_SKILL_CREATOR_NAME = 'cindy-skill-creator';
 
+const CINDY_OFFICIAL_DESKTOP_COMMAND_NAMES = new Set(['learn']);
+
 const CINDY_SKILL_CREATOR_SOURCE_DESCRIPTIONS = new Set([
   'Create or update a Cindy Skill',
   'Create or update a skill',
@@ -19,4 +21,9 @@ export function isCindyBuiltInSkillMetadata(skill: {
     skill.description
     && CINDY_SKILL_CREATOR_SOURCE_DESCRIPTIONS.has(skill.description.trim()),
   );
+}
+
+/** Identify Desktop commands owned and shipped by Cindy. */
+export function isCindyOfficialDesktopCommandName(name: string): boolean {
+  return CINDY_OFFICIAL_DESKTOP_COMMAND_NAMES.has(name);
 }

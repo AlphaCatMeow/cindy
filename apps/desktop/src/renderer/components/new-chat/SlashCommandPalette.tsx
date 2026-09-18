@@ -22,12 +22,12 @@ import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   filterSlashCommands,
+  isCindyOfficialSlashCommand,
   isSlashCommandUnavailable,
   type UnifiedCommand,
 } from '@/lib/slashCommands';
 import { builtInSkillDescriptionKey } from '@/features/skillhub/lib/builtInSkillPresentation';
 import { OfficialSkillBadge } from '@/features/skillhub/components/OfficialSkillBadge';
-import { isCindyBuiltInSkillMetadata } from '@/../shared/cindyBuiltInSkills';
 
 const TOOLTIP_W = 280;
 const TOOLTIP_GAP = 8;
@@ -249,7 +249,7 @@ export function SlashCommandPalette({
           filtered.map((cmd, idx) => {
             const focused = idx === focusedIndex;
             const unavailable = isSlashCommandUnavailable(cmd);
-            const official = cmd.kind === 'agent-skill' && isCindyBuiltInSkillMetadata(cmd);
+            const official = isCindyOfficialSlashCommand(cmd);
             return (
               <button
                 key={cmd.name}

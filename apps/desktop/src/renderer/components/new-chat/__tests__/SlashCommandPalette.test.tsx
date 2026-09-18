@@ -199,4 +199,39 @@ describe('SlashCommandPalette project Skill rows', () => {
     expect(screen.queryByText('skillhub.builtIn.skillCreator.description')).toBeNull();
     expect(screen.queryByText('skillhub.builtIn.official')).toBeNull();
   });
+
+  it('marks Cindy Desktop /learn as official', () => {
+    render(
+      <SlashCommandPalette
+        query=""
+        commands={[{ kind: 'desktop', name: 'learn', description: 'Learn from this task' }]}
+        focusedIndex={0}
+        onFocusedIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('skillhub.builtIn.official')).toBeTruthy();
+  });
+
+  it('does not mark a user Skill named learn as official', () => {
+    render(
+      <SlashCommandPalette
+        query=""
+        commands={[{
+          kind: 'agent-skill',
+          name: 'learn',
+          description: 'My Learn workflow',
+          source: 'skill',
+        }]}
+        focusedIndex={0}
+        onFocusedIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('skillhub.builtIn.official')).toBeNull();
+  });
 });

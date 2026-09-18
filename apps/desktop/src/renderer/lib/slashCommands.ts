@@ -19,7 +19,10 @@
 import type { UnifiedCommand, AgentKind } from '@cindy/maker-core';
 import { leadingSlashInvocation } from '@cindy/maker-shared';
 import type { PiPackageCommandRuntimeStatus } from '@/../shared/piPackages';
-import { isCindyBuiltInSkillMetadata } from '@/../shared/cindyBuiltInSkills';
+import {
+  isCindyBuiltInSkillMetadata,
+  isCindyOfficialDesktopCommandName,
+} from '@/../shared/cindyBuiltInSkills';
 
 export { leadingSlashInvocation };
 
@@ -39,6 +42,13 @@ export function isSlashCommandUnavailable(command: UnifiedCommand): boolean {
       || command.runtimeStatus === 'unknown'
       || command.runtimeStatus === 'failed'
     );
+}
+
+export function isCindyOfficialSlashCommand(command: UnifiedCommand): boolean {
+  if (command.kind === 'desktop') {
+    return isCindyOfficialDesktopCommandName(command.name);
+  }
+  return command.kind === 'agent-skill' && isCindyBuiltInSkillMetadata(command);
 }
 
 export function hasAvailableSlashCommand(commands: readonly UnifiedCommand[]): boolean {
@@ -277,8 +287,7 @@ export function filterSlashCommands(
     .map((command, index) => {
       const name = command.name.toLowerCase();
       const rank = q ? (name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : -1) : 0;
-      const officialPriority = command.kind === 'agent-skill'
-        && isCindyBuiltInSkillMetadata(command) ? 0 : 1;
+      const officialPriority = isCindyOfficialSlashCommand(command) ? 0 : 1;
       return { command, index, rank, officialPriority };
     })
     .filter((entry) => entry.rank >= 0)
