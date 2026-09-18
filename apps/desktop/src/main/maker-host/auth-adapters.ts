@@ -42,7 +42,6 @@ import { prepareSharedGlobalSkillLinks } from './shared-global-skills.js';
 import {
   prepareBuiltInSkills,
   refreshBuiltInClaudeSkillLinks,
-  refreshBuiltInSharedSkillLinks,
   resolveBundledSystemSkillsRoot,
 } from './built-in-skills.js';
 import {
@@ -606,9 +605,9 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     try {
       const ownerId = getActiveAppSession().dataOwnerId;
       const result = await withSharedGlobalSkillProjectionMutation(ownerId, async () => {
-        // Bundle activation and every projection of that bundle share one
-        // stable-owner critical section. Passive instances are rejected before
-        // they can switch the process-independent active manifest.
+        // Bundle publication projects every managed Agent link before it
+        // advances the active manifest. The stable-owner boundary prevents a
+        // passive profile from participating in that transaction.
         const preparedBuiltIns = await prepareBuiltInSkills({
           bundledRoot: resolveBundledSystemSkillsRoot({
             isPackaged: app.isPackaged,
@@ -618,17 +617,15 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
           userDataDir: app.getPath('userData'),
           appDataDir: app.getPath('appData'),
         });
-        const builtInSharedProjection = preparedBuiltIns.projectionSafe
-          ? await refreshBuiltInSharedSkillLinks({
-              userDataDir: app.getPath('userData'),
-              appDataDir: app.getPath('appData'),
-              descriptors: preparedBuiltIns.descriptors,
-            })
-          : { warnings: ['skipped built-in Skill projection because the active bundle could not be verified'] };
         const sharedProjection = await prepareSharedGlobalSkillLinks({
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
         });
-        const isolatedClaudeProjection = preparedBuiltIns.projectionSafe
+        // Publication already established a usable Claude projection before
+        // switching the manifest. Reconcile once more after the generic
+        // palette sync so a newly surfaced user-owned ~/.claude winner keeps
+        // precedence; atomic link replacement preserves the usable projection
+        // if this optional refinement fails.
+        const claudePaletteProjection = preparedBuiltIns.projectionSafe
           ? await refreshBuiltInClaudeSkillLinks({
               userDataDir: app.getPath('userData'),
               appDataDir: app.getPath('appData'),
@@ -638,9 +635,8 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
         return {
           warnings: [
             ...preparedBuiltIns.warnings,
-            ...builtInSharedProjection.warnings,
             ...sharedProjection.warnings,
-            ...isolatedClaudeProjection.warnings,
+            ...claudePaletteProjection.warnings,
           ],
         };
       });

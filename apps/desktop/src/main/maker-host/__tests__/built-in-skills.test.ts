@@ -9,7 +9,6 @@ import {
   markCindyBuiltInAgentSkills,
   prepareBuiltInSkills,
   refreshBuiltInClaudeSkillLinks,
-  refreshBuiltInSharedSkillLinks,
   resolveBundledSystemSkillsRoot,
 } from '../built-in-skills';
 
@@ -45,30 +44,7 @@ function fixture() {
 async function prepareAndProjectBuiltInSkills(
   input: ReturnType<typeof fixture> & { bundleVersion?: number },
 ) {
-  const prepared = await prepareBuiltInSkills(input);
-  const shared = prepared.projectionSafe
-    ? await refreshBuiltInSharedSkillLinks({
-        userDataDir: input.userDataDir,
-        appDataDir: input.appDataDir,
-        homeDir: input.homeDir,
-        descriptors: prepared.descriptors,
-        withSharedMutation: input.withSharedMutation,
-      })
-    : { changed: false, warnings: [] };
-  const claude = prepared.projectionSafe
-    ? await refreshBuiltInClaudeSkillLinks({
-        userDataDir: input.userDataDir,
-        appDataDir: input.appDataDir,
-        homeDir: input.homeDir,
-        descriptors: prepared.descriptors,
-        withSharedMutation: input.withSharedMutation,
-      })
-    : { changed: false, warnings: [] };
-  return {
-    ...prepared,
-    changed: prepared.changed || shared.changed || claude.changed,
-    warnings: [...prepared.warnings, ...shared.warnings, ...claude.warnings],
-  };
+  return prepareBuiltInSkills(input);
 }
 
 afterEach(() => {
@@ -344,6 +320,116 @@ describe('built-in Skills', () => {
     expect(fs.readdirSync(versionsRoot)).toEqual([initialActiveBundle]);
   });
 
+  it('rolls every Agent projection back before keeping the previous manifest', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const manifestPath = path.join(root, '.cindy-system-skills.json');
+    const initialManifest = fs.readFileSync(manifestPath, 'utf8');
+    const initialCreator = initial.descriptors.find(
+      (descriptor) => descriptor.name === 'cindy-skill-creator',
+    )!;
+    const initialLearn = initial.descriptors.find((descriptor) => descriptor.name === 'learn')!;
+    const creatorLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    const learnLink = path.join(input.homeDir, '.agents', 'skills', 'learn');
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
+    fs.appendFileSync(path.join(input.bundledRoot, 'learn', 'SKILL.md'), '\nLearn v2\n');
+
+    const originalSymlink = fs.promises.symlink.bind(fs.promises);
+    vi.spyOn(fs.promises, 'symlink').mockImplementation(async (target, linkPath, type) => {
+      if (
+        String(target).includes(`${path.sep}.versions${path.sep}v9-`)
+        && String(linkPath).includes(`learn.next-`)
+      ) {
+        throw new Error('blocked Learn projection');
+      }
+      await originalSymlink(target, linkPath, type);
+    });
+
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 9 });
+
+    expect(failed.changed).toBe(false);
+    expect(failed.projectionSafe).toBe(true);
+    expect(failed.warnings.join('\n')).toContain('blocked Learn projection');
+    expect(failed.warnings.join('\n')).toContain('not every Agent projection accepted');
+    expect(fs.readFileSync(manifestPath, 'utf8')).toBe(initialManifest);
+    expect(fs.realpathSync(creatorLink)).toBe(fs.realpathSync(initialCreator.absolutePath));
+    expect(fs.realpathSync(learnLink)).toBe(fs.realpathSync(initialLearn.absolutePath));
+    expect(fs.realpathSync(initialCreator.nativeClaudePath)).toBe(
+      fs.realpathSync(initialCreator.absolutePath),
+    );
+    expect(fs.realpathSync(initialLearn.nativeClaudePath)).toBe(
+      fs.realpathSync(initialLearn.absolutePath),
+    );
+    expect(fs.readdirSync(path.join(root, '.versions'))).toEqual([
+      JSON.parse(initialManifest).activeBundle,
+    ]);
+  });
+
+  it('repairs projections left on an unpublished bundle before another activation', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const orphanBundle = 'v9-aaaaaaaaaaaaaaaa-00000000-0000-0000-0000-000000000000';
+    const orphanRoot = path.join(root, '.versions', orphanBundle);
+    fs.cpSync(path.dirname(initial.descriptors[0]!.absolutePath), orphanRoot, { recursive: true });
+    const creatorLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    fs.unlinkSync(creatorLink);
+    fs.symlinkSync(
+      path.join(orphanRoot, 'cindy-skill-creator'),
+      creatorLink,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const repaired = await prepareBuiltInSkills(input);
+
+    expect(repaired.projectionSafe).toBe(true);
+    expect(fs.realpathSync(creatorLink)).toBe(
+      fs.realpathSync(initial.descriptors[0]!.absolutePath),
+    );
+  });
+
+  it('removes first-install projections when no bundle was ever activated', async () => {
+    const input = fixture();
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const orphanBundle = 'v8-bbbbbbbbbbbbbbbb-00000000-0000-0000-0000-000000000000';
+    const orphanRoot = path.join(root, '.versions', orphanBundle);
+    const sharedLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    const nativeLink = path.join(input.userDataDir, 'claude-home', 'skills', 'cindy-skill-creator');
+    fs.mkdirSync(path.join(orphanRoot, 'cindy-skill-creator'), { recursive: true });
+    fs.writeFileSync(
+      path.join(orphanRoot, 'cindy-skill-creator', 'SKILL.md'),
+      '# Unpublished\n',
+    );
+    fs.mkdirSync(path.dirname(sharedLink), { recursive: true });
+    fs.mkdirSync(path.dirname(nativeLink), { recursive: true });
+    fs.symlinkSync(
+      path.join(orphanRoot, 'cindy-skill-creator'),
+      sharedLink,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    fs.symlinkSync(sharedLink, nativeLink, process.platform === 'win32' ? 'junction' : 'dir');
+    fs.writeFileSync(
+      path.join(root, '.cindy-system-skills.json'),
+      `${JSON.stringify({ schemaVersion: 2, bundleVersion: 0, fingerprints: {} })}\n`,
+    );
+    fs.renameSync(
+      path.join(input.bundledRoot, 'learn', 'SKILL.md'),
+      path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
+    );
+
+    const recovered = await prepareBuiltInSkills(input);
+
+    expect(recovered.projectionSafe).toBe(false);
+    expect(recovered.warnings.join('\n')).toContain('missing SKILL.md');
+    expect(fs.existsSync(sharedLink)).toBe(false);
+    expect(fs.existsSync(nativeLink)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(
+      path.join(root, '.cindy-system-skills.json'),
+      'utf8',
+    ))).toEqual({ schemaVersion: 2, bundleVersion: 0, fingerprints: {} });
+  });
+
   it('creates a durable empty manifest before publishing the first version', async () => {
     const input = fixture();
     const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
@@ -437,18 +523,20 @@ describe('built-in Skills', () => {
     expect(fs.existsSync(path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator'))).toBe(false);
   });
 
-  it('materializes app-owned bytes without mutating home-level discovery roots', async () => {
+  it('does not activate app-owned bytes until home and Claude projections are ready', async () => {
     const input = fixture();
     const result = await prepareBuiltInSkills(input);
 
     expect(fs.existsSync(result.descriptors[0]!.absolutePath)).toBe(true);
-    expect(fs.existsSync(path.join(
+    expect(fs.realpathSync(path.join(
       input.homeDir,
       '.agents',
       'skills',
       'cindy-skill-creator',
-    ))).toBe(false);
-    expect(fs.existsSync(result.descriptors[0]!.nativeClaudePath)).toBe(false);
+    ))).toBe(fs.realpathSync(result.descriptors[0]!.absolutePath));
+    expect(fs.realpathSync(result.descriptors[0]!.nativeClaudePath)).toBe(
+      fs.realpathSync(result.descriptors[0]!.absolutePath),
+    );
   });
 
   it('waits a bounded interval for another profile to finish materialization', async () => {

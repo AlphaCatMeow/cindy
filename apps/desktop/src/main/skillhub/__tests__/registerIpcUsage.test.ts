@@ -470,6 +470,55 @@ describe('registerSkillhubIpc usage handlers', () => {
     expect(writeSkillFile).not.toHaveBeenCalled();
   });
 
+  it('preserves the built-in attestation when discovery used a shared alias', async () => {
+    const builtInRoot = path.join(fixtureRoot, 'shared-system-skills', 'learn');
+    const builtInFile = path.join(builtInRoot, 'SKILL.md');
+    const sharedAlias = path.join(fixtureRoot, 'home', '.agents', 'skills', 'learn');
+    fs.mkdirSync(builtInRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(sharedAlias), { recursive: true });
+    fs.writeFileSync(builtInFile, '# Learn\n');
+    fs.symlinkSync(builtInRoot, sharedAlias, process.platform === 'win32' ? 'junction' : 'dir');
+    const physicalBuiltInRoot = fs.realpathSync.native(builtInRoot);
+    const attestedRoot = process.platform === 'win32'
+      ? physicalBuiltInRoot.toLowerCase()
+      : physicalBuiltInRoot;
+    const sender = { id: 181, on: vi.fn(), once: vi.fn() };
+    resolveExistingSkillPathForGrant.mockReturnValue(physicalBuiltInRoot);
+    isExistingSkillPathGranted.mockReturnValue(true);
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        id: 'builtin:learn',
+        kind: 'skill',
+        name: 'learn',
+        absolutePath: builtInRoot,
+        discoveredPath: sharedAlias,
+        discoveryPaths: [sharedAlias],
+        scope: 'global',
+        builtIn: true,
+      }],
+      sources: [],
+    });
+    readSkillRawFile.mockResolvedValue({ success: true, content: '# Learn\n' });
+    const { registerSkillhubIpc } = await import('../registerIpc');
+    registerSkillhubIpc({
+      getMaker: () => ({ listAgentSkills }) as never,
+      getManagedSkillRoots,
+      getBuiltInSkills: () => [{
+        name: 'learn',
+        absolutePath: builtInRoot,
+        nativeClaudePath: '/tmp/claude-home/skills/learn',
+      }],
+      getAllowedProjectRoots,
+      marketService: marketService as never,
+      publishService: { publish, cancel } as never,
+    });
+
+    await handlers.get('skillhub:scan')?.({ sender }, { projects: [] });
+    await handlers.get('skillhub:read-raw')?.({ sender }, { filePath: builtInFile });
+
+    expect(readSkillRawFile).toHaveBeenCalledWith({ filePath: builtInFile, attestedRoot });
+  });
+
   it('keeps a scanned built-in version immutable after the active bundle advances', async () => {
     const versionsRoot = path.join(fixtureRoot, 'shared-system-skills', '.versions');
     const previousRoot = path.join(versionsRoot, 'v7-previous', 'learn');
@@ -911,10 +960,13 @@ describe('registerSkillhubIpc usage handlers', () => {
     });
     scanAllSkills.mockResolvedValueOnce({
       skills: [{
+        id: 'builtin:cindy-skill-creator',
+        name: 'cindy-skill-creator',
         absolutePath: builtInRoot,
         discoveredPath: builtInRoot,
         scope: 'user',
         kind: 'skill',
+        builtIn: true,
       }],
       sources: [],
     });

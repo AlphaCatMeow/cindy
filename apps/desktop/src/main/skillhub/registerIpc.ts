@@ -236,9 +236,22 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
         ? projectRootKey(skill.projectRoot)
         : undefined;
       if (skill.scope === 'project' && !skillProjectRootKey) continue;
+      // A built-in discovered through ~/.agents/skills still resolves to the
+      // app-owned physical root. Keep Main's built-in attestation instead of
+      // downgrading it to an ordinary discovery grant, otherwise the later
+      // read handlers re-apply the lexical user-skill whitelist and reject the
+      // exact path that the scan returned.
+      if (skill.builtIn === true) {
+        const root = configuredBuiltInRoot(skill.absolutePath);
+        const entryKey = root ? `${root}\0built-in` : null;
+        if (root && entryKey && !seenEntries.has(entryKey)) {
+          seenEntries.add(entryKey);
+          entries.push({ root, builtIn: true });
+        }
+        continue;
+      }
       // discoveredPath preserves an allowed lexical alias when absolutePath was
       // canonicalized through a parent-directory symlink.
-      let remembered = false;
       for (const candidate of [skill.discoveredPath, skill.absolutePath]) {
         const root = resolveExistingSkillPathForGrant(candidate);
         if (root) {
@@ -250,19 +263,7 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
               ...(skillProjectRootKey ? { projectRootKey: skillProjectRootKey } : {}),
             });
           }
-          remembered = true;
           break;
-        }
-      }
-      // Scanner may inject the official copy when a same-name user Skill owns
-      // every normal discovery alias. Authorize only the exact physical root
-      // supplied by Main so its detail/files view remains readable.
-      if (!remembered) {
-        const root = configuredBuiltInRoot(skill.absolutePath);
-        const entryKey = root ? `${root}\0built-in` : null;
-        if (root && entryKey && !seenEntries.has(entryKey)) {
-          seenEntries.add(entryKey);
-          entries.push({ root, builtIn: true });
         }
       }
     }
