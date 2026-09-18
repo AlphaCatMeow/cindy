@@ -2737,17 +2737,9 @@ export function MessageStream({
   const [firstVisibleItemKey, setFirstVisibleItemKey] = useState<string | null>(() => {
     return resolveRestoredRenderWindow(restoreSnapshotRef.current).anchor;
   });
-  // 两段式默认窗口的当前尺寸(FIRST_PAINT → 空闲期扩到 INITIAL)。只影响
-  // firstVisibleItemKey === null 的"默认窗口"分支;锚点窗口不看它。
-  // "默认窗口 + 非贴底"快照已在上面转为锚点窗口,不再进本分支;仅
-  // viewportTopKey 缺失的降级路径仍需全量 INITIAL 保命中率。
-  const [defaultWindowItems, setDefaultWindowItems] = useState(() => {
-    const snap = restoringRef.current ? restoreSnapshotRef.current : null;
-    if (snap && snap.windowAnchorKey === null && !snap.isNearBottom && !snap.viewportTopKey) {
-      return RENDER_WINDOW_INITIAL_ITEMS;
-    }
-    return RENDER_WINDOW_FIRST_PAINT_ITEMS;
-  });
+  // 默认尾窗首个提交就使用最终容量。若先画 15 条、再在空闲期扩到 80 条，
+  // 切换任务时会把更早消息插入视口上方并触发一次可见的滚动补偿。
+  const defaultWindowItems = RENDER_WINDOW_INITIAL_ITEMS;
   /**
    * 锚点窗口向后的 item 上界（render-window-bidirectional 要点 1）。
    * 仅 firstVisibleItemKey !== null 时生效；null（默认窗口）时不参与 slice。
@@ -3026,18 +3018,10 @@ export function MessageStream({
   const { items: visibleRenderItems, startIdx: visibleStartIdx } = useMemo(() => {
     if (allRenderItems.length === 0) return { items: allRenderItems, startIdx: 0 };
     if (firstVisibleItemKey === null) {
-      // 首帧阶段(defaultWindowItems 还没被空闲扩窗抬到 INITIAL)叠加内容预算:
-      // 条数上限防"多而小",字节预算防"少而大"(单条 12KB 表格 × 15 条 = ~380ms)。
-      // 顺序:先 snap(边界吸附向前扩)再按预算收 —— 预算是硬上界,否则 snap 会把
-      // 刚裁掉的大条目又吸回来。预算收窄后的起点可能不在 turn 边界上(顶部短暂出现
-      // 无上下文卡片),空闲扩窗(→INITIAL)会在 ~1s 内带着正常 snap 重建窗口。
+      // 默认尾窗固定使用 INITIAL 容量；字节预算只在明确的首屏窗口策略中使用。
       const countStartIdx = Math.max(0, allRenderItems.length - defaultWindowItems);
       const snappedStartIdx = snapRenderWindowStartIdx(allRenderItems, countStartIdx);
-      const defaultStartIdx =
-        defaultWindowItems < RENDER_WINDOW_INITIAL_ITEMS
-          ? clampTailWindowStartByBudget(allRenderItems, snappedStartIdx)
-          : snappedStartIdx;
-      return { items: allRenderItems.slice(defaultStartIdx), startIdx: defaultStartIdx };
+      return { items: allRenderItems.slice(snappedStartIdx), startIdx: snappedStartIdx };
     }
     let idx = allRenderItems.findIndex((it) => it.key === firstVisibleItemKey);
     if (idx < 0) {
@@ -3070,39 +3054,6 @@ export function MessageStream({
     defaultWindowItems,
     anchoredForwardItems,
   ]);
-
-  // 两段式默认窗口第二段:首帧(非空)提交后,空闲期把默认窗口扩回 INITIAL。
-  // 只在仍钉底时扩(prepend 在视口上方,pin-to-bottom layout effect 同帧重钉,
-  // 无跳动);已向上滚离底部 / 已切到锚点窗口的,交给既有 expandWindow 路径。
-  // requestIdleCallback 带 1s timeout 兜底;测试等无 ric 环境退化为 setTimeout。
-  useEffect(() => {
-    if (firstVisibleItemKey !== null) return;
-    if (visibleRenderItems.length === 0) return;
-    // 不能只比较 allItems <= defaultWindowItems。短会话的声明窗口容量可能已
-    // 覆盖全量，但首帧字节预算仍会把实际 DOM 起点向后裁；此时 visible.length
-    // 才是窗口是否完整的事实源。只要实际可见数 < 全量，就要在空闲期 boost，
-    // 将 defaultWindowItems 升到 INITIAL（预算仅在 <INITIAL 阶段生效），恢复全部 item。
-    if (
-      !shouldBoostDefaultWindow({
-        allItemCount: allRenderItems.length,
-        visibleItemCount: visibleRenderItems.length,
-        defaultWindowItems,
-      })
-    ) {
-      return;
-    }
-    const boost = () => {
-      if (isNearBottomRef.current) {
-        setDefaultWindowItems(RENDER_WINDOW_INITIAL_ITEMS);
-      }
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(boost, { timeout: 1000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const id = window.setTimeout(boost, 200);
-    return () => window.clearTimeout(id);
-  }, [defaultWindowItems, firstVisibleItemKey, visibleRenderItems.length, allRenderItems.length]);
 
   // 镜像 ref：unmount cleanup / ResizeObserver / 落定回调里读最新值（闭包会 stale）。
   const visibleRenderItemsRef = useRef(visibleRenderItems);
