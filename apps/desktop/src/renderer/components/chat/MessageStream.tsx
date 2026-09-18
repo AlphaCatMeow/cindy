@@ -71,7 +71,6 @@ import type {
   ContinuationInFlightProjectionCapability,
 } from '@/hooks/useCCAgentChat';
 import { Spinner } from '@/components/ui/spinner';
-import { BrandLoadingMark } from '@/components/branding/BrandLoadingMark';
 import { useMessageNavRailPreference } from '@/hooks/useMessageNavRailPreference';
 import { HISTORY_GAP_SPLIT_MS } from '@/lib/historyGap';
 import { projectRemoteUsers } from '@/lib/remoteUserHandoff';
@@ -229,8 +228,6 @@ export const RENDER_WINDOW_INITIAL_ITEMS = 80;
 export const RENDER_WINDOW_FIRST_PAINT_ITEMS = 15;
 const RENDER_WINDOW_GROWTH_ITEMS = 80;
 const RENDER_WINDOW_BOUNDARY_LOOKBACK_ITEMS = 24;
-/** shell-first mount 的首帧空窗口。模块级常量保证引用稳定,不触发下游 memo 重算。 */
-const EMPTY_RENDER_ITEMS: RenderItem[] = [];
 
 function eventTargetElement(target: EventTarget | null): HTMLElement | null {
   if (target instanceof HTMLElement) return target;
@@ -2895,23 +2892,11 @@ export function MessageStream({
    * `slice(startIdx, startIdx + anchoredForwardItems)`，配合向下扩窗（要点 1）。
    * 同时导出 startIdx 供 windowAtTop 判定使用（要点 2）。
    */
-  // ── 切换立即响应(shell-first mount)──
-  // 旧行为:点击切 session → 首个提交同步构建整个消息树 → 期间界面冻结(压测
-  // session 实测 ~380ms 无响应),体感是"卡住才切过去"。
-  // 新行为:首个提交只渲染外壳(标题栏/输入框/空消息区 + spinner),消息树推迟
-  // 到外壳绘制后的下一帧 —— 点击零冻结,先切进去再看到内容浮现(对齐 Codex
-  // Desktop 的加载体感)。挂载后的滚动定位不受影响:pin-to-bottom 与 applyRestore
-  // 都由 ResizeObserver 在内容真正挂载时驱动,首帧空内容它们自然 no-op。
-  // 各 auto-fill effect 均有 `visibleRenderItems.length === 0` 早退守卫,空帧不误触发。
-  const [firstMountDeferred, setFirstMountDeferred] = useState(true);
-  useEffect(() => {
-    // rAF 保证外壳那一帧真正上屏后才挂消息树;卸载时取消,防 setState-after-unmount。
-    const raf = requestAnimationFrame(() => setFirstMountDeferred(false));
-    return () => cancelAnimationFrame(raf);
-  }, []);
+  // ── 切换首帧 ──
+  // 首个提交直接渲染有界的首屏窗口，保留首屏成本控制；滚动锚点恢复仍由
+  // layout effect 和 ResizeObserver 处理。
 
   const { items: visibleRenderItems, startIdx: visibleStartIdx } = useMemo(() => {
-    if (firstMountDeferred) return { items: EMPTY_RENDER_ITEMS, startIdx: 0 };
     if (allRenderItems.length === 0) return { items: allRenderItems, startIdx: 0 };
     if (firstVisibleItemKey === null) {
       // 首帧阶段(defaultWindowItems 还没被空闲扩窗抬到 INITIAL)叠加内容预算:
@@ -2974,7 +2959,6 @@ export function MessageStream({
     firstVisibleItemKey,
     defaultWindowItems,
     anchoredForwardItems,
-    firstMountDeferred,
   ]);
 
   // If a restored default-tail anchor fell out of the tail while this session
@@ -5556,10 +5540,6 @@ export function MessageStream({
       onInlinePlanVisibilityChange(null);
       return;
     }
-    // shell-first 的首帧故意不挂消息树。此时保持“未知”而不是误报不可见，避免
-    // 品牌 loading 帧里 composer 胶囊抢先闪一下。
-    if (firstMountDeferred) return;
-
     const root = scrollRef.current;
     const card = root
       ? [...root.querySelectorAll<HTMLElement>('[data-inline-plan-key]')].find(
@@ -5613,7 +5593,6 @@ export function MessageStream({
       resizeObserver?.disconnect();
     };
   }, [
-    firstMountDeferred,
     latestInlinePlanKey,
     latestInlinePlanRendered,
     onInlinePlanVisibilityChange,
@@ -5641,16 +5620,6 @@ export function MessageStream({
       <GhostFulfillmentContext.Provider value={ghostCallsByUserTurn}>
         <ImageGalleryContext.Provider value={sessionImageSrcs}>
           <div className="relative h-full w-full">
-            {/* shell-first mount:外壳帧(消息树推迟一帧挂载)的品牌加载指示。
-                挂在滚动容器外的 overlay 层,视口正中(absolute inset-0 center),
-                不随滚动内容移动,也不参与 contentH / pin-to-bottom 计算。
-                只在确有内容待挂时挂载;指示器自带延迟浮现(CSS animation-delay)
-                —— 小会话下一帧就挂载完,指示器从未可见,不闪 loading。 */}
-            {firstMountDeferred && messages.length > 0 && (
-              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-                <BrandLoadingMark />
-              </div>
-            )}
             {/* chat-text-quote:选中消息文字 → 浮出"添加到对话"按钮(portal 到 body)。
           绑定本流的滚动容器:协同模式多流并存时,选区归属按各自容器判定。 */}
             {sessionId ? (
