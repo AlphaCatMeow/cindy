@@ -88,7 +88,7 @@ describe('built-in Skills', () => {
     const link = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
     expect(first.changed).toBe(true);
     expect(first.warnings).toEqual([]);
-    expect(manifest).toMatchObject({ schemaVersion: 3, bundleVersion: 7 });
+    expect(manifest).toMatchObject({ schemaVersion: 3, bundleVersion: 8 });
     expect(descriptor.absolutePath).toBe(
       path.join(root, '.versions', manifest.activeBundle, 'cindy-skill-creator'),
     );
@@ -123,7 +123,7 @@ describe('built-in Skills', () => {
     expect(fs.existsSync(path.join(descriptor.absolutePath, 'SKILL.md'))).toBe(true);
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
-    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 8 });
+    const updated = await prepareAndProjectBuiltInSkills({ ...input, bundleVersion: 9 });
     expect(updated.changed).toBe(true);
     const updatedDescriptor = updated.descriptors.find(
       (item) => item.name === 'cindy-skill-creator',
@@ -189,7 +189,7 @@ describe('built-in Skills', () => {
     );
     fs.writeFileSync(manifestPath, JSON.stringify({
       schemaVersion: 3,
-      bundleVersion: 7,
+      bundleVersion: 8,
       fingerprints: {},
       activeBundle: 'damaged',
     }));
@@ -247,9 +247,9 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
     );
 
-    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+    const partial = await prepareBuiltInSkills({ ...input, bundleVersion: 9 });
     const manifestPath = path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.cindy-system-skills.json');
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(7);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(8);
     expect(partial.warnings.join('\n')).toContain('missing SKILL.md');
     expect(
       fs.readFileSync(path.join(partial.descriptors[0]!.absolutePath, 'SKILL.md'), 'utf8'),
@@ -259,9 +259,9 @@ describe('built-in Skills', () => {
       path.join(input.bundledRoot, 'learn', 'SKILL.md.missing'),
       path.join(input.bundledRoot, 'learn', 'SKILL.md'),
     );
-    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+    const retried = await prepareBuiltInSkills({ ...input, bundleVersion: 9 });
     expect(retried.warnings).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(8);
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).bundleVersion).toBe(9);
     expect(
       fs.readFileSync(
         path.join(
@@ -302,7 +302,7 @@ describe('built-in Skills', () => {
       await originalRename(source, destination);
     });
 
-    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 9 });
 
     expect(failed.changed).toBe(false);
     expect(failed.warnings.join('\n')).toContain('blocked version publish');
@@ -332,7 +332,7 @@ describe('built-in Skills', () => {
       originalRename(source, destination);
     });
 
-    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 8 });
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 9 });
 
     expect(failed.changed).toBe(false);
     expect(failed.warnings.join('\n')).toContain('blocked manifest switch');
@@ -374,7 +374,7 @@ describe('built-in Skills', () => {
     expect(retried.warnings).toEqual([]);
     expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8'))).toMatchObject({
       schemaVersion: 3,
-      bundleVersion: 7,
+      bundleVersion: 8,
     });
   });
 

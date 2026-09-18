@@ -388,6 +388,40 @@ metadata:
 
     fs.writeFileSync(
       path.join(skillDir, "SKILL.md"),
+      "---\nname: on\ndescription: yes\n---\n# js-yaml scalar compatibility\n",
+    );
+    const legacyBooleanWords = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.equal(
+      legacyBooleanWords.status,
+      0,
+      `${legacyBooleanWords.stdout}\n${legacyBooleanWords.stderr}`,
+    );
+    assert.match(legacyBooleanWords.stdout, /Skill is valid!/);
+
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: yaml-regression\ndescription: true\n---\n",
+    );
+    const actualBoolean = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.notEqual(actualBoolean.status, 0);
+    assert.match(actualBoolean.stdout, /Description must be a string, got bool/);
+
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: yaml-regression\ndescription: 1e3\n---\n",
+    );
+    const scientificNumber = spawnSync(command, [...prefix, "-S", validator, skillDir], {
+      encoding: "utf8",
+    });
+    assert.notEqual(scientificNumber.status, 0);
+    assert.match(scientificNumber.stdout, /Description must be a string, got float/);
+
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
       "---\nname: yaml-regression\ndescription: invalid\0value\n---\n",
     );
     const rejected = spawnSync(command, [...prefix, "-S", validator, skillDir], {

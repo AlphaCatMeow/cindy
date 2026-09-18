@@ -22,6 +22,47 @@ FRONTMATTER_RE = re.compile(
 )
 
 
+class FrontmatterLoader(yaml.SafeLoader):
+    """SafeLoader with the scalar resolver semantics used by js-yaml 3."""
+
+
+# gray-matter 4 uses js-yaml 3's DEFAULT_SAFE_SCHEMA. Unlike PyYAML's YAML 1.1
+# resolver, it leaves yes/no/on/off as strings, resolves only true/false as
+# booleans, and accepts scientific notation without a decimal point.
+# Copy the inherited table before editing so other vendored PyYAML consumers
+# retain SafeLoader's defaults.
+FrontmatterLoader.yaml_implicit_resolvers = {
+    first: [
+        (tag, resolver)
+        for tag, resolver in resolvers
+        if tag not in {"tag:yaml.org,2002:bool", "tag:yaml.org,2002:float"}
+    ]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+FrontmatterLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+FrontmatterLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"""^(?:
+            [-+]?(?:0|[1-9][0-9_]*)(?:
+                \.[0-9_]*(?:[eE][-+]?[0-9]+)?
+                |[eE][-+]?[0-9]+
+            )
+            |\.[0-9_]+(?:[eE][-+]?[0-9]+)?
+            |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
+            |[-+]?\.(?:inf|Inf|INF)
+            |\.(?:nan|NaN|NAN)
+        )$""",
+        re.X,
+    ),
+    list("-+0123456789."),
+)
+
+
 def split_frontmatter(content):
     match = FRONTMATTER_RE.match(content)
     if not match:
@@ -57,10 +98,10 @@ def _reject_duplicate_mapping_keys(node, visited=None):
 
 def parse_frontmatter(frontmatter_text):
     try:
-        root = yaml.compose(frontmatter_text, Loader=yaml.SafeLoader)
+        root = yaml.compose(frontmatter_text, Loader=FrontmatterLoader)
         if root is not None:
             _reject_duplicate_mapping_keys(root)
-        return yaml.safe_load(frontmatter_text)
+        return yaml.load(frontmatter_text, Loader=FrontmatterLoader)
     except FrontmatterError:
         raise
     except yaml.YAMLError as exc:
