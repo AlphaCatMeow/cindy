@@ -579,8 +579,6 @@ import { skillhubAutoSyncService } from './skillhub/autoSyncService';
 import { rehydrateCloseSuppression } from './maker-host/rehydrateCloseSuppression.js';
 import {
   builtInSkillDescriptors,
-  prepareBuiltInSkills,
-  resolveBundledSystemSkillsRoot,
 } from './maker-host/built-in-skills.js';
 import { isCindyLearnSkillEnabled } from './skillhub/activationPreferences';
 // Maker Core 一阶段重构（新链路）—— 静态 import 避免 dynamic import 触发 vite chunking
@@ -8585,23 +8583,10 @@ app.on('ready', async () => {
 
   await ensureMainAppPresence('app-ready');
 
-  // Cindy-owned Skills are packaged as immutable resources and copied into a
-  // stable profile-independent path. Home-level projections happen only through
-  // ensureSharedGlobalSkills(), whose stable-owner boundary rejects passive instances;
-  // they never replace a same-name user Skill.
+  // Cindy-owned Skill activation and all home-level projections happen through
+  // one stable-owner boundary. Passive shared-userData instances may consume the
+  // active bundle but cannot switch it or its projections.
   try {
-    const prepared = await prepareBuiltInSkills({
-      bundledRoot: resolveBundledSystemSkillsRoot({
-        isPackaged: app.isPackaged,
-        appPath: app.getAppPath(),
-        resourcesPath: process.resourcesPath,
-      }),
-      userDataDir: app.getPath('userData'),
-      appDataDir: app.getPath('appData'),
-    });
-    for (const warning of prepared.warnings) {
-      createLogger('built-in-skills').warn('built-in Skill preparation warning', { warning });
-    }
     await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();
   } catch (error) {
     // A broken optional Skill must not block the desktop from starting.

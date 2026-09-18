@@ -234,6 +234,7 @@ describe('passive shared-userData instance auth isolation', () => {
     expect(bootstrapSource).toContain(
       'await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();',
     );
+    expect(bootstrapSource).not.toContain('prepareBuiltInSkills({');
     expect(bootstrapSource).not.toContain('await prepareSharedGlobalSkillLinks();');
     expect(bootstrapSource).not.toContain('refreshBuiltInSharedSkillLinks');
 
@@ -242,6 +243,7 @@ describe('passive shared-userData instance auth isolation', () => {
     const body = authAdapterSource.slice(start, end);
     const ownerBoundary = body.indexOf('withSharedGlobalSkillProjectionMutation(ownerId');
     expect(ownerBoundary).toBeGreaterThan(-1);
+    expect(body.indexOf('prepareBuiltInSkills({')).toBeGreaterThan(ownerBoundary);
     expect(body.indexOf('refreshBuiltInSharedSkillLinks({')).toBeGreaterThan(ownerBoundary);
     expect(body.indexOf('prepareSharedGlobalSkillLinks({')).toBeGreaterThan(ownerBoundary);
     expect(body.indexOf('refreshBuiltInClaudeSkillLinks({')).toBeGreaterThan(ownerBoundary);

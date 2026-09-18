@@ -599,8 +599,12 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
   ipcMain.handle(
     'skillhub:write-file',
     async (event, params: { filePath: string; content: string }) => {
-      if (!await findScannedSkillGrant(event, params.filePath)) return scanGrantDenied();
-      if (isBuiltInSkillPath(params.filePath)) {
+      const grant = await findScannedSkillGrant(event, params.filePath);
+      if (!grant) return scanGrantDenied();
+      // The scan grant is the durable attestation for the exact immutable
+      // version shown to this renderer. The active manifest may have advanced
+      // since the scan, so re-checking only the current descriptors is unsafe.
+      if (grant.builtIn || isBuiltInSkillPath(params.filePath)) {
         return { success: false, error: 'Cindy built-in Skills are read-only' };
       }
       return writeSkillFile(params);
@@ -627,8 +631,9 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     async (event, params: { absolutePath: string; newName: string }) => {
       const ownerScope = activeOwnerScopeKey();
       const canMutate = () => ownerScope === activeOwnerScopeKey() && !isAppSessionBoundaryPending();
-      if (!await findScannedSkillGrant(event, params.absolutePath)) return scanGrantDenied();
-      if (isBuiltInSkillPath(params.absolutePath)) {
+      const grant = await findScannedSkillGrant(event, params.absolutePath);
+      if (!grant) return scanGrantDenied();
+      if (grant.builtIn || isBuiltInSkillPath(params.absolutePath)) {
         return { success: false, error: 'Cindy built-in Skills are read-only' };
       }
       if (!canMutate()) return { success: false, error: 'Skill mutation context changed' };
@@ -990,8 +995,8 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
   ipcMain.handle(
     'skillhub:publish',
     async (event, params: PublishParams) => {
-      assertTrustedAppRendererEvent(event);
-      if (isBuiltInSkillPath(params.absolutePath)) {
+      const grant = await findScannedSkillGrant(event, params.absolutePath);
+      if (grant?.builtIn || isBuiltInSkillPath(params.absolutePath)) {
         return { success: false as const, errorCode: 'INTERNAL' as const, message: 'Cindy built-in Skills cannot be published' };
       }
       return publishService.publish(params);

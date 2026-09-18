@@ -110,8 +110,10 @@ vi.mock('../shared-global-skills.js', () => ({
 }));
 
 vi.mock('../built-in-skills.js', () => ({
+  prepareBuiltInSkills: async () => ({ descriptors: [], warnings: [] }),
   refreshBuiltInSharedSkillLinks: async () => ({ warnings: [] }),
   refreshBuiltInClaudeSkillLinks: async () => ({ warnings: [] }),
+  resolveBundledSystemSkillsRoot: () => '/tmp/cindy-bundled-system-skills',
 }));
 
 vi.mock('../anthropic-compat-proxy-host.js', () => ({

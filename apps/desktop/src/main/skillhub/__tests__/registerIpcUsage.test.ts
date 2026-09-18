@@ -470,6 +470,64 @@ describe('registerSkillhubIpc usage handlers', () => {
     expect(writeSkillFile).not.toHaveBeenCalled();
   });
 
+  it('keeps a scanned built-in version immutable after the active bundle advances', async () => {
+    const versionsRoot = path.join(fixtureRoot, 'shared-system-skills', '.versions');
+    const previousRoot = path.join(versionsRoot, 'v7-previous', 'learn');
+    const currentRoot = path.join(versionsRoot, 'v8-current', 'learn');
+    const previousFile = path.join(previousRoot, 'SKILL.md');
+    fs.mkdirSync(previousRoot, { recursive: true });
+    fs.mkdirSync(currentRoot, { recursive: true });
+    fs.writeFileSync(previousFile, '# Previous built-in\n');
+    fs.writeFileSync(path.join(currentRoot, 'SKILL.md'), '# Current built-in\n');
+    let activeRoot = previousRoot;
+    const sender = { id: 19, on: vi.fn(), once: vi.fn() };
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        id: 'builtin:learn',
+        kind: 'skill',
+        name: 'learn',
+        absolutePath: previousRoot,
+        discoveredPath: previousRoot,
+        discoveryPaths: [previousRoot],
+        scope: 'global',
+        builtIn: true,
+      }],
+      sources: [],
+    });
+    const { registerSkillhubIpc } = await import('../registerIpc');
+    registerSkillhubIpc({
+      getMaker: () => ({ listAgentSkills }) as never,
+      getManagedSkillRoots,
+      getBuiltInSkills: () => [{
+        name: 'learn',
+        absolutePath: activeRoot,
+        nativeClaudePath: '/tmp/claude-home/skills/learn',
+      }],
+      getAllowedProjectRoots,
+      marketService: marketService as never,
+      publishService: { publish, cancel } as never,
+    });
+
+    await handlers.get('skillhub:scan')?.({ sender }, { projects: [] });
+    activeRoot = currentRoot;
+
+    await expect(handlers.get('skillhub:write-file')?.(
+      { sender },
+      { filePath: previousFile, content: '# changed' },
+    )).resolves.toMatchObject({ success: false, error: expect.stringContaining('read-only') });
+    await expect(handlers.get('skillhub:rename-local')?.(
+      { sender },
+      { absolutePath: previousRoot, newName: 'renamed' },
+    )).resolves.toMatchObject({ success: false, error: expect.stringContaining('read-only') });
+    await expect(handlers.get('skillhub:publish')?.(
+      { sender },
+      { absolutePath: previousRoot },
+    )).resolves.toMatchObject({ success: false, message: expect.stringContaining('cannot be published') });
+    expect(writeSkillFile).not.toHaveBeenCalled();
+    expect(renameLocalSkill).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it.each(['unchanged', 'grant-wait', 'mutation-wait', 'boundary-pending'] as const)(
     'guards local rename at its original owner generation: %s', async (transition) => {
       const sender = { id: 71, on: vi.fn(), once: vi.fn() };

@@ -40,8 +40,10 @@ import { prepareCodexGlobalPluginsBridge } from './codex-global-plugins.js';
 import { DESKTOP_CAPABILITY_ROUTING_POLICY } from './capability-routing.js';
 import { prepareSharedGlobalSkillLinks } from './shared-global-skills.js';
 import {
+  prepareBuiltInSkills,
   refreshBuiltInClaudeSkillLinks,
   refreshBuiltInSharedSkillLinks,
+  resolveBundledSystemSkillsRoot,
 } from './built-in-skills.js';
 import {
   copyCodexAuthSnapshot,
@@ -604,9 +606,22 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     try {
       const ownerId = getActiveAppSession().dataOwnerId;
       const result = await withSharedGlobalSkillProjectionMutation(ownerId, async () => {
+        // Bundle activation and every projection of that bundle share one
+        // stable-owner critical section. Passive instances are rejected before
+        // they can switch the process-independent active manifest.
+        const preparedBuiltIns = await prepareBuiltInSkills({
+          bundledRoot: resolveBundledSystemSkillsRoot({
+            isPackaged: app.isPackaged,
+            appPath: app.getAppPath(),
+            resourcesPath: process.resourcesPath,
+          }),
+          userDataDir: app.getPath('userData'),
+          appDataDir: app.getPath('appData'),
+        });
         const builtInSharedProjection = await refreshBuiltInSharedSkillLinks({
           userDataDir: app.getPath('userData'),
           appDataDir: app.getPath('appData'),
+          descriptors: preparedBuiltIns.descriptors,
         });
         const sharedProjection = await prepareSharedGlobalSkillLinks({
           assertOwnerStable: () => assertGhostSkillProjectionBoundaryStableForOwner(ownerId),
@@ -614,9 +629,11 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
         const isolatedClaudeProjection = await refreshBuiltInClaudeSkillLinks({
           userDataDir: app.getPath('userData'),
           appDataDir: app.getPath('appData'),
+          descriptors: preparedBuiltIns.descriptors,
         });
         return {
           warnings: [
+            ...preparedBuiltIns.warnings,
             ...builtInSharedProjection.warnings,
             ...sharedProjection.warnings,
             ...isolatedClaudeProjection.warnings,
