@@ -583,11 +583,11 @@ import {
   resolveBundledSystemSkillsRoot,
 } from './maker-host/built-in-skills.js';
 import { isCindyLearnSkillEnabled } from './skillhub/activationPreferences';
-import { prepareSharedGlobalSkillLinks } from './maker-host/shared-global-skills.js';
 // Maker Core 一阶段重构（新链路）—— 静态 import 避免 dynamic import 触发 vite chunking
 // 让 imageProtocol 等需要 app.ready 前注册的模块跑在错误时机。getMaker() 是 lazy 的，
 // 静态 import 不会触发 Maker / Agent 的实例化。
 import {
+  desktopClaudeAuthAdapter,
   getMaker as getMakerCore,
   getMakerIfReady,
   resetMaker,
@@ -8601,10 +8601,7 @@ app.on('ready', async () => {
     for (const warning of prepared.warnings) {
       createLogger('built-in-skills').warn('built-in Skill preparation warning', { warning });
     }
-    const shared = await prepareSharedGlobalSkillLinks();
-    for (const warning of shared.warnings) {
-      createLogger('built-in-skills').warn('shared Skill projection warning', { warning });
-    }
+    await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();
   } catch (error) {
     // A broken optional Skill must not block the desktop from starting.
     createLogger('built-in-skills').warn('built-in Skill preparation failed', {

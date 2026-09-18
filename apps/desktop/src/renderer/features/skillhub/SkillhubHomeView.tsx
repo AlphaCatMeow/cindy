@@ -31,7 +31,6 @@ import {
 import { buildLocalSkillRoute, findLocalSkillByPath } from './lib/localRoutes';
 import {
   builtInSkillDescriptionKey,
-  isBuiltInLearnSkillEnabled,
   prioritizeCindyBuiltInSkills,
 } from './lib/builtInSkillPresentation';
 import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
@@ -81,7 +80,7 @@ export function SkillhubHomeView({
 } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { skills, projects, bootstrapped, syncResults } = useSkillhub();
+  const { skills, projects, bootstrapped, learnSkillEnabled, syncResults } = useSkillhub();
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
@@ -482,7 +481,7 @@ export function SkillhubHomeView({
           }
           onClone={handleClone}
           onManageAction={management.handleManageAction}
-          learnSkillEnabled={isBuiltInLearnSkillEnabled(skills, bootstrapped)}
+          learnSkillEnabled={learnSkillEnabled}
         />
         <MarketManagementDialogs controller={management} />
         <InstallTargetPicker

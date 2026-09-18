@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CINDY_LEARN_SOURCE_DESCRIPTION } from '../../../../../shared/cindyBuiltInSkills';
-import {
-  isBuiltInLearnSkillEnabled,
-  prioritizeCindyBuiltInSkills,
-} from '../builtInSkillPresentation';
+import { prioritizeCindyBuiltInSkills } from '../builtInSkillPresentation';
 
 describe('prioritizeCindyBuiltInSkills', () => {
   it('puts Cindy official Skills first in their product order and keeps user order stable', () => {
@@ -36,32 +33,5 @@ describe('prioritizeCindyBuiltInSkills', () => {
       localA,
       localB,
     ]);
-  });
-});
-
-describe('isBuiltInLearnSkillEnabled', () => {
-  it('waits for the local scan, then follows only the official Learn entry', () => {
-    expect(isBuiltInLearnSkillEnabled([], false)).toBe(true);
-    expect(isBuiltInLearnSkillEnabled([], true)).toBe(false);
-    expect(isBuiltInLearnSkillEnabled([{
-      name: 'learn',
-      description: 'My own Learn workflow',
-      scope: 'global',
-      cindyEnabled: true,
-    }], true)).toBe(false);
-    expect(isBuiltInLearnSkillEnabled([{
-      name: 'learn',
-      description: CINDY_LEARN_SOURCE_DESCRIPTION,
-      builtIn: true,
-      scope: 'global',
-      cindyEnabled: false,
-    }], true)).toBe(false);
-    expect(isBuiltInLearnSkillEnabled([{
-      name: 'learn',
-      description: CINDY_LEARN_SOURCE_DESCRIPTION,
-      builtIn: true,
-      scope: 'global',
-      cindyEnabled: true,
-    }], true)).toBe(true);
   });
 });

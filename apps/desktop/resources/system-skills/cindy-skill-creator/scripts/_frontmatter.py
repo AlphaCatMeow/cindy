@@ -49,7 +49,60 @@ def _strip_plain_comment(value):
     return value.strip()
 
 
-def _parse_flow_collection(value):
+def _split_flow_items(value):
+    """Split one flow collection without losing nested collections or quotes."""
+    closing = "]" if value.startswith("[") else "}"
+    stack = [closing]
+    quote = None
+    escaped = False
+    items = []
+    item_start = 1
+    index = 1
+    while index < len(value):
+        char = value[index]
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                index += 1
+            elif char == "'":
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char in "[{":
+            stack.append("]" if char == "[" else "}")
+        elif char in "]}":
+            if not stack or stack.pop() != char:
+                raise FrontmatterError(f"Mismatched flow delimiter '{char}'")
+            if not stack:
+                if value[index + 1 :].strip():
+                    raise FrontmatterError("Unexpected content after flow collection")
+                final_item = value[item_start:index].strip()
+                if final_item:
+                    items.append(final_item)
+                elif item_start != 1 and not items:
+                    raise FrontmatterError("Empty flow collection entry")
+                return items
+        elif char == "," and len(stack) == 1:
+            item = value[item_start:index].strip()
+            if not item:
+                raise FrontmatterError("Empty flow collection entry")
+            items.append(item)
+            item_start = index + 1
+        index += 1
+
+    if quote is not None or escaped:
+        raise FrontmatterError("Unterminated quoted scalar in flow collection")
+    raise FrontmatterError(f"Unterminated flow collection, expected '{stack[-1]}'")
+
+
+def _split_flow_mapping_entry(value, required=False):
+    """Find a flow-mapping colon without mistaking nested values or URLs for it."""
     stack = []
     quote = None
     escaped = False
@@ -75,15 +128,44 @@ def _parse_flow_collection(value):
         elif char in "]}":
             if not stack or stack.pop() != char:
                 raise FrontmatterError(f"Mismatched flow delimiter '{char}'")
-            if not stack and value[index + 1 :].strip():
-                raise FrontmatterError("Unexpected content after flow collection")
+        elif char == ":" and not stack and (
+            required
+            or index + 1 == len(value)
+            or value[index + 1].isspace()
+            or value.lstrip().startswith(('"', "'"))
+        ):
+            return value[:index], value[index + 1 :]
         index += 1
-
     if quote is not None or escaped:
-        raise FrontmatterError("Unterminated quoted scalar in flow collection")
+        raise FrontmatterError("Unterminated quoted scalar")
     if stack:
         raise FrontmatterError(f"Unterminated flow collection, expected '{stack[-1]}'")
-    return [] if value.startswith("[") else {}
+    return None
+
+
+def _validate_flow_mapping_entry(value, required):
+    mapping_entry = _split_flow_mapping_entry(value, required)
+    if mapping_entry is None:
+        if required:
+            raise FrontmatterError("Flow mapping entry is missing ':'")
+        _parse_scalar(value)
+        return
+
+    raw_key, raw_value = mapping_entry
+    if not raw_key.strip():
+        raise FrontmatterError("Flow mapping entry is missing a key")
+    key = _parse_scalar(raw_key.strip())
+    if not isinstance(key, (str, int, float, bool)):
+        raise FrontmatterError("Invalid flow mapping key")
+    _parse_scalar(raw_value.strip())
+
+
+def _parse_flow_collection(value):
+    items = _split_flow_items(value)
+    is_mapping = value.startswith("{")
+    for item in items:
+        _validate_flow_mapping_entry(item, required=is_mapping)
+    return {} if is_mapping else []
 
 
 def _parse_scalar(raw):

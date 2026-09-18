@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { t } from '../i18n.js';
 import { throwIpcError } from '../utils/ipcValidate';
-import { setCindySkillEnabled } from './activationPreferences';
+import { isCindyLearnSkillEnabled, setCindySkillEnabled } from './activationPreferences';
 import { inspectLocalSkillTarget, isLocalSkillTargetCurrent, isPluginManagedSkillPath, type LocalSkillTarget } from './localSkillTarget';
 import { tryAcquireSkillInstallLock } from './installLock';
 import { randomUUID } from 'node:crypto';
@@ -502,13 +502,22 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
           for (const { token } of pendingCleanups) {
             cleanupGrants.set(cleanupGrantKey(event.sender.id, token), { ownerId: scanOwnerId, senderId: event.sender.id });
           }
-          return { success: true, ...result, pendingCleanups };
+          return {
+            success: true,
+            ...result,
+            pendingCleanups,
+            learnSkillEnabled: isCindyLearnSkillEnabled(),
+          };
         }
-        return { success: true, ...result };
+        return { success: true, ...result, learnSkillEnabled: isCindyLearnSkillEnabled() };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error('[skillhub:scan] failed:', err);
-        return { success: false, error: message };
+        return {
+          success: false,
+          error: message,
+          learnSkillEnabled: isCindyLearnSkillEnabled(),
+        };
       }
     },
   );

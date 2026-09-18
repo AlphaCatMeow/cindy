@@ -6,7 +6,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'skillhub-ipc-management-'));
 afterAll(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 const setCindySkillEnabled = vi.fn(async () => undefined);
-vi.mock('../activationPreferences', () => ({ setCindySkillEnabled }));
+const isCindyLearnSkillEnabled = vi.fn(() => true);
+vi.mock('../activationPreferences', () => ({
+  isCindyLearnSkillEnabled,
+  setCindySkillEnabled,
+}));
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const showOpenDialog = vi.fn();
@@ -147,6 +151,7 @@ describe('registerSkillhubIpc usage handlers', () => {
     ownerState.generation = 1;
     ownerState.pending = false;
     installServiceMocks.listPendingUninstallCleanups.mockReturnValue([]);
+    isCindyLearnSkillEnabled.mockReturnValue(true);
     handlers.clear();
     vi.clearAllMocks();
     renameLocalSkill.mockReset();
@@ -372,6 +377,20 @@ describe('registerSkillhubIpc usage handlers', () => {
       { mdPath: '/repo/.pi/skills/authorized/demo/SKILL.md' },
     );
     expect(afterDestroy).toMatchObject({ success: false });
+  });
+
+  it('returns the Learn activation preference even when discovery fails', async () => {
+    const sender = { id: 91, on: vi.fn(), once: vi.fn() };
+    isCindyLearnSkillEnabled.mockReturnValue(false);
+    scanAllSkills.mockRejectedValueOnce(new Error('scan failed'));
+
+    await expect(
+      handlers.get('skillhub:scan')?.({ sender }, { projects: [] }),
+    ).resolves.toEqual({
+      success: false,
+      error: 'scan failed',
+      learnSkillEnabled: false,
+    });
   });
 
   it('grants read-only access to a Main-attested built-in with no discovery alias', async () => {

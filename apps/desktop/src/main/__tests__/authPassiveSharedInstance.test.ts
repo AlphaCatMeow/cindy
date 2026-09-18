@@ -226,6 +226,13 @@ describe('passive shared-userData instance auth isolation', () => {
     expect(beforeEnsureReady).not.toContain('continuing with cloud database');
   });
 
+  it('启动期共享 Skill 投影通过 owner 边界保护入口执行', () => {
+    expect(bootstrapSource).toContain(
+      'await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();',
+    );
+    expect(bootstrapSource).not.toContain('await prepareSharedGlobalSkillLinks();');
+  });
+
   it('relogin marker:passive 不消费整机一份的 marker,也不删 primary 的 token', () => {
     const start = authSource.indexOf('const reloginFlag = readReloginFlag();');
     const end = authSource.indexOf('// Old Feishu-auth refresh tokens', start);

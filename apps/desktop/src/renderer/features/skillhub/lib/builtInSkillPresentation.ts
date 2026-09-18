@@ -51,22 +51,3 @@ export function prioritizeCindyBuiltInSkills<Skill extends {
     })
     .map(({ skill }) => skill);
 }
-
-/** Keep SkillHub's Learn shortcut aligned with the built-in Skill toggle. */
-export function isBuiltInLearnSkillEnabled(
-  skills: ReadonlyArray<{
-    builtIn?: boolean;
-    cindyEnabled?: boolean;
-    name: string;
-    description?: string;
-    scope?: string;
-  }>,
-  bootstrapped: boolean,
-): boolean {
-  return !bootstrapped || skills.some(
-    (skill) =>
-      skill.name === CINDY_LEARN_NAME
-      && isCindyBuiltInSkillMetadata(skill)
-      && skill.cindyEnabled !== false,
-  );
-}
