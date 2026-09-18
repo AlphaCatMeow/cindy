@@ -4,12 +4,15 @@ import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import {
   Keyboard,
   SlidersHorizontal,
-  ArrowLeft,
-  ArrowRight,
-  Menu,
   type LucideIcon,
 } from "lucide-react-native";
-import { AllWindowsIcon, ShowDesktopIcon } from "./RemoteDesktopIcons";
+import {
+  AllWindowsIcon,
+  ShowDesktopIcon,
+  WorkspaceLeftIcon,
+  WorkspaceRightIcon,
+  OmarchyMenuIcon,
+} from "./RemoteDesktopIcons";
 import { RemoteDesktopPanelButton } from "./RemoteDesktopPanelButton";
 import { useTranslation } from "react-i18next";
 import { Text } from "@/components/AppText";
@@ -62,13 +65,13 @@ export function RemoteDesktopToolbar({
   }> = [
     {
       key: onWorkspaceLeft ? "workspaceLeft" : "allWindows",
-      icon: onWorkspaceLeft ? ArrowLeft : AllWindowsIcon,
+      icon: onWorkspaceLeft ? WorkspaceLeftIcon : AllWindowsIcon,
       press: onWorkspaceLeft ?? onWindows,
       disabled: !canControl,
     },
     {
       key: onWorkspaceRight ? "workspaceRight" : "showDesktop",
-      icon: onWorkspaceRight ? ArrowRight : ShowDesktopIcon,
+      icon: onWorkspaceRight ? WorkspaceRightIcon : ShowDesktopIcon,
       press: onWorkspaceRight ?? onDesktop,
       disabled: !canControl,
     },
@@ -76,7 +79,7 @@ export function RemoteDesktopToolbar({
       ? [
           {
             key: "omarchyMenu",
-            icon: Menu,
+            icon: OmarchyMenuIcon,
             press: onOmarchyMenu,
             disabled: !canControl,
           },

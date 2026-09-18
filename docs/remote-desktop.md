@@ -608,15 +608,21 @@ of physical phone end-to-end parity.
 | Desktop navigation                   | Mission Control / system shortcuts                                                    | Capability-gated left/right workspace buttons on the captured monitor and an Omarchy menu button when installed; legacy viewers retain the window picker and temporary empty-workspace toggle |
 | PiP, rotation, gestures              | Mobile viewer functionality                                                           | Same viewer functionality, subject to phone/runtime support                                                                                                                                   |
 
+The Omarchy toolbar uses desktop-and-arrow icons and the official Omarchy mark
+(https://omarchy.org/brand/omarchy-logo.svg), tinted with the toolbar foreground
+in both themes. Left/right navigation includes empty workspaces on the captured
+monitor (`r-1` / `r+1`); the menu button uses Omarchy's own `menu toggle`, so a
+second press closes it even when the menu was opened locally.
+
 Linux's window picker supplies selection/switching, not macOS Mission Control's
 thumbnail animation. Quickshell auto-unlock remains unavailable under the
 existing-system-interface constraint. These differences and the unverified
 physical phone scenarios must not be described as complete macOS parity.
 
 The mobile toolbar uses `workspaceNavigation` to replace its first two actions
-with left/right desktops (`m-1` / `m+1`, existing workspaces on the selected
+with left/right desktops (`r-1` / `r+1`, including empty workspaces on the selected
 monitor). `omarchyMenu` adds a fifth action, invoking the fixed local
-`omarchy menu summon` entry point. Keyboard and Controls remain available.
+`omarchy menu toggle` entry point. Keyboard and Controls remain available.
 Both native iOS and shared mobile chrome size the toolbar for its action count;
 the landscape popover stays anchored to Controls. Old hosts keep their original
 toolbar, and all new host actions require an active controlling lease.

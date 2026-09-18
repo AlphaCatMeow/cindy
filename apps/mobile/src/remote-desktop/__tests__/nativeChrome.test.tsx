@@ -104,6 +104,9 @@ vi.mock("lucide-react-native", () => ({
 vi.mock("../RemoteDesktopIcons", () => ({
   AllWindowsIcon: () => null,
   ShowDesktopIcon: () => null,
+  WorkspaceLeftIcon: () => <span data-icon="workspace-left" />,
+  WorkspaceRightIcon: () => <span data-icon="workspace-right" />,
+  OmarchyMenuIcon: () => <span data-icon="omarchy" />,
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -193,6 +196,8 @@ it.each([false, true])(
       onOmarchyMenu: menu,
     };
     const v = mount(<RemoteDesktopToolbar {...props} />);
+    for (const icon of ["workspace-left", "workspace-right", "omarchy"])
+      expect(v.host.querySelector(`[data-icon="${icon}"]`)).not.toBeNull();
     for (const key of ["workspaceLeft", "workspaceRight", "omarchyMenu"])
       act(() =>
         v.host

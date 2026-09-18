@@ -155,12 +155,12 @@ it('strictly parses the additive host action without accepting arbitrary command
 });
 
 it.each([false, true])(
-  'switches workspaces on the captured monitor without moving windows (Lua=%s)',
+  'includes empty workspaces on the captured monitor without moving windows (Lua=%s)',
   async (lua) => {
     const h = fixture(lua);
     for (const [action, direction] of [
-      ['workspaceLeft', 'm-1'],
-      ['workspaceRight', 'm+1'],
+      ['workspaceLeft', 'r-1'],
+      ['workspaceRight', 'r+1'],
     ] as const) {
       await h.windows.request(action, undefined, 'hyprland:eDP-2', () => true);
       expect(h.run).toHaveBeenLastCalledWith(

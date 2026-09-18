@@ -26,13 +26,7 @@ import {
   presentationDragIndicator,
   shapes,
 } from "@expo/ui/swift-ui/modifiers";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Menu,
-  Keyboard,
-  SlidersHorizontal,
-} from "lucide-react-native";
+import { Keyboard, SlidersHorizontal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -46,7 +40,13 @@ import {
 import { useLiquidGlassAvailable } from "@/session/useLiquidGlassAvailable";
 import { Text as AppText } from "@/components/AppText";
 import { RemoteDesktopPanelButton } from "./RemoteDesktopPanelButton";
-import { AllWindowsIcon, ShowDesktopIcon } from "./RemoteDesktopIcons";
+import {
+  AllWindowsIcon,
+  ShowDesktopIcon,
+  WorkspaceLeftIcon,
+  WorkspaceRightIcon,
+  OmarchyMenuIcon,
+} from "./RemoteDesktopIcons";
 import type {
   RemoteDesktopPanel as Panel,
   RemoteDesktopToolbar as Toolbar,
@@ -64,14 +64,14 @@ export function RemoteDesktopToolbar(props: ComponentProps<typeof Toolbar>) {
   const actions = [
     {
       key: props.onWorkspaceLeft ? "workspaceLeft" : "allWindows",
-      Icon: props.onWorkspaceLeft ? ArrowLeft : AllWindowsIcon,
+      Icon: props.onWorkspaceLeft ? WorkspaceLeftIcon : AllWindowsIcon,
       onPress: props.onWorkspaceLeft ?? props.onWindows,
       disabled: !props.canControl,
       selected: false,
     },
     {
       key: props.onWorkspaceRight ? "workspaceRight" : "showDesktop",
-      Icon: props.onWorkspaceRight ? ArrowRight : ShowDesktopIcon,
+      Icon: props.onWorkspaceRight ? WorkspaceRightIcon : ShowDesktopIcon,
       onPress: props.onWorkspaceRight ?? props.onDesktop,
       disabled: !props.canControl,
       selected: false,
@@ -80,7 +80,7 @@ export function RemoteDesktopToolbar(props: ComponentProps<typeof Toolbar>) {
       ? [
           {
             key: "omarchyMenu",
-            Icon: Menu,
+            Icon: OmarchyMenuIcon,
             onPress: props.onOmarchyMenu,
             disabled: !props.canControl,
             selected: false,

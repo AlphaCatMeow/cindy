@@ -19,7 +19,7 @@ export function supportsOmarchyMenu(): boolean {
 }
 async function openOmarchyMenu(): Promise<void> {
   if (!supportsOmarchyMenu()) throw new Error('DESKTOP_INPUT_UNSUPPORTED');
-  await exec('/usr/bin/omarchy', ['menu', 'summon'], { timeout: 2000, maxBuffer: 16384 });
+  await exec('/usr/bin/omarchy', ['menu', 'toggle'], { timeout: 2000, maxBuffer: 16384 });
 }
 const invoke = async (args: string[]): Promise<string> => {
   const { stdout } = await exec('/usr/bin/hyprctl', args, { timeout: 2000, maxBuffer: 512000 });
@@ -120,7 +120,8 @@ export class LinuxWindowActions {
           await this.dispatch('focusmonitor', selected.name, check);
           await check();
           if (action === 'omarchyMenu') await this.openMenu();
-          else await this.dispatch('workspace', action === 'workspaceLeft' ? 'm-1' : 'm+1', check);
+          // r includes empty workspaces on this monitor; m skips them.
+          else await this.dispatch('workspace', action === 'workspaceLeft' ? 'r-1' : 'r+1', check);
           await check();
           return null;
         }
