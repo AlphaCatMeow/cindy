@@ -987,6 +987,18 @@
         "unknown": "未知"
       },
       "storage": {
+        "dialogueDirectoryTitle": "对话工作区",
+        "dialogueDirectoryDescription": "仅用于新建任务，已有文件保持原位置。",
+        "dialogueDirectoryOpen": "打开目录",
+        "dialogueDirectoryChoose": "更改目录",
+        "dialogueDirectoryReset": "恢复默认位置",
+        "dialogueDirectoryFailed": "无法更新对话工作区，请确认所选目录可写后重试。",
+        "dialogueDirectoryDefault": "默认",
+        "dialogueDirectoryFullPath": "完整路径",
+        "dialogueDirectoryDetails": "未指定项目文件夹的新任务使用此位置。Cindy 会在所选文件夹中创建当前账号独立的子目录。",
+        "dialogueDirectoryCopy": "复制路径",
+        "dialogueDirectoryCopied": "路径已复制",
+        "dialogueDirectoryCopyFailed": "无法复制路径，请选中路径后手动复制。",
         "mediaSectionTitle": "媒体文件",
         "databaseSectionTitle": "数据库",
         "overviewTitle": "本地存储空间",

@@ -238,7 +238,8 @@ import {
   isDbClientNotReadyError,
 } from '../localDb/client/current.js';
 import { createBotRuntimeRestoreCoordinator } from './botRuntimeRestore.js';
-import { createWorkingDirectoryRecovery, isUnavailableFilesystemError, worktreeConversationFallbackDir } from './workingDirectoryRecovery.js';
+import { createWorkingDirectoryRecovery, isUnavailableFilesystemError } from './workingDirectoryRecovery.js';
+import { allocateDialogueRecoveryWorkspace, findDialogueRecoveryWorkspace, requiredDialogueRecoveryRoot } from './dialogueRecoveryWorkspace.js';
 import { workdirDiagnosticContext, workdirDiagnosticErrorCode, workdirDiagnosticId } from '../workdirDiagnostics.js';
 import { statWorkingDirectory, mkdirWorkingDirectory, realpathWorkingDirectory, findSimilarWorkingDirectory } from '../workdir-probe-host/index.js';
 import { getMessagesForHistory } from '../localDb/chatHistoryReader.js';
@@ -250,9 +251,9 @@ import {
 } from '../localDb/agentInputQueueSnapshots.js';
 import {
   ensureDialogueWorkspaceDir,
-  dialogueWorkspaceRootDir,
+  dialogueWorkspaceRoots,
+  isManagedDialogueWorkspace,
 } from '../localDb/dialogueWorkspace.js';
-import { matchDialogueWorkspacePath } from '../localDb/dialogueWorkdirSelfHeal.js';
 import {
   broadcastMessageRow,
   broadcastMessageAgentMetaUpdate,
@@ -1115,14 +1116,7 @@ import { installSessionTurnObserver } from './sessionTurnObserver.js';
 
 const log = createLogger('maker-ipc');
 const workdirLog = createLogger('workdir-diagnostics');
-const workingDirectoryRecovery = createWorkingDirectoryRecovery({ stat: statWorkingDirectory, mkdir: mkdirWorkingDirectory, realpath: realpathWorkingDirectory }, async (sessionId, workingDir, mode) => {
-  if (mode === 'unrestored-worktree') {
-    const fallback = worktreeConversationFallbackDir(dialogueWorkspaceRootDir(), sessionId, workingDir);
-    await fsp.mkdir(fallback, { recursive: true });
-    return fallback;
-  }
-  return ensureDialogueWorkspaceDir(sessionId, Date.now());
-}, workdirLog);
+const workingDirectoryRecovery = createWorkingDirectoryRecovery({ stat: statWorkingDirectory, mkdir: mkdirWorkingDirectory, realpath: realpathWorkingDirectory, requiredRoot: requiredDialogueRecoveryRoot, findFallback: findDialogueRecoveryWorkspace }, allocateDialogueRecoveryWorkspace, workdirLog);
 
 function localModelWindowSwitchErrorCode(code: IpcErrorCode): IpcErrorCode {
   return isDeviceLinkInvoke() ? 'PRECONDITION_FAILED' : code;
@@ -8487,7 +8481,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         agentKind: lead?.agentKind ?? leadRow?.agentKind ?? null,
       },
       (pluginId, workingDir) => getPluginRegistry().isEnabled(pluginId, workingDir),
-      (workingDir) => matchDialogueWorkspacePath(workingDir, dialogueWorkspaceRootDir()) !== null,
+      isManagedDialogueWorkspace,
     );
   }
 
@@ -12205,8 +12199,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     checkWorkDirExists,
     resolveRecoveredWorkingDir: (sessionId, dir) => workingDirectoryRecovery.resolve(sessionId, dir),
-    isPersistedWorktreeFallback: (dir) => path.dirname(path.resolve(dir)) ===
-      path.join(dialogueWorkspaceRootDir(), 'worktree-recovery'),
+    isPersistedWorktreeFallback: (dir) => dialogueWorkspaceRoots().some((root) =>
+      path.dirname(path.resolve(dir)) === path.join(root, 'worktree-recovery')),
     preflightBotRuntimeResources: async (opts) => { await preflightBotRuntimeResources(opts); },
     readWorkingDirectoryRecoveryCreateOpts: async (sessionId) => {
       const [row] = await getDbClient().drizzle.select().from(sessions)
@@ -17744,7 +17738,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               wd,
               typeof workspaceKind === 'string' ? workspaceKind : null,
               (candidate) =>
-                matchDialogueWorkspacePath(candidate, dialogueWorkspaceRootDir()) !== null,
+                isManagedDialogueWorkspace(candidate),
             )
           : wd;
       const state = await getPluginRegistry().getEnableState(id, policyWorkingDir);
@@ -18123,7 +18117,7 @@ async function materializeCodexImage(
  */
 async function checkWorkDirExists(
   sessionId: string,
-  workingDir: string | undefined | null,
+  requestedWorkingDir: string | undefined | null,
   agentKind: AgentKind | undefined,
   remoteHostId?: string | null,
   opts?: { suppressMissingBroadcast?: boolean },
@@ -18133,10 +18127,10 @@ async function checkWorkDirExists(
   // 场景, 远端走自己的 probe (StartRemoteSessionPanel 创建前 stat-remote-path,
   // 或者 agent 真跑起来时由远端 codex 自己报 ENOENT)。这里直接放行。
   if (remoteHostId) return true;
-  if (!workingDir?.trim()) return true;
-  const cindyMakeWorkspace = isCindyMakeManagedWorktreePath(app.getPath('userData'), workingDir);
+  if (!requestedWorkingDir?.trim()) return true;
+  const cindyMakeWorkspace = isCindyMakeManagedWorktreePath(app.getPath('userData'), requestedWorkingDir);
   if (cindyMakeWorkspace) workingDirectoryRecovery.discard(sessionId);
-  workingDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
+  let workingDir = workingDirectoryRecovery.resolve(sessionId, requestedWorkingDir);
   const source: AgentKind = agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';
   // suppressMissingBroadcast: 调用方(SEND 事务)手里还有 DB 权威值可兜底时,
   // 首检失败只记日志不广播错误横幅——兜底成功的话用户不该看到假错误。
@@ -18149,6 +18143,17 @@ async function checkWorkDirExists(
   };
   try {
     if (cindyMakeWorkspace) await assertCindyMakeWorkspace(app.getPath('userData'), workingDir);
+    // Resume the previously selected ordinary workspace before probing a path
+    // that may now be inaccessible or a file. Do not allocate a new fallback here.
+    if (!cindyMakeWorkspace &&
+      !workingDirectoryRecovery.isFallback(sessionId, workingDir) &&
+      getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) === null) {
+      if (!await workingDirectoryRecovery.recover(sessionId, workingDir, undefined, [], 'ordinary', { existingFallbackOnly: true })) {
+        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'saved-recovery-lookup-failed' });
+        return false;
+      }
+      workingDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
+    }
     const stat = await statWorkingDirectory(workingDir);
     if (!stat.isDirectory()) {
       workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'not-directory' });

@@ -15,6 +15,7 @@ import { DESKTOP_LOCAL, type RemoteDesktopApi } from '../shared/remoteDesktop';
 import { DEVICE_LINK_PUSH } from '../shared/deviceLinkIpc';
 import type { MobileCodexRateLimitsResult } from '@cindy/maker-shared/device-link-contract';
 import type { AppearanceSettings } from '../shared/appearanceSettings';
+import type { DialogueWorkspaceSettingsState } from '../shared/dialogueWorkspaceSettings';
 import type {
   CustomProviderUpdateOptions,
   CustomProviderUpdateResult,
@@ -4179,6 +4180,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 占用统计 / 清理预检(报数)/ 执行清理 / 对账体检。scan 与 cleanup 的
   // draftUrls 由 renderer 从 composerDraftStore 现场收集(main 读不到
   // renderer 内存,草稿附件是合法的零引用 blob,必须随参取证防误删)。
+  dialogueWorkspace: {
+    open: (): Promise<{ success: boolean }> => ipcRenderer.invoke('dialogue-workspace:open'),
+    get: (): Promise<DialogueWorkspaceSettingsState> => ipcRenderer.invoke('dialogue-workspace:get'),
+    choose: (): Promise<DialogueWorkspaceSettingsState> => ipcRenderer.invoke('dialogue-workspace:choose'),
+    reset: (): Promise<DialogueWorkspaceSettingsState> => ipcRenderer.invoke('dialogue-workspace:reset'),
+  },
+
   cindyMediaStorage: {
     /**
      * 本窗口草稿附件 URL 变化时上报(composerDraftStore mutator 尾部调用,

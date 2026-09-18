@@ -170,7 +170,7 @@ describe('sendToSession ordering', () => {
     expect(policyGuardBlock).toContain(' : leadRow?.workspaceKind;');
     expectOrder(policyGuardBlock, 'const liveWorkspaceKind =', 'assertCollabProjectEnabled(');
     expect(policyGuardBlock).toContain(
-      'matchDialogueWorkspacePath(workingDir, dialogueWorkspaceRootDir()) !== null',
+      'isManagedDialogueWorkspace',
     );
   });
 
@@ -184,7 +184,7 @@ describe('sendToSession ordering', () => {
     expect(pluginStateBlock).toContain('resolveLocalCollabPolicyWorkingDir(');
     expect(pluginStateBlock).toContain("typeof workspaceKind === 'string' ? workspaceKind : null");
     expect(pluginStateBlock).toContain(
-      'matchDialogueWorkspacePath(candidate, dialogueWorkspaceRootDir()) !== null',
+      'isManagedDialogueWorkspace(candidate)',
     );
     expect(pluginStateBlock).toContain('getEnableState(id, policyWorkingDir)');
     expect(pluginStateBlock).toContain(

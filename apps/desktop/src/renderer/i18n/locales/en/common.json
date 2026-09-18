@@ -987,6 +987,18 @@
         "unknown": "Unknown"
       },
       "storage": {
+        "dialogueDirectoryTitle": "Chat workspace",
+        "dialogueDirectoryDescription": "For new sessions only. Existing files stay where they are.",
+        "dialogueDirectoryOpen": "Open directory",
+        "dialogueDirectoryChoose": "Change directory",
+        "dialogueDirectoryReset": "Restore default location",
+        "dialogueDirectoryFailed": "Could not update the chat workspace. Check that the selected folder is writable and try again.",
+        "dialogueDirectoryDefault": "Default",
+        "dialogueDirectoryFullPath": "Full path",
+        "dialogueDirectoryDetails": "New sessions without a project folder use this location. Cindy creates an account-specific subfolder inside the selected folder.",
+        "dialogueDirectoryCopy": "Copy path",
+        "dialogueDirectoryCopied": "Path copied",
+        "dialogueDirectoryCopyFailed": "Could not copy the path. Select it and copy it manually.",
         "mediaSectionTitle": "Media files",
         "databaseSectionTitle": "Database",
         "overviewTitle": "Local storage overview",

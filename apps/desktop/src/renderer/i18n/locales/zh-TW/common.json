@@ -987,6 +987,18 @@
         "unknown": "未知"
       },
       "storage": {
+        "dialogueDirectoryTitle": "對話工作區",
+        "dialogueDirectoryDescription": "僅用於新建任務，現有檔案保留原位置。",
+        "dialogueDirectoryOpen": "開啟目錄",
+        "dialogueDirectoryChoose": "變更目錄",
+        "dialogueDirectoryReset": "恢復預設位置",
+        "dialogueDirectoryFailed": "無法更新對話工作區，請確認所選目錄可寫入後再試。",
+        "dialogueDirectoryDefault": "預設",
+        "dialogueDirectoryFullPath": "完整路徑",
+        "dialogueDirectoryDetails": "未指定專案資料夾的新任務使用此位置。Cindy 會在所選資料夾中建立目前帳號獨立的子目錄。",
+        "dialogueDirectoryCopy": "複製路徑",
+        "dialogueDirectoryCopied": "路徑已複製",
+        "dialogueDirectoryCopyFailed": "無法複製路徑，請選取路徑後手動複製。",
         "mediaSectionTitle": "媒體檔案",
         "databaseSectionTitle": "資料庫",
         "overviewTitle": "本機儲存空間",
