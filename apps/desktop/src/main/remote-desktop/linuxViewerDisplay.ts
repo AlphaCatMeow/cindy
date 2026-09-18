@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { RemoteDesktopDisplay } from '@cindy/device-link';
 import type { ViewerDisplayHandle } from './viewerDisplay';
 import { linuxDisplay, linuxMonitor, linuxMonitors, supportsLinuxDisplay } from './linuxDesktop';
+import { supportsHyprlandCapture } from './hyprlandCapture';
 
 function script(): string {
   return app.isPackaged
@@ -12,7 +13,8 @@ function script(): string {
     : path.join(app.getAppPath(), 'native', 'remote-desktop', 'linux-viewer-display.py');
 }
 export function supportsLinuxViewerDisplay(): boolean {
-  if (!supportsLinuxDisplay()) return false;
+  // Portal capture cannot select the helper's Hyprland-only display IDs.
+  if (!supportsHyprlandCapture() || !supportsLinuxDisplay()) return false;
   try {
     accessSync('/usr/bin/python3', constants.X_OK);
     accessSync(script(), constants.R_OK);

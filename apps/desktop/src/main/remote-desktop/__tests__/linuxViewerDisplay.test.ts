@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => '/test/app' } }));
 vi.mock('node:fs', () => ({ accessSync: vi.fn(), constants: { X_OK: 1, R_OK: 4 } }));
 vi.mock('node:child_process', () => ({ spawn: () => h.child }));
+vi.mock('../hyprlandCapture', () => ({ supportsHyprlandCapture: () => true }));
 vi.mock('../linuxDesktop', () => ({
   supportsLinuxDisplay: () => true,
   linuxMonitor: h.monitor,

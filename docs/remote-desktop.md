@@ -537,7 +537,10 @@ it to the original output. A Python standard-library helper owns the mirror and
 workspace moves. EOF, missed heartbeats and termination restore the source and
 remove only its own output; restoration retries keep the in-memory snapshot alive
 through temporary compositor errors. A missing source is treated as unplugged.
-The helper requires a running user compositor and Python 3. It does not provide
+The helper requires a running user compositor, Python 3 and the native Hyprland
+capture prerequisites (including `grim`). Capability advertisement and creation
+share this check: portal capture cannot target its Hyprland-only display IDs.
+It does not provide
 pre-login access or a physical privacy screen. Explicit mirror/special-workspace
 configurations are rejected rather than being silently replaced. Live scratch
 output tests cover resize, EOF, heartbeat timeout and SIGTERM cleanup.
