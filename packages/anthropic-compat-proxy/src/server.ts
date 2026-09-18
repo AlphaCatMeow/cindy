@@ -668,10 +668,11 @@ function respondRequestTooLarge(opts: {
   /** Content-Length 预检命中时的声明字节数;流式守卫命中时为 null。 */
   declaredBytes: number | null;
   receivedBytes: number;
-  reason?: 'request_body_too_large';
+  reason?: 'request_body_too_large' | 'attachment_recovery_storage_exhausted';
 }): void {
   const { req, res, logger } = opts;
-  logger.warn?.('✖ request body exceeds proxy limit → 413', {
+  const storageExhausted = opts.reason === 'attachment_recovery_storage_exhausted';
+  logger.warn?.(storageExhausted ? 'attachment recovery has insufficient temporary disk space → 507' : '✖ request body exceeds proxy limit → 413', {
     reqId: opts.reqId,
     method: opts.method,
     url: opts.url,
@@ -684,10 +685,10 @@ function respondRequestTooLarge(opts: {
     error: {
       type: 'proxy_error',
       reason: opts.reason ?? 'request_body_too_large',
-      message: `request body too large: ${opts.declaredBytes ?? `>${opts.receivedBytes}`} bytes exceeds proxy limit of ${opts.limitBytes} bytes`,
+      message: storageExhausted ? 'Not enough free disk space to recover this request. Free disk space and retry; the original conversation is unchanged.' : `request body too large: ${opts.declaredBytes ?? `>${opts.receivedBytes}`} bytes exceeds proxy limit of ${opts.limitBytes} bytes`,
     },
   }));
-  res.writeHead(413, {
+  res.writeHead(storageExhausted ? 507 : 413, {
     'content-type': 'application/json',
     'content-length': String(payload.length),
     connection: 'close',
@@ -2228,7 +2229,8 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
                 reqId, originalBytes: body.bytes, recoveredBytes: recovered.length,
               });
               return recovered;
-            } catch {
+            } catch (error) {
+              if (error instanceof Error && error.message === 'RECOVERY_STORAGE_EXHAUSTED') throw error;
               // Do not leak paths, payloads or credentials in recovery errors.
               logger.warn?.('oversized attachment recovery failed', { reqId });
               return null;
@@ -2237,10 +2239,11 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
         : await collectRequestBody(req, requestIngressBytes);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg === 'REQUEST_TOO_LARGE') {
+      if (msg === 'REQUEST_TOO_LARGE' || msg === 'RECOVERY_STORAGE_EXHAUSTED') {
         respondRequestTooLarge({
           req, res, logger, reqId, method, url, headers,
           limitBytes: maxBodyBytes,
+          reason: msg === 'RECOVERY_STORAGE_EXHAUSTED' ? 'attachment_recovery_storage_exhausted' : 'request_body_too_large',
           declaredBytes: null,
           receivedBytes: (err as { receivedBytes?: number }).receivedBytes ?? 0,
         });

@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createAnthropicCompatProxy } from './server.js';
 import type { LocalRequestHandler } from './types.js';
-import { recoverInlineAttachments } from './oversized-attachments.js';
+import { recoverInlineAttachments as recover, type RecoveredAttachment } from './oversized-attachments.js';
 import { listenOnAvailableLoopbackPort } from './test-loopback-server.js';
+const recoverInlineAttachments = (body: Parameters<typeof recover>[0], limit: number, prepare: (a: RecoveredAttachment) => Promise<string>) =>
+  recover(body, limit, { prepare, commit: async () => {} });
+
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 

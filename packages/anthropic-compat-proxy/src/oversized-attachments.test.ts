@@ -4,7 +4,10 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { collectRecoverableBody, recoverInlineAttachments, type AttachmentKeeper } from './oversized-attachments.js';
+import { collectRecoverableBody, recoverInlineAttachments as recover, type RecoveredAttachment } from './oversized-attachments.js';
+
+const recoverInlineAttachments = (body: Parameters<typeof recover>[0], limit: number, prepare: (a: RecoveredAttachment) => Promise<string>) =>
+  recover(body, limit, { prepare, commit: async () => {} });
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -64,7 +67,7 @@ describe('overflow-only attachment recovery', () => {
     { type: 'video_url', video_url: { url: `data:video/mp4;base64,${data.toString('base64')}` } },
   ])('handles attachment blocks in nested tool results: $type', async block => {
     const f = await fixture({ messages: [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: [block] }] }] });
-    const keep: AttachmentKeeper = vi.fn(async a => {
+    const keep = vi.fn(async (a: RecoveredAttachment) => {
       expect(await readFile(a.filePath)).toEqual(data);
       return path.join(f.dir, 'retained');
     });
@@ -132,4 +135,32 @@ describe('overflow-only attachment recovery', () => {
     })).rejects.toThrow();
     expect(await readFile(f.body.filePath)).toEqual(f.raw);
   });
+});
+
+it('recovers many small attachments only after their aggregate request overflows', async () => {
+  const small = Buffer.alloc(1024, 7);
+  const block = { type: 'input_image', image_url: `data:image/png;base64,${small.toString('base64')}` };
+  const f = await fixture({ input: [{ role: 'user', content: Array.from({ length: 70 }, () => block) }] });
+  const prepare = vi.fn(async (a: RecoveredAttachment) => { expect(await readFile(a.filePath)).toEqual(small); return '/tmp/small.png'; });
+  const commit = vi.fn(async () => {});
+  const result = await recover(f.body, 30_000, { prepare, commit });
+  expect(result!.length).toBeLessThanOrEqual(30_000);
+  const content = JSON.parse(result!.toString()).input[0].content;
+  expect(content[0].type).toBe('input_text');
+  expect(content.at(-1)).toEqual(block);
+  expect(commit).toHaveBeenCalledOnce();
+});
+
+it('keeps URL attachments intact while recovering inline small attachments', async () => {
+  const remote = { type: 'input_image', image_url: 'https://example.test/image.png' };
+  const f = await fixture({ input: [remote, image()] });
+  const result = await recoverInlineAttachments(f.body, 1000, async () => '/tmp/kept');
+  expect(JSON.parse(result!.toString()).input[0]).toEqual(remote);
+});
+
+it('does not commit staged files when the recovered request still cannot fit', async () => {
+  const f = await fixture({ instructions: 'x'.repeat(100_000), input: [image()] });
+  const commit = vi.fn();
+  expect(await recover(f.body, 1000, { prepare: async () => '/tmp/kept', commit })).toBeNull();
+  expect(commit).not.toHaveBeenCalled();
 });
