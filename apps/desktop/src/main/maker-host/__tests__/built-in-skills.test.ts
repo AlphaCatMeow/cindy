@@ -77,12 +77,32 @@ describe('built-in Skills', () => {
     );
 
     fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nUpdated\n');
-    const updated = await prepareBuiltInSkills(input);
+    const updated = await prepareBuiltInSkills({ ...input, bundleVersion: 2 });
     expect(updated.changed).toBe(true);
     expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toContain(
       'Updated',
     );
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(descriptor.absolutePath));
+  });
+
+  it('does not let an older or conflicting bundle overwrite newer shared bytes', async () => {
+    const input = fixture();
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nNewer bundle\n');
+    const newer = await prepareBuiltInSkills({ ...input, bundleVersion: 2 });
+    const descriptor = newer.descriptors[0]!;
+    const installed = fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8');
+
+    fs.writeFileSync(
+      path.join(input.source, 'SKILL.md'),
+      '---\nname: cindy-skill-creator\ndescription: Old bundle\n---\n\n# Old\n',
+    );
+    const older = await prepareBuiltInSkills({ ...input, bundleVersion: 1 });
+    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
+    expect(older.warnings.join('\n')).toContain('only carries older bundle 1');
+
+    const conflicting = await prepareBuiltInSkills({ ...input, bundleVersion: 2 });
+    expect(fs.readFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), 'utf8')).toBe(installed);
+    expect(conflicting.warnings.join('\n')).toContain('bundle version 2 was reused');
   });
 
   it('keeps a user-owned same-name Skill while retaining the Cindy copy', async () => {

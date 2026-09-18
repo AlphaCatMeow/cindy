@@ -24,14 +24,70 @@ def split_frontmatter(content):
 
 
 def _strip_plain_comment(value):
-    for index, char in enumerate(value):
-        if char == "#" and index > 0 and value[index - 1].isspace():
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                index += 1
+            elif char == "'":
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == "#" and index > 0 and value[index - 1].isspace():
             return value[:index].rstrip()
+        index += 1
     return value.strip()
 
 
+def _parse_flow_collection(value):
+    stack = []
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                index += 1
+            elif char == "'":
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char in "[{":
+            stack.append("]" if char == "[" else "}")
+        elif char in "]}":
+            if not stack or stack.pop() != char:
+                raise FrontmatterError(f"Mismatched flow delimiter '{char}'")
+            if not stack and value[index + 1 :].strip():
+                raise FrontmatterError("Unexpected content after flow collection")
+        index += 1
+
+    if quote is not None or escaped:
+        raise FrontmatterError("Unterminated quoted scalar in flow collection")
+    if stack:
+        raise FrontmatterError(f"Unterminated flow collection, expected '{stack[-1]}'")
+    return [] if value.startswith("[") else {}
+
+
 def _parse_scalar(raw):
-    value = raw.strip()
+    value = _strip_plain_comment(raw)
     if value.startswith('"'):
         try:
             parsed = json.loads(value)
@@ -43,7 +99,6 @@ def _parse_scalar(raw):
             raise FrontmatterError("Invalid single-quoted scalar")
         return value[1:-1].replace("''", "'")
 
-    value = _strip_plain_comment(value)
     lowered = value.lower()
     if lowered in {"null", "~"} or value == "":
         return None
@@ -54,14 +109,11 @@ def _parse_scalar(raw):
     if re.fullmatch(r"[-+]?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)", value):
         return float(value)
     if value.startswith(("[", "{")):
-        closing = "]" if value.startswith("[") else "}"
-        if not value.endswith(closing):
-            raise FrontmatterError(f"Unterminated flow value, expected '{closing}'")
         # The bundled tools only inspect scalar name/description values. Keep
         # flow collection contents opaque while preserving the collection type,
         # so valid YAML bare scalars such as [Read, Grep] and {owner: me} do not
         # require PyYAML or JSON syntax.
-        return [] if value.startswith("[") else {}
+        return _parse_flow_collection(value)
     return value
 
 

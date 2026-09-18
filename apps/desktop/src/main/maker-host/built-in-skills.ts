@@ -17,6 +17,8 @@ export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
 const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_NAME] as const;
 const MANIFEST_FILE = '.cindy-system-skills.json';
 const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
+/** Increment whenever shipped built-in Skill bytes change between releases. */
+export const BUILT_IN_SKILLS_BUNDLE_VERSION = 1;
 
 export interface BuiltInSkillDescriptor {
   name: string;
@@ -29,6 +31,7 @@ export interface PrepareBuiltInSkillsOptions {
   userDataDir: string;
   appDataDir?: string;
   homeDir?: string;
+  bundleVersion?: number;
   withSharedMutation?: typeof withSkillMutation;
 }
 
@@ -39,7 +42,8 @@ export interface PrepareBuiltInSkillsResult {
 }
 
 interface MaterializationManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  bundleVersion: number;
   fingerprints: Record<string, string>;
 }
 
@@ -100,16 +104,22 @@ async function readManifest(root: string): Promise<MaterializationManifest> {
       await fsp.readFile(path.join(root, MANIFEST_FILE), 'utf8'),
     ) as Partial<MaterializationManifest>;
     if (
-      parsed.schemaVersion === 1 &&
+      parsed.schemaVersion === 2 &&
+      Number.isSafeInteger(parsed.bundleVersion) &&
+      (parsed.bundleVersion ?? 0) >= 0 &&
       parsed.fingerprints &&
       typeof parsed.fingerprints === 'object'
     ) {
-      return { schemaVersion: 1, fingerprints: parsed.fingerprints };
+      return {
+        schemaVersion: 2,
+        bundleVersion: parsed.bundleVersion!,
+        fingerprints: parsed.fingerprints,
+      };
     }
   } catch {
     // Missing or unreadable app-owned metadata is repaired from bundled bytes.
   }
-  return { schemaVersion: 1, fingerprints: {} };
+  return { schemaVersion: 2, bundleVersion: 0, fingerprints: {} };
 }
 
 async function writeManifest(root: string, manifest: MaterializationManifest): Promise<void> {
@@ -318,19 +328,39 @@ export async function prepareBuiltInSkills(
   const descriptors = builtInSkillDescriptors(options.userDataDir, options.appDataDir);
   const warnings: string[] = [];
   let changed = false;
+  const bundleVersion = options.bundleVersion ?? BUILT_IN_SKILLS_BUNDLE_VERSION;
+  if (!Number.isSafeInteger(bundleVersion) || bundleVersion < 1) {
+    throw new Error(`invalid built-in Skill bundle version: ${bundleVersion}`);
+  }
   const mutate = options.withSharedMutation ?? withSkillMutation;
   const locked = await mutate(BUILT_IN_SKILL_NAMES, async () => {
     await fsp.mkdir(root, { recursive: true });
     const manifest = await readManifest(root);
+    const newerBundleIsInstalled = manifest.bundleVersion > bundleVersion;
+    if (newerBundleIsInstalled) {
+      warnings.push(
+        `kept built-in Skill bundle ${manifest.bundleVersion}; this build only carries older bundle ${bundleVersion}`,
+      );
+    }
 
     for (const descriptor of descriptors) {
       const source = path.join(options.bundledRoot, descriptor.name);
       try {
         const fingerprint = await hashDirectory(source);
         const installedFingerprint = await hashDirectory(descriptor.absolutePath).catch(() => null);
-        if (
-          installedFingerprint !== fingerprint ||
-          manifest.fingerprints[descriptor.name] !== fingerprint
+        const recordedFingerprint = manifest.fingerprints[descriptor.name];
+        const sameVersionConflict = (
+          manifest.bundleVersion === bundleVersion &&
+          recordedFingerprint !== undefined &&
+          recordedFingerprint !== fingerprint
+        );
+        if (sameVersionConflict) {
+          warnings.push(
+            `kept built-in Skill ${descriptor.name} because bundle version ${bundleVersion} was reused for different bytes`,
+          );
+        } else if (
+          !newerBundleIsInstalled &&
+          (installedFingerprint !== fingerprint || recordedFingerprint !== fingerprint)
         ) {
           changed = (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
           manifest.fingerprints[descriptor.name] = fingerprint;
@@ -388,12 +418,15 @@ export async function prepareBuiltInSkills(
       }
     }
 
-    try {
-      await writeManifest(root, manifest);
-    } catch (error) {
-      warnings.push(
-        `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    if (!newerBundleIsInstalled) {
+      manifest.bundleVersion = bundleVersion;
+      try {
+        await writeManifest(root, manifest);
+      } catch (error) {
+        warnings.push(
+          `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     return true;
   }, { waitMs: BUILT_IN_SKILL_MUTATION_WAIT_MS });
