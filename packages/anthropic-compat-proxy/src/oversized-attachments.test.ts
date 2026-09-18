@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, access, copyFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, access, copyFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -39,19 +39,25 @@ describe('overflow-only attachment recovery', () => {
       { role: 'user', content: [{ type: 'input_text', text: 'Compare these' }, image()] },
     ] };
     const f = await fixture(value);
+    // Backslashes need JSON decoding even when this test runs on a POSIX host.
+    const savedPath = path.join(f.dir, 'saved\\nested', 'saved.png');
+    await mkdir(path.dirname(savedPath), { recursive: true });
     const saved: Buffer[] = [];
     const result = await recoverInlineAttachments(f.body, f.raw.length - 1, async a => {
       saved.push(await readFile(a.filePath));
-      const dest = path.join(f.dir, 'saved.png');
-      await copyFile(a.filePath, dest);
-      return dest;
+      await copyFile(a.filePath, savedPath);
+      return savedPath;
     });
     expect(saved).toEqual([data]);
     const parsed = JSON.parse(result!.toString());
     expect(parsed.input[0]).toEqual(value.input[0]);
     expect(parsed.input[1].call_id).toBe('one');
     expect(parsed.input[1].output[0]).toMatchObject({ type: 'input_text' });
-    expect(parsed.input[1].output[0].text).toContain(path.join(f.dir, 'saved.png'));
+    const preservedPath = parsed.input[1].output[0].text.match(/Preserved local file: (.+)\. Read the file/);
+    expect(preservedPath).not.toBeNull();
+    const localPath = JSON.parse(preservedPath![1]);
+    expect(localPath).toBe(savedPath);
+    expect(await readFile(localPath)).toEqual(data);
     expect(parsed.input[1].output[1]).toEqual(value.input[1].output![1]);
     expect(parsed.input[2]).toEqual(value.input[2]);
     expect(await readFile(f.body.filePath)).toEqual(f.raw);
