@@ -107,7 +107,7 @@ def read_frontmatter_name(skill_dir):
     if not skill_md.exists():
         print(f"[ERROR] SKILL.md not found in {skill_dir}")
         return None
-    content = skill_md.read_text()
+    content = skill_md.read_text(encoding="utf-8")
     try:
         frontmatter_text, _body_start = split_frontmatter(content)
         frontmatter = parse_frontmatter(frontmatter_text)
@@ -189,7 +189,7 @@ def write_openai_yaml(skill_dir, skill_name, raw_overrides):
     agents_dir = Path(skill_dir) / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     output_path = agents_dir / "openai.yaml"
-    output_path.write_text(content)
+    output_path.write_text(content, encoding="utf-8")
     print(f"[OK] Created agents/openai.yaml")
     return output_path
 

@@ -16,6 +16,7 @@ export const BUILT_IN_LEARN_SKILL_NAME = CINDY_LEARN_NAME;
 
 const BUILT_IN_SKILL_NAMES = [BUILT_IN_SKILL_CREATOR_NAME, BUILT_IN_LEARN_SKILL_NAME] as const;
 const MANIFEST_FILE = '.cindy-system-skills.json';
+const BUILT_IN_SKILL_MUTATION_WAIT_MS = 5_000;
 
 export interface BuiltInSkillDescriptor {
   name: string;
@@ -395,7 +396,7 @@ export async function prepareBuiltInSkills(
       );
     }
     return true;
-  });
+  }, { waitMs: BUILT_IN_SKILL_MUTATION_WAIT_MS });
   if (locked === undefined) {
     warnings.push('could not prepare built-in Skills because another Skill mutation is in progress');
   }

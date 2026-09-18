@@ -144,6 +144,22 @@ describe('built-in Skills', () => {
     expect(fs.existsSync(path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator'))).toBe(false);
   });
 
+  it('waits a bounded interval for another profile to finish its projection', async () => {
+    const input = fixture();
+    let waitMs: number | undefined;
+    const result = await prepareBuiltInSkills({
+      ...input,
+      withSharedMutation: async (_names, operation, options) => {
+        waitMs = options?.waitMs;
+        return operation();
+      },
+    });
+
+    expect(waitMs).toBe(5_000);
+    expect(result.warnings).toEqual([]);
+    expect(fs.existsSync(result.descriptors[0]!.absolutePath)).toBe(true);
+  });
+
   it('keeps a user-owned same-name symlink', async () => {
     const input = fixture();
     const userSource = path.join(path.dirname(input.homeDir), 'user-skill');

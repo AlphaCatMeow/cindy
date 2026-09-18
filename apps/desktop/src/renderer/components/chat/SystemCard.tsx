@@ -107,13 +107,23 @@ const codeClass = cn(
 function HelpCard({ data }: { data?: Record<string, unknown> }) {
   const { t } = useTranslation();
   const commands =
-    (data?.commands as Array<{ name: string; description?: string; source: string }>) ?? [];
+    (data?.commands as Array<{
+      name: string;
+      description?: string;
+      source: string;
+      builtIn?: boolean;
+    }>) ?? [];
   const desktopCmds = commands.filter((c) => c.source === 'desktop');
   const agentBuiltinCmds = commands.filter((c) => c.source === 'agent-builtin');
   const projectCmds = commands.filter((c) => c.source === 'user' || c.source === 'skill');
 
   const renderCommandRows = (
-    items: Array<{ name: string; description?: string; source: string }>,
+    items: Array<{
+      name: string;
+      description?: string;
+      source: string;
+      builtIn?: boolean;
+    }>,
   ) => (
     <div className="flex flex-col gap-[2px]">
       {items.map((c) => {

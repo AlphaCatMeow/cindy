@@ -30,6 +30,23 @@ const shadowedUnavailableSkillsByCommands = new WeakMap<UnifiedCommand[], Set<st
 
 export type { UnifiedCommand } from '@cindy/maker-core';
 
+export interface HelpCardCommand {
+  name: string;
+  description?: string;
+  source: string;
+  builtIn?: boolean;
+}
+
+/** Preserve Main-attested built-in identity when commands enter a persisted help card. */
+export function commandsForHelpCard(commands: readonly UnifiedCommand[]): HelpCardCommand[] {
+  return commands.map((command) => ({
+    name: command.name,
+    description: 'description' in command ? command.description : undefined,
+    source: command.kind === 'agent-skill' ? command.source : command.kind,
+    ...(command.kind === 'agent-skill' && command.builtIn === true ? { builtIn: true } : {}),
+  }));
+}
+
 export const PI_RUNTIME_SKILL_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 4_000] as const;
 
 export function isSlashCommandUnavailable(command: UnifiedCommand): boolean {
