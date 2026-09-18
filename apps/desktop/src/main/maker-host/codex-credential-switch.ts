@@ -210,13 +210,19 @@ export function isCodexThreadModelProviderIdentityMismatch(
   const actualIsAppliedCustomProviderIdentity = isAppliedCodexCustomProviderIdentity(
     actualThreadModelProviderId,
   );
+  const targetProvider = getActiveCatalog().providers.find(
+    (provider) => provider.id === nextProviderId,
+  );
+  const targetCatalogId = targetProvider ? providerCatalogId(targetProvider) : null;
   // Older app-server versions may report the logical provider id directly
   // (for example `openai`) instead of Cindy's materialized `cindy_openai`
-  // alias. When the target logical route is the same provider, that raw id is
-  // a matching identity; only a route crossing needs a rebuild.
+  // alias. Account-specific OpenAI ids also share the catalog identity
+  // `openai`; when the target catalog identity matches, only a route crossing
+  // needs a rebuild.
   const actualMatchesTargetLogicalProvider =
     actualThreadModelProviderId !== null &&
-    actualThreadModelProviderId === nextProviderId;
+    (actualThreadModelProviderId === nextProviderId ||
+      actualThreadModelProviderId === targetCatalogId);
   // The app-server may report a provider id that is not one of Cindy's
   // materialized identities (for example `openai`, Azure, or a custom provider).
   // It is still a sticky thread identity. Treating those ids as unknown lets a

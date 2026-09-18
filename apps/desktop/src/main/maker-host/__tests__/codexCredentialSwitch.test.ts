@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BUNDLED_CATALOG, buildUserProvider } from '@cindy/model-providers';
 
 import {
   isCodexThreadModelProviderIdentityMismatch,
@@ -9,9 +10,11 @@ import {
   type PrepareLocalCodexCredentialModeSwitchInput,
 } from '../codex-credential-switch.js';
 import { rehydrateCloseSuppression } from '../rehydrateCloseSuppression.js';
+import { setActiveCatalog } from '../active-catalog.js';
 
 afterEach(() => {
   rehydrateCloseSuppression.resetForTest();
+  setActiveCatalog(BUNDLED_CATALOG);
 });
 
 describe('shouldCloseSessionForCredentialSwitch codex mode', () => {
@@ -160,6 +163,29 @@ describe('shouldCloseSessionForCredentialSwitch codex mode', () => {
       agentKind: 'codex',
       currentProviderId: 'openai',
       nextProviderId: 'openai',
+      currentModel: 'gpt-5.4',
+      nextModel: 'gpt-5.5',
+      currentCodexProxyActive: true,
+      currentCodexThreadModelProviderId: 'openai',
+    } as const;
+    expect(isCodexThreadModelProviderIdentityMismatch(input)).toBe(false);
+    expect(shouldCloseSessionForCredentialSwitch(input)).toBe(false);
+  });
+
+  it('matches a raw OpenAI identity for an account-specific Codex provider id', () => {
+    const account = buildUserProvider({
+      id: 'openai-account', name: 'OpenAI account',
+      auth: { method: 'oauth', native: 'codex' },
+      runtimes: { codex: { baseUrl: 'https://chatgpt.com/backend-api/codex', models: [] } },
+    }, { modelRegistry: BUNDLED_CATALOG.modelRegistry });
+    setActiveCatalog({
+      ...BUNDLED_CATALOG,
+      providers: [...BUNDLED_CATALOG.providers, account],
+    });
+    const input = {
+      agentKind: 'codex',
+      currentProviderId: 'openai',
+      nextProviderId: 'openai-account',
       currentModel: 'gpt-5.4',
       nextModel: 'gpt-5.5',
       currentCodexProxyActive: true,
