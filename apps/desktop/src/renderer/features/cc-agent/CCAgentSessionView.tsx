@@ -28,7 +28,7 @@ import {
 import type { CSSProperties, ReactNode } from 'react';
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
-import { useTranslation } from 'react-i18next';
+import { useStableTranslation as useTranslation } from '@/hooks/useStableTranslation';
 import {
   isCodexResumeNotReadyProjectionError,
   type AgentInputReference,
