@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DESKTOP_LOCAL, type DesktopHostCommand } from '../../../shared/remoteDesktop';
+import {
+  DESKTOP_AUDIO_RETRY_MS,
+  DESKTOP_LOCAL,
+  type DesktopHostCommand,
+} from '../../../shared/remoteDesktop';
+
+vi.hoisted(() => {
+  vi.stubGlobal('process', { ...process, platform: 'darwin', getSystemVersion: () => '26.0' });
+});
 
 const h = vi.hoisted(() => ({
   wayland: false,
@@ -234,6 +242,7 @@ const flush = async () => {
 const offer = () =>
   h.deps.offer({ lease: h.lease, display: { id: '1' } }, 'sdp', undefined, false, 'attempt');
 beforeEach(() => {
+  vi.stubGlobal('process', { ...process, platform: 'darwin', getSystemVersion: () => '26.0' });
   vi.useFakeTimers();
   h.wayland = false;
   h.hyprland = false;
@@ -951,4 +960,88 @@ it('binds Linux audio to the exact capture window, opted-in video lease and stop
   expect(h.audioStop).toHaveBeenCalled();
   expect(() => read(event(owner), 'lease')).toThrow('PERMISSION_DENIED');
   expect(h.audioRead).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])(
+  'bounds same-screen audio recovery after the initial grant was consumed=%s',
+  async (consumed) => {
+    const pending = h.deps.offer(
+      { lease: h.lease, display: { id: '1' } },
+      'sdp',
+      { audio: true, fps: 30, bitrate: 0 },
+      true,
+      'attempt',
+    );
+    h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+    await flush();
+    const owner = h.owner;
+    const grant = owner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+    const callback = vi.fn();
+    const request = { frame: owner.mainFrame, videoRequested: true, audioRequested: true };
+    if (consumed) {
+      grant(request, callback);
+      expect(callback).toHaveBeenLastCalledWith({
+        video: { id: 'screen:1', display_id: '1' },
+        audio: 'loopback',
+      });
+    }
+    h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls[0][1].id, 'answer');
+    await pending;
+    // An OS denial can happen before the first display grant is consumed.
+    // The answered video lease still permits only bounded audio recovery.
+    for (const invalid of [
+      { ...request, frame: {} },
+      { ...request, audioRequested: false },
+      { ...request, videoRequested: false },
+    ]) {
+      grant(invalid, callback);
+      expect(callback).toHaveBeenLastCalledWith({});
+    }
+    for (let i = consumed ? 1 : 0; i < 1 + DESKTOP_AUDIO_RETRY_MS.length; i++) {
+      grant(request, callback);
+      expect(callback).toHaveBeenLastCalledWith({
+        video: { id: 'screen:1', display_id: '1' },
+        audio: 'loopback',
+      });
+    }
+    grant(request, callback);
+    expect(callback).toHaveBeenLastCalledWith({});
+    expect(owner.dead).toBe(false);
+  },
+);
+
+it('revokes audio recovery with the lease and never grants it to an audio-off replacement', async () => {
+  const pending = h.deps.offer(
+    { lease: h.lease, display: { id: '1' } },
+    'sdp',
+    { audio: true, fps: 30, bitrate: 0 },
+    true,
+    'attempt',
+  );
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const oldOwner = h.owner;
+  const oldGrant = oldOwner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), oldOwner.send.mock.calls[0][1].id, 'answer');
+  await pending;
+  h.lease = 'replacement';
+  const callback = vi.fn();
+  const oldRequest = { frame: oldOwner.mainFrame, videoRequested: true, audioRequested: true };
+  oldGrant(oldRequest, callback);
+  expect(callback).toHaveBeenLastCalledWith({});
+  const replacement = offer();
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const owner = h.owner;
+  const grant = owner.session.setDisplayMediaRequestHandler.mock.calls[0][0];
+  oldGrant(oldRequest, callback);
+  expect(callback).toHaveBeenLastCalledWith({});
+  const request = { ...oldRequest, frame: owner.mainFrame };
+  grant(request, callback);
+  expect(callback).toHaveBeenLastCalledWith({ video: { id: 'screen:1', display_id: '1' } });
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), owner.send.mock.calls[0][1].id, 'answer');
+  await replacement;
+  grant(request, callback);
+  expect(callback).toHaveBeenLastCalledWith({});
+  expect(owner.dead).toBe(false);
 });

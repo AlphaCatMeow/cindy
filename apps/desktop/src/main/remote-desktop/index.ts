@@ -27,6 +27,7 @@ import {
 } from '@cindy/device-link';
 import {
   DESKTOP_LOCAL,
+  DESKTOP_AUDIO_RETRY_MS,
   type DesktopHostCommand,
   type DesktopHostReply,
 } from '../../shared/remoteDesktop';
@@ -181,7 +182,13 @@ const supportsPrivacyScreen =
 let displayAwake: number | null = null;
 let nativeDisplay: string | null = null;
 let windowsAvailable = false;
-let captureGrant: { source: DesktopCapturerSource; lease: string; audio: boolean } | null = null;
+let captureGrant: {
+  source: DesktopCapturerSource;
+  lease: string;
+  audio: boolean;
+  remaining: number;
+  used: boolean;
+} | null = null;
 const supportsSystemAudio = () =>
   (nativeWayland() && supportsLinuxAudio()) ||
   process.platform === 'win32' ||
@@ -338,7 +345,15 @@ async function offer(
     )
       throw new Error('DESKTOP_LEASE_EXPIRED');
     if (settings?.audio && !supportsSystemAudio()) throw new Error('DESKTOP_AUDIO_UNAVAILABLE');
-    captureGrant = source ? { source, lease: lease.lease, audio: settings?.audio === true } : null;
+    captureGrant = source
+      ? {
+          source,
+          lease: lease.lease,
+          audio: settings?.audio === true,
+          remaining: settings?.audio ? 1 + DESKTOP_AUDIO_RETRY_MS.length : 1,
+          used: false,
+        }
+      : null;
     nativeDisplay = nativeAvailable ? lease.display.id : null;
     nativeOverlay =
       cursorOverlay === true &&
@@ -982,14 +997,17 @@ export function registerRemoteDesktopIpc(
         host !== owner ||
         request.frame !== owner.mainFrame ||
         !remoteDesktop.hasLease(grant.lease) ||
-        !pending ||
-        pending.op !== 'offer' ||
+        videoLease !== grant.lease ||
+        ((grant.used || pending?.op !== 'offer') && (!grant.audio || !request.audioRequested)) ||
         !request.videoRequested
       ) {
         callback({});
         return;
       }
-      captureGrant = null;
+      // Reuse only this screen/lease's audio-enabled grant, never a general
+      // display picker grant. OS permission is checked on every capture.
+      grant.used = true;
+      if (--grant.remaining === 0) captureGrant = null;
       callback({
         video: grant.source,
         ...(grant.audio && request.audioRequested ? { audio: 'loopback' as const } : {}),

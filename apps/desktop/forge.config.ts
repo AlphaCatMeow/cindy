@@ -1137,6 +1137,9 @@ function buildRemoteDesktopInput(platform: ForgePlatform, arch: ForgeArch): void
       );
       // Optional, ABI-pinned compositor integration. Other Linux distributions
       // still package normally and report privacy unavailable.
+      // A skipped optional build must not ship an earlier checkout's plugin.
+      for (const extension of ['so', 'json'])
+        fs.rmSync(path.join(destDir, `cindy-hyprland-privacy.${extension}`), { force: true });
       const privacyHeaders = spawnSync('pkg-config', ['--modversion', 'hyprland'], {
         encoding: 'utf8',
       });
@@ -2047,6 +2050,12 @@ const config: ForgeConfig = {
           entry: 'src/main/contacts-sync/contactsSyncCodecWorker.ts',
           config: 'vite.contacts-sync-codec-worker.config.ts',
           // 大通讯录 JSON/gzip/crypto 隔离在线程中，避免阻塞 Electron main。
+          target: 'preload',
+        },
+        {
+          entry: 'src/main/worktree/recoveryArchiveWorker.ts',
+          config: 'vite.recovery-archive-worker.config.ts',
+          // Physical ASAR bytes belong in recovery archives; isolate noAsar from main.
           target: 'preload',
         },
         {
