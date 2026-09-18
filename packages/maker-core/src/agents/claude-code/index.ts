@@ -1037,7 +1037,7 @@ export class ClaudeCodeAgent extends BaseAgent {
         kind: 'agent-skill' as const,
         name: item.name,
         description: item.description,
-        source: 'skill' as const,
+        source: item.kind === 'skill' ? 'skill' as const : 'user' as const,
         path: item.mdPath,
         scope: item.scope === 'project' ? 'project' as const : 'global' as const,
         enabled: true,

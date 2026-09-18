@@ -17,6 +17,13 @@ function writeSkill(root: string, name: string): string {
   return skillDir;
 }
 
+function writeCommand(root: string, name: string): string {
+  const command = path.join(root, 'commands', `${name}.md`);
+  fs.mkdirSync(path.dirname(command), { recursive: true });
+  fs.writeFileSync(command, `---\ndescription: ${name}\n---\n`);
+  return command;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -66,5 +73,31 @@ describe('scanClaudeRuntimeSkills', () => {
       fs.realpathSync(repositoryLearn),
     ]);
     expect(result.items.map((item) => item.absolutePath)).not.toContain(fs.realpathSync(outsideLearn));
+  });
+
+  it('includes legacy commands that compete in the runtime slash-command namespace', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-runtime-commands-'));
+    roots.push(root);
+    const isolatedConfig = path.join(root, 'claude-home');
+    const repository = path.join(root, 'repository');
+    const workingDir = path.join(repository, 'packages', 'app');
+    fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+    fs.mkdirSync(workingDir, { recursive: true });
+    const globalLearnSkill = writeSkill(isolatedConfig, 'learn');
+    const globalLearnCommand = writeCommand(isolatedConfig, 'learn');
+    const repositoryLearnCommand = writeCommand(path.join(repository, '.claude'), 'learn');
+    const outsideLearnCommand = writeCommand(path.join(root, '.claude'), 'outside');
+
+    const result = await scanClaudeRuntimeSkills(workingDir, isolatedConfig);
+
+    expect(result.items.filter((item) => item.name === 'learn').map((item) => ({
+      kind: item.kind,
+      path: item.absolutePath,
+    }))).toEqual([
+      { kind: 'skill', path: globalLearnSkill },
+      { kind: 'command', path: globalLearnCommand },
+      { kind: 'command', path: fs.realpathSync(repositoryLearnCommand) },
+    ]);
+    expect(result.items.map((item) => item.absolutePath)).not.toContain(outsideLearnCommand);
   });
 });

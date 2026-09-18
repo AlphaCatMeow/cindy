@@ -87,8 +87,10 @@ function scanClaudeCustomizationsAtConfig(
   return result;
 }
 
-/** Native project discovery walks to the nearest Git root (or filesystem root).
+/** Native slash-command discovery walks to the nearest Git root (or filesystem root).
  * Keep this runtime view separate from SkillHub's explicitly owned project list.
+ * Legacy commands and Skills share Claude's slash-command namespace, so callers
+ * making authorization decisions must see both kinds.
  * Ancestors precede descendants so same-name winner selection keeps the closest source.
  */
 export async function scanClaudeRuntimeSkills(
@@ -105,7 +107,7 @@ export async function scanClaudeRuntimeSkills(
     current = parent;
   }
   return scanClaudeCustomizationsAtConfig(
-    { workingDirs, kinds: ['skill'] },
+    { workingDirs, kinds: ['skill', 'command'] },
     configDir,
   );
 }
