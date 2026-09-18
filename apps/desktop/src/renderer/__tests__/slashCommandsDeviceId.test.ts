@@ -29,7 +29,10 @@ function stubElectron() {
     commands: import('@cindy/maker-core').UnifiedCommand[];
     runtimeStatus?: import('../../shared/piPackages').PiPackageCommandRuntimeStatus;
   }));
-  const listAgentSkills = vi.fn(async () => ({ success: true, skills: [c('localskill', 'agent-skill')] }));
+  const listAgentSkills = vi.fn(async () => ({
+    success: true,
+    skills: [c('learn', 'agent-skill'), c('localskill', 'agent-skill')],
+  }));
   const invoke = vi.fn(async (_deviceId: string, channel: string, args?: unknown[]) => {
     if (channel === 'maker:list-agent-commands') {
       return args?.[0] === 'pi'
@@ -40,7 +43,9 @@ function stubElectron() {
           }
         : { success: true, commands: [c('host-cmd', 'agent-builtin')] };
     }
-    if (channel === 'maker:list-agent-skills') return { success: true, skills: [c('host-skill', 'agent-skill')] };
+    if (channel === 'maker:list-agent-skills') {
+      return { success: true, skills: [c('learn', 'agent-skill'), c('host-skill', 'agent-skill')] };
+    }
     return { success: false };
   });
   vi.stubGlobal('window', {
@@ -62,8 +67,10 @@ describe('loadAllCommands deviceId', () => {
       workingDir: '/w',
       sessionId: 'local-session',
     });
-    // 本地会话:goal 命令保留(可对本地 session 设目标)。
-    expect(cmds.map((x) => x.name).sort()).toEqual(['compact', 'goal', 'help', 'localskill']);
+    // 本地会话:goal 命令保留，learn 由可用的 Agent Skill 提供。
+    expect(cmds.map((x) => x.name).sort()).toEqual([
+      'compact', 'goal', 'help', 'learn', 'localskill',
+    ]);
   });
 
   it('本地 Claude 新对话 workingDir=null 时仍加载全局 skills', async () => {
@@ -147,8 +154,10 @@ describe('loadAllCommands deviceId', () => {
       'claude-code',
       { workingDir: '/host/path', sessionId: 'remote-session' },
     ]);
-    // 结果 = 本地 desktop(help + goal,远程会话不再剔除)+ 被控端 builtin(host-cmd)+ 被控端 skill(host-skill)
-    expect(cmds.map((x) => x.name).sort()).toEqual(['goal', 'help', 'host-cmd', 'host-skill']);
+    // 结果 = 本地 desktop(help + goal)+ 被控端 builtin(host-cmd)+ 被控端 skills(learn + host-skill)
+    expect(cmds.map((x) => x.name).sort()).toEqual([
+      'goal', 'help', 'host-cmd', 'host-skill', 'learn',
+    ]);
     // device-link 下 /goal 保留:业务体经隧道到被控端 goal-host,palette 正常展示。
     expect(cmds.some((x) => x.name === 'goal')).toBe(true);
   });

@@ -87,6 +87,7 @@ import {
 } from './remoteChatHistory.js';
 import { botSessionLinks, sessions } from '../localDb/schema.js';
 import { isCindyLearnSkillEnabled } from '../skillhub/activationPreferences.js';
+import { getLearnController } from '../learn-host/index.js';
 
 export interface DesktopMcpProvidersDeps {
   botCapabilities: Pick<ReturnType<typeof createBotCapabilityService>, 'list' | 'select'>;
@@ -391,9 +392,6 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
               message: 'Cindy Learn is disabled in Local Skills.',
             };
           }
-          // Lazy import avoids coupling provider construction to learn-host startup.
-          // The callback is invoked only after bootstrap has initialized the host.
-          const { getLearnController } = await import('../learn-host/index.js');
           const controller = getLearnController();
           if (!controller) {
             return {

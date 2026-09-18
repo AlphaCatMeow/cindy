@@ -390,13 +390,17 @@ export async function loadAllCommands(
   }
 
   const rawDesktop = (desktopRes.success && desktopRes.commands ? desktopRes.commands : []) as UnifiedCommand[];
+  const agentSkill = (skillRes.success && skillRes.skills ? skillRes.skills : []) as UnifiedCommand[];
   // Learn 已迁成可开关的官方 Skill。本地/Device Link 能读 Skill 清单时只展示
-  // agent-skill；SSH 显式跳过扫描，才使用仍可路由 Learn host 的 Desktop 兼容入口。
-  const desktop = shouldLoadSkills
+  // 实际可用的 agent-skill；SSH 显式跳过扫描、扫描失败或尚未发现 Skill 时，
+  // 保留仍可路由 Learn host 的 Desktop 兼容入口。
+  const hasAvailableLearnSkill = agentSkill.some((command) => (
+    command.name.toLowerCase() === 'learn' && !isSlashCommandUnavailable(command)
+  ));
+  const desktop = shouldLoadSkills && hasAvailableLearnSkill
     ? rawDesktop.filter((command) => command.name !== 'learn')
     : rawDesktop;
   const agentBuiltin = (builtinRes.success && builtinRes.commands ? builtinRes.commands : []) as UnifiedCommand[];
-  const agentSkill = (skillRes.success && skillRes.skills ? skillRes.skills : []) as UnifiedCommand[];
   return mergeCommands(desktop, agentBuiltin, agentSkill);
 }
 

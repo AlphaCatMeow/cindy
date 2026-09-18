@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CINDY_LEARN_SOURCE_DESCRIPTION } from '../../../shared/cindyBuiltInSkills';
 
 import {
@@ -9,6 +9,7 @@ import {
   hasUnavailableProjectSkillPreview,
   isCindyOfficialSlashCommand,
   isSlashCommandUnavailable,
+  loadAllCommands,
   mergeCommands,
   nextAvailableSlashCommandIndex,
   rebaseInlineRangesAfterSlashCommandRewrite,
@@ -26,6 +27,45 @@ const skill = (overrides: Partial<Extract<UnifiedCommand, { kind: 'agent-skill' 
   name: 'demo',
   source: 'skill' as const,
   ...overrides,
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function stubCommandLists(skillResult: { success: boolean; skills?: UnifiedCommand[] }) {
+  vi.stubGlobal('window', {
+    electronAPI: {
+      maker: {
+        listDesktopCommands: vi.fn(async () => ({
+          success: true,
+          commands: [{ kind: 'desktop', name: 'learn', description: 'Learn' }],
+        })),
+        listAgentCommands: vi.fn(async () => ({ success: true, commands: [] })),
+        listAgentSkills: vi.fn(async () => skillResult),
+      },
+    },
+  });
+}
+
+describe('loadAllCommands Learn fallback', () => {
+  it.each([
+    ['the Skill query fails', { success: false }],
+    ['Learn is not discovered yet', { success: true, skills: [] }],
+  ])('keeps the Desktop Learn command when %s', async (_label, result) => {
+    stubCommandLists(result as { success: boolean; skills?: UnifiedCommand[] });
+
+    await expect(loadAllCommands('claude-code', null)).resolves.toEqual([
+      { kind: 'desktop', name: 'learn', description: 'Learn' },
+    ]);
+  });
+
+  it('uses an available Agent Skill instead of the Desktop Learn fallback', async () => {
+    const learnSkill = skill({ name: 'learn', builtIn: true });
+    stubCommandLists({ success: true, skills: [learnSkill] });
+
+    await expect(loadAllCommands('claude-code', null)).resolves.toEqual([learnSkill]);
+  });
 });
 
 describe('commandsForHelpCard', () => {
