@@ -565,11 +565,12 @@ not merely successful delivery of the lock request. An installed session locker
 is required. Real phone clipboard, lock and sound playback still need end-to-end
 validation with the running development build.
 
-When the mobile viewer is already streaming, a transient relay `DEVICE_OFFLINE`
-gets at most eight seconds to recover. A brief link-status transition does not
-tear down a healthy RTC stream. Explicit revocation, local stop, backgrounding
-and host lease expiry retain their existing behavior. Recovery is scoped to this
-viewer; it never resets a shared relay or another peer's pending requests.
+Foreground mobile viewers release their lease immediately when signaling goes
+offline or heartbeat reports `DEVICE_OFFLINE`, matching the host's teardown.
+Returning online starts a fresh lease instead of retaining a dead RTC peer.
+Authorized background presentations retain their existing signaling-loss policy;
+heartbeat timeouts alone do not prove lease revocation. Recovery is scoped to
+this viewer; it never resets a shared relay or another peer's pending requests.
 
 Hyprland cursor overlay uses `ext-image-copy-capture-v1` on the video helper's
 Wayland connection. Bounded PNG cursor images and hotspots reuse the existing

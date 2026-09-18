@@ -363,8 +363,12 @@ const visibleInputHint = () =>
 const button = (key: string) =>
   host.querySelector<HTMLButtonElement>(`[aria-label="remoteDesktop.${key}"]`)!;
 beforeEach(async () => {
-  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.show-mouse-buttons.v1").catch(() => undefined);
-  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.audio.v1").catch(() => undefined);
+  await AsyncStorage.removeItem(
+    "cindy.mobile.remote-desktop.show-mouse-buttons.v1",
+  ).catch(() => undefined);
+  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.audio.v1").catch(
+    () => undefined,
+  );
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   fixture.beginBackgroundTransition.mockImplementation(
@@ -3102,7 +3106,7 @@ describe("remote desktop controls", () => {
     expect(fixture.invoke).toHaveBeenCalledTimes(1);
     expect(requests().some((r) => r.op === "start")).toBe(false);
   });
-  it("keeps live video through a brief relay route interruption", async () => {
+  it("replaces the foreground lease after even a brief relay interruption", async () => {
     await connect();
     act(() =>
       fixture.message!({
@@ -3112,14 +3116,14 @@ describe("remote desktop controls", () => {
     fixture.status = "offline";
     act(() => root.render(<RemoteDesktopScreen />));
     await act(async () => vi.advanceTimersByTimeAsync(2000));
-    expect(requests().filter((r) => r.op === "stop")).toHaveLength(0);
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
     fixture.status = "online";
     await act(async () => root.render(<RemoteDesktopScreen />));
     await act(async () => vi.advanceTimersByTimeAsync(9000));
-    expect(requests().filter((r) => r.op === "start")).toHaveLength(1);
-    expect(requests().filter((r) => r.op === "stop")).toHaveLength(0);
+    expect(requests().filter((r) => r.op === "start")).toHaveLength(2);
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
   });
-  it("bounds offline video grace and still obeys explicit host revocation", async () => {
+  it("immediately releases foreground video when signaling goes offline", async () => {
     await connect();
     act(() =>
       fixture.message!({
@@ -3128,11 +3132,10 @@ describe("remote desktop controls", () => {
     );
     fixture.status = "offline";
     act(() => root.render(<RemoteDesktopScreen />));
-    await act(async () => vi.advanceTimersByTimeAsync(8100));
     expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
   });
   it.each(["DEVICE_OFFLINE", "ACCESS_REVOKED"])(
-    "limits transient heartbeat handling to offline errors: %s",
+    "discards the foreground lease on a definitive heartbeat error: %s",
     async (code) => {
       await connect();
       act(() =>
@@ -3147,13 +3150,7 @@ describe("remote desktop controls", () => {
           : original(...args),
       );
       await act(async () => vi.advanceTimersByTimeAsync(3100));
-      expect(requests().filter((r) => r.op === "stop")).toHaveLength(
-        code === "DEVICE_OFFLINE" ? 0 : 1,
-      );
-      if (code === "DEVICE_OFFLINE") {
-        await act(async () => vi.advanceTimersByTimeAsync(9000));
-        expect(requests().some((r) => r.op === "stop")).toBe(true);
-      }
+      expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
     },
   );
   it("renews again after a lost heartbeat reply without replacing the live lease", async () => {
@@ -3643,7 +3640,9 @@ describe("remote desktop controls", () => {
     await connect();
     act(() => button("operations").click());
     expect(button("rightClick")).toBeNull();
-    expect(button("showMouseButtons").getAttribute("aria-checked")).toBe("false");
+    expect(button("showMouseButtons").getAttribute("aria-checked")).toBe(
+      "false",
+    );
     await act(async () => button("showMouseButtons").click());
     expect(button("showMouseButtons").getAttribute("aria-checked")).toBe(
       "true",

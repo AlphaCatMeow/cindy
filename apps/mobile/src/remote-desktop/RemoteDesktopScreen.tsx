@@ -297,10 +297,6 @@ export function RemoteDesktopSession({
   const connecting = useRef(false);
   const ready = useRef(false);
   const streaming = useRef(false);
-  // A relay route can briefly disappear while this viewer's RTC stream lives.
-  // Keep only this lease for at most 8 s (host lease is 12 s); never reset links
-  // shared by other tasks or devices to recover a desktop viewer.
-  const transientFailureAt = useRef<number | null>(null);
   const mediaAttempt = useRef<string | null>(null);
   const receiveWindow = useRef({
     since: Date.now(),
@@ -661,7 +657,6 @@ export function RemoteDesktopSession({
       timing.current?.("stopped");
       timing.current = null;
       generation.current++;
-      transientFailureAt.current = null;
       unlockFrame.current?.(false);
       unlockFrame.current = null;
       presentation.current = false;
@@ -1267,7 +1262,6 @@ export function RemoteDesktopSession({
           // when a local transition timed out, retry a release or restore the
           // local bit so a held key cannot stay down behind a view-only phone.
           if (active.current !== current || presentation.current) return;
-          transientFailureAt.current = null;
           if (result.controlling === false) {
             // startInput can still be settling while this heartbeat was in
             // flight. Clearing a pending take-control here would leave later
@@ -1286,13 +1280,6 @@ export function RemoteDesktopSession({
         })
         .catch((cause) => {
           if (active.current !== current) return;
-          if (
-            streaming.current &&
-            remoteDesktopErrorCode(cause) === "DEVICE_OFFLINE"
-          ) {
-            transientFailureAt.current ??= Date.now();
-            if (Date.now() - transientFailureAt.current < 8000) return;
-          }
           // A missing reply does not prove renewal failed; the next interval
           // retries within the lease. Explicit host revocation still stops us.
           if (
@@ -1501,27 +1488,15 @@ export function RemoteDesktopSession({
   ]);
   useEffect(() => {
     if (link.status !== "online") {
-      // A prepared native background lease survives signaling loss; ordinary
-      // inline streams retain the bounded transient-disconnect grace below.
+      // Only a prepared background presentation can survive host signaling loss.
+      // The host stops foreground leases, so discard ours before reconnecting.
       if (
         presentation.current ||
         (NativeRemoteDesktopView && pipPrepared.current)
       )
         return;
-      if (!active.current || !streaming.current) {
-        pause();
-        return;
-      }
-      transientFailureAt.current ??= Date.now();
-      const lease = active.current;
-      const timer = setTimeout(
-        () => {
-          if (active.current === lease && linkRef.current.status !== "online")
-            pause();
-        },
-        Math.max(0, 8000 - (Date.now() - transientFailureAt.current)),
-      );
-      return () => clearTimeout(timer);
+      pause();
+      return;
     }
     if (!active.current) void connectRef.current();
     else restoreInlinePresentationRef.current();
