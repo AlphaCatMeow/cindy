@@ -179,7 +179,18 @@ def _parse_scalar(raw):
     if value.startswith("'"):
         if len(value) < 2 or not value.endswith("'"):
             raise FrontmatterError("Invalid single-quoted scalar")
-        return value[1:-1].replace("''", "'")
+        inner = value[1:-1]
+        index = 0
+        while index < len(inner):
+            if inner[index] != "'":
+                index += 1
+                continue
+            if index + 1 >= len(inner) or inner[index + 1] != "'":
+                raise FrontmatterError(
+                    "Single quotes inside a single-quoted scalar must be doubled"
+                )
+            index += 2
+        return inner.replace("''", "'")
 
     lowered = value.lower()
     if lowered in {"null", "~"} or value == "":
