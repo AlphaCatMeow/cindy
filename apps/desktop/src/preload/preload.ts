@@ -3856,10 +3856,45 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getCindyMakeSourceStatus: (): Promise<import('../shared/cindyMakeDoctor').MakeSourceStatus> =>
     ipcRenderer.invoke('app:get-cindy-make-source-status'),
+  cindyMakeMerge: (
+    input: import('../shared/cindyMakeMerge').CindyMakeMergeRequest,
+  ): Promise<import('../shared/cindyMakeMerge').CindyMakeMergeState | undefined> =>
+    ipcRenderer.invoke('app:cindy-make-merge', input),
+  getCindyMakeHistory: (
+    selected?: string,
+  ): Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState> =>
+    ipcRenderer.invoke('app:cindy-make-history', selected),
+  actCindyMakeHistory: (
+    runId: string,
+    action: import('../shared/cindyMakeHistory').MakeHistoryAction,
+  ): Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState> =>
+    ipcRenderer.invoke('app:cindy-make-history-action', runId, action),
+  generateCindyMakePersonal: (): Promise<
+    import('../shared/cindyMakeHistory').CindyMakeHistoryState
+  > => ipcRenderer.invoke('app:cindy-make-history-build'),
+  cancelCindyMakePersonal: (
+    buildId: string,
+  ): Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState> =>
+    ipcRenderer.invoke('app:cindy-make-history-cancel-build', buildId),
+  openCindyMakeHistoryBuild: (): Promise<void> =>
+    ipcRenderer.invoke('app:cindy-make-history-open-build'),
+  cindyMakeTest: (
+    sessionId: string,
+    completionId: string,
+    action: import('../shared/cindyMakeSession').CindyMakeTestAction,
+  ): Promise<import('../shared/cindyMakeSession').CindyMakeCompletionMeta> =>
+    ipcRenderer.invoke('app:cindy-make-test', sessionId, completionId, action),
+  getCindyVersions: (): Promise<import('../shared/cindyVersions').CindyVersionsState> =>
+    ipcRenderer.invoke('app:cindy-versions-state'),
+  actCindyVersion: (
+    action: import('../shared/cindyVersions').CindyVersionAction,
+    id: string,
+  ): Promise<import('../shared/cindyVersions').CindyVersionsState> =>
+    ipcRenderer.invoke('app:cindy-versions-action', action, id),
 
   getCindyMakeState: (): Promise<import('../shared/cindyMakeDoctor').CindyMakeGlobalState> =>
     ipcRenderer.invoke('app:get-cindy-make-state'),
-  manageCindyMakeTask: (sessionId: string, action: 'finish' | 'delete'): Promise<void> =>
+  manageCindyMakeTask: (sessionId: string, action: 'end' | 'finish' | 'delete'): Promise<void> =>
     ipcRenderer.invoke('app:manage-cindy-make-task', sessionId, action),
 
   onCindyMakeState: (
@@ -3895,8 +3930,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runId: string,
   ): Promise<import('../shared/cindyMakeDoctor').MakeTaskWorkspace> =>
     ipcRenderer.invoke('app:prepare-cindy-make-workspace', runId),
-  startCindyMakeTask: (input: import('../shared/cindyMakeDoctor').CindyMakeTaskStart): Promise<string> =>
-    ipcRenderer.invoke('app:start-cindy-make-task', input),
+  startCindyMakeTask: (
+    input: import('../shared/cindyMakeDoctor').CindyMakeTaskStart,
+  ): Promise<string> => ipcRenderer.invoke('app:start-cindy-make-task', input),
   cancelCindyMakeTask: (runId: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('app:cancel-cindy-make-task', runId),
 
