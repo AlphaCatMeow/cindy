@@ -236,6 +236,57 @@ async function materializeSkill(
   return true;
 }
 
+function materializationTransactionPaths(root: string): { pending: string; backup: string } {
+  const parent = path.dirname(root);
+  const name = path.basename(root);
+  return {
+    pending: path.join(parent, `.${name}.pending`),
+    backup: path.join(parent, `.${name}.backup`),
+  };
+}
+
+async function recoverMaterializationTransaction(root: string): Promise<void> {
+  const { pending, backup } = materializationTransactionPaths(root);
+  const rootExists = fs.existsSync(root);
+  const backupExists = fs.existsSync(backup);
+
+  if (!rootExists && backupExists) {
+    await fsp.rename(backup, root);
+  } else if (rootExists && backupExists) {
+    await fsp.rm(backup, { recursive: true, force: true });
+  }
+  await fsp.rm(pending, { recursive: true, force: true });
+}
+
+async function commitMaterializationTransaction(root: string): Promise<string | undefined> {
+  const { pending, backup } = materializationTransactionPaths(root);
+  let movedExistingRoot = false;
+  try {
+    await fsp.rename(root, backup);
+    movedExistingRoot = true;
+    await fsp.rename(pending, root);
+  } catch (error) {
+    if (movedExistingRoot && !fs.existsSync(root)) {
+      try {
+        await fsp.rename(backup, root);
+      } catch (rollbackError) {
+        throw new Error(
+          `could not restore the previous built-in Skill bundle after a failed swap: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
+
+  try {
+    await fsp.rm(backup, { recursive: true, force: true });
+  } catch (error) {
+    return `could not remove the previous built-in Skill bundle backup: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return undefined;
+}
+
 async function ensureSkillEntry(
   descriptor: BuiltInSkillDescriptor,
   linkPath: string,
@@ -543,6 +594,15 @@ export async function prepareBuiltInSkills(
   }
   const mutate = options.withSharedMutation ?? withSkillMutation;
   const locked = await mutate(BUILT_IN_SKILL_NAMES, async () => {
+    await fsp.mkdir(path.dirname(root), { recursive: true });
+    try {
+      await recoverMaterializationTransaction(root);
+    } catch (error) {
+      warnings.push(
+        `kept existing built-in Skills because an interrupted update could not be recovered: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return true;
+    }
     await fsp.mkdir(root, { recursive: true });
     let manifest: MaterializationManifest;
     try {
@@ -605,40 +665,30 @@ export async function prepareBuiltInSkills(
         plans.map(({ descriptor, fingerprint }) => [descriptor.name, fingerprint]),
       ),
     };
-    const manifestNeedsUpdate =
+    const materializationNeeded =
       manifest.bundleVersion !== bundleVersion ||
       plans.some(
-        ({ descriptor, fingerprint }) => manifest.fingerprints[descriptor.name] !== fingerprint,
+        ({ descriptor, fingerprint, installedFingerprint }) =>
+          manifest.fingerprints[descriptor.name] !== fingerprint ||
+          installedFingerprint !== fingerprint,
       );
-    if (manifestNeedsUpdate) {
-      try {
-        // Commit the version/fingerprints before swapping any directories. If a
-        // later materialization is interrupted, old builds see the newer version
-        // and cannot downgrade the bytes; this build repairs them on its next run.
-        await writeManifest(root, nextManifest);
-        manifest = nextManifest;
-        changed = true;
-      } catch (error) {
-        warnings.push(
-          `could not save built-in Skill manifest: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return true;
-      }
-    }
+    if (!materializationNeeded) return true;
 
-    for (const { descriptor, source, fingerprint, installedFingerprint } of plans) {
-      if (
-        installedFingerprint === fingerprint &&
-        manifest.fingerprints[descriptor.name] === fingerprint
-      ) continue;
-      try {
-        changed =
-          (await materializeSkill(source, descriptor.absolutePath, fingerprint)) || changed;
-      } catch (error) {
-        warnings.push(
-          `could not materialize built-in Skill ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+    const { pending } = materializationTransactionPaths(root);
+    try {
+      await fsp.mkdir(pending, { recursive: true });
+      for (const { descriptor, source, fingerprint } of plans) {
+        await materializeSkill(source, path.join(pending, descriptor.name), fingerprint);
       }
+      await writeManifest(pending, nextManifest);
+      const cleanupWarning = await commitMaterializationTransaction(root);
+      if (cleanupWarning) warnings.push(cleanupWarning);
+      changed = true;
+    } catch (error) {
+      await fsp.rm(pending, { recursive: true, force: true }).catch(() => undefined);
+      warnings.push(
+        `could not materialize built-in Skill bundle: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     return true;
   }, { waitMs: BUILT_IN_SKILL_MUTATION_WAIT_MS });

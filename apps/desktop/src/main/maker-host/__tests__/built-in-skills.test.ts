@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   activeCindyBuiltInAgentSkills,
@@ -68,6 +68,7 @@ async function prepareAndProjectBuiltInSkills(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -233,6 +234,37 @@ describe('built-in Skills', () => {
         'utf8',
       ),
     ).toBe('Learn v2\n');
+  });
+
+  it('restores the complete previous bundle when the final directory swap fails', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const creator = initial.descriptors.find((descriptor) => descriptor.name === 'cindy-skill-creator')!;
+    const learn = initial.descriptors.find((descriptor) => descriptor.name === 'learn')!;
+    const root = path.dirname(creator.absolutePath);
+    const manifestPath = path.join(root, '.cindy-system-skills.json');
+    const initialManifest = fs.readFileSync(manifestPath, 'utf8');
+    const initialCreator = fs.readFileSync(path.join(creator.absolutePath, 'SKILL.md'), 'utf8');
+    const initialLearn = fs.readFileSync(path.join(learn.absolutePath, 'SKILL.md'), 'utf8');
+    fs.appendFileSync(path.join(input.source, 'SKILL.md'), '\nCreator v2\n');
+    fs.writeFileSync(path.join(input.bundledRoot, 'learn', 'SKILL.md'), 'Learn v2\n');
+
+    const pending = path.join(path.dirname(root), `.${path.basename(root)}.pending`);
+    const originalRename = fs.promises.rename.bind(fs.promises);
+    vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === pending && destination === root) throw new Error('blocked final swap');
+      await originalRename(source, destination);
+    });
+
+    const failed = await prepareBuiltInSkills({ ...input, bundleVersion: 7 });
+
+    expect(failed.changed).toBe(false);
+    expect(failed.warnings.join('\n')).toContain('blocked final swap');
+    expect(fs.readFileSync(manifestPath, 'utf8')).toBe(initialManifest);
+    expect(fs.readFileSync(path.join(creator.absolutePath, 'SKILL.md'), 'utf8')).toBe(initialCreator);
+    expect(fs.readFileSync(path.join(learn.absolutePath, 'SKILL.md'), 'utf8')).toBe(initialLearn);
+    expect(fs.existsSync(pending)).toBe(false);
+    expect(fs.existsSync(path.join(path.dirname(root), `.${path.basename(root)}.backup`))).toBe(false);
   });
 
   it('keeps a user-owned same-name Skill while retaining the Cindy copy', async () => {
