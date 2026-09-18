@@ -9,7 +9,7 @@ const subscribeEmptyComposer = () => () => {};
 const CACHE_RETRY_DELAYS_MS = [1_000, 3_000, 5_000];
 
 export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKind, revision, running, maker,
-  composerSource, hasAttachments = false, hasTerminalError = false }: {
+  composerSource, hasAttachments = false, hasTerminalError = false, voiceIsBusy = false }: {
   ownerId?: string;
   deviceId: string;
   sessionId: string;
@@ -19,6 +19,7 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
   composerSource?: ComposerDraftSource;
   hasAttachments?: boolean;
   hasTerminalError?: boolean;
+  voiceIsBusy?: boolean;
   maker: Pick<MobileMakerTransport, 'predictNextPrompt'>;
 }) {
   const scope = JSON.stringify([ownerId, deviceId, sessionId]);
@@ -27,7 +28,7 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
     const snapshot = composerSource?.getSnapshot();
     return !!snapshot && (!!snapshot.draft.trim() || composerDocumentQuotes(snapshot.document).length > 0);
   });
-  const blocked = hasComposerContent || hasAttachments || hasTerminalError;
+  const blocked = hasComposerContent || hasAttachments || hasTerminalError || voiceIsBusy;
   const [result, setResult] = useState<{ scope: string; revision: number; prompt: string } | null>(null);
   // The transport is recreated when the device-link context refreshes. Keep the
   // latest callable without treating that refresh as a new recommendation run.
@@ -39,7 +40,6 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
     running: false,
     sawRunning: false,
     revisionAtStart: 0,
-    lastRevision: null as number | null,
     liveRevision: null as number | null,
   });
   const current = useRef({ scope, revision, running, blocked });
@@ -56,22 +56,12 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
         running: false,
         sawRunning: false,
         revisionAtStart: 0,
-        lastRevision: null,
         liveRevision: null,
       };
       request.current = null;
       setResult(null);
     }
     const run = observed.current;
-    // A sessions patch can deliver the new completion revision without a
-    // visible running edge (for example while the phone is reconnecting).
-    // Remember the latest revision so that a strictly newer completion still
-    // starts a live prediction instead of being treated as history.
-    const revisionAdvanced = revision != null
-      && run.lastRevision != null
-      && revision > run.lastRevision;
-    if (revision != null) run.lastRevision = revision;
-    if (revisionAdvanced) run.liveRevision = revision;
     if (running) {
       if (!run.running) {
         // A fresh running edge starts a new completion generation. A dismissal
@@ -79,6 +69,7 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
         consumedRevisions.delete(scope);
         run.sawRunning = true;
         run.revisionAtStart = revision ?? 0;
+        run.liveRevision = null;
         request.current = null;
         setResult(null);
       }
@@ -86,6 +77,13 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
       return;
     }
     run.running = false;
+    // Only an observed run can authorize a paid prediction. Keep waiting if
+    // stopped arrives before its revision, then bind that run to one completion.
+    // Later metadata refreshes must not inherit permission from an older run.
+    if (run.sawRunning && revision != null && revision > run.revisionAtStart) {
+      run.liveRevision = revision;
+      run.sawRunning = false;
+    }
     if (!deviceId || !sessionId || !agentKind || !revision || consumedRevisions.get(scope) === revision) return;
     if (blocked) {
       // Consume this completion even if the draft/attachment is later removed.
@@ -94,9 +92,7 @@ export function usePromptRecommendation({ ownerId, deviceId, sessionId, agentKin
       return;
     }
     // Historical navigation only reuses a host result; it never starts a paid prediction.
-    // An ended patch may arrive after stopped, so keep the observed run until then.
-    const cacheOnly = (!run.sawRunning && run.liveRevision !== revision)
-      || (run.sawRunning && revision <= run.revisionAtStart);
+    const cacheOnly = run.liveRevision !== revision;
     if (request.current?.scope === scope && request.current.revision === revision
       && request.current.cacheOnly === cacheOnly) return;
     const attempt = { scope, revision, cacheOnly };

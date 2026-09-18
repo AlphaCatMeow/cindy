@@ -42,6 +42,53 @@ it('waits for the new completion revision even when stopped arrives first', asyn
   expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ cacheOnly: false, completionRevision: 20 }));
 });
 
+it('metadata refresh after opening cached history stays cache-only, including retries', async () => {
+  request.mockResolvedValue({ prompt: null });
+  await render(); await advance();
+  await render({ revision: 20 }); await advance();
+  await act(async () => vi.advanceTimersByTimeAsync(10_000));
+  expect(request).toHaveBeenCalledTimes(5);
+  expect(request.mock.calls.every(([args]) => args.cacheOnly === true)).toBe(true);
+});
+
+it('an observed run authorizes only its completion, and a later run can predict again', async () => {
+  await render({ running: true });
+  await render({ running: false, revision: 20 }); await advance();
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ cacheOnly: false, completionRevision: 20 }));
+  await render({ revision: 30 }); await advance();
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ cacheOnly: true, completionRevision: 30 }));
+  await render({ running: true });
+  await render({ running: false, revision: 40 }); await advance();
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ cacheOnly: false, completionRevision: 40 }));
+});
+
+it('voice input consumes a completion before transcription, without reviving it when voice ends', async () => {
+  await render({ running: true, voiceIsBusy: true });
+  await render({ running: false, revision: 20 }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ voiceIsBusy: false }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ running: true });
+  await render({ running: false, revision: 30 }); await advance();
+  expect(value.prompt).toBe('Suggested next step');
+});
+
+it('starting voice cancels a scheduled request and rejects an already pending result', async () => {
+  await render({ running: true });
+  await render({ running: false, revision: 20 });
+  await render({ voiceIsBusy: true }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  await render({ running: true, voiceIsBusy: false });
+  let resolve!: (result: { prompt: string }) => void;
+  request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await render({ running: false, revision: 30 }); await advance();
+  await render({ voiceIsBusy: true });
+  await act(async () => resolve({ prompt: 'Stale suggestion' }));
+  await render({ voiceIsBusy: false }); await advance();
+  expect(value.prompt).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
 it('dismissal or sending rejects late results and survives a page remount', async () => {
   let resolve!: (result: { prompt: string }) => void;
   request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));

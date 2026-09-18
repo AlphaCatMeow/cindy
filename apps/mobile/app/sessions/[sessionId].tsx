@@ -1355,14 +1355,6 @@ export default function SessionScreen() {
       requestAnimationFrame(() => composerInputRef.current?.focus());
     },
   });
-  const { prompt: promptRecommendation, dismiss: dismissPromptRecommendation } = usePromptRecommendation({
-    ownerId: auth.user?.id, deviceId, sessionId, maker,
-    agentKind: recommendationSession ? agentKindForSession(recommendationSession) : null,
-    revision: recommendationSession?.lastTurnEndedAt, running: remoteSessionRunning,
-    composerSource: composerDraftSource,
-    hasAttachments: attachments.length > 0 || pendingUploads.length > 0 || pastePlaceholderCount > 0,
-    hasTerminalError: remoteSessionRunStatus.hasTerminalError === true,
-  });
   // 换会话与退屏的 outbox 回收:未派发条目的文字合并回草稿库(用户已「发出」的文字
   // 不能静默蒸发,回来时出现在输入框里),在途上传任务丢弃(与托盘退出语义一致,
   // controller 会中止传输并回收已完成的 OSS 对象),已就绪附件回收中转对象。
@@ -1396,6 +1388,16 @@ export default function SessionScreen() {
   const voiceStartPendingSeqRef = useRef(0);
   const voiceStartedOnPressInRef = useRef(false);
   const [voiceState, setVoiceStateInternal] = useState<MobileVoiceState>('idle');
+  const { prompt: promptRecommendation, dismiss: dismissPromptRecommendation } = usePromptRecommendation({
+    ownerId: auth.user?.id, deviceId, sessionId, maker,
+    agentKind: recommendationSession ? agentKindForSession(recommendationSession) : null,
+    revision: recommendationSession?.lastTurnEndedAt, running: remoteSessionRunning,
+    composerSource: composerDraftSource,
+    hasAttachments: attachments.length > 0 || pendingUploads.length > 0 || pastePlaceholderCount > 0,
+    hasTerminalError: remoteSessionRunStatus.hasTerminalError === true,
+    voiceIsBusy: voiceStartPending || voiceState === 'listening'
+      || voiceState === 'submitting' || voiceState === 'refining',
+  });
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceReleaseToSendActive, setVoiceReleaseToSendActive] = useState(false);
   // 「语音结束保持展开」hold:语音真实收尾(busy → done/error)时布防,草稿仍有
