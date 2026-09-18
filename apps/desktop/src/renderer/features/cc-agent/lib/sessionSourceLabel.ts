@@ -22,7 +22,7 @@ import {
 export function buildSessionSourceLabelMap(
   sessions: readonly Session[],
   allKnownProjects: readonly ProjectNode[],
-  dialogueLabel: string,
+  dialogueLabel = '',
   cindyMakeLabel?: string,
 ): Map<string, string> {
   const nameByKey = new Map(allKnownProjects.map((p) => [p.projectKey, p.displayName]));
@@ -32,10 +32,11 @@ export function buildSessionSourceLabelMap(
       map.set(s.id, cindyMakeLabel);
       continue;
     }
-    if (s.workspaceKind === 'dialogue') {
+    if (s.workspaceKind === 'dialogue' && dialogueLabel) {
       map.set(s.id, dialogueLabel);
       continue;
     }
+    if (s.workspaceKind === 'dialogue') continue;
     const key = projectIdentityKeyForSession(s);
     const name = key ? nameByKey.get(key) : undefined;
     if (name) {

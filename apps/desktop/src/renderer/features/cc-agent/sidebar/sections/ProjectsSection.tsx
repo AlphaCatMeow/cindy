@@ -83,6 +83,8 @@ import { sidebarPriorityContext } from '../../lib/sidebarPriorityContext';
 import { useViewedPriorityHold } from '../../hooks/useViewedPriorityHold';
 import { projectKeyComparisonKey, type BotGroupNode } from '../../lib/projectGrouping';
 import { buildSessionSourceLabelMap } from '../../lib/sessionSourceLabel';
+import { aggregateSessionLamps, type SessionLampAggregate } from '../../lib/sessionLampAggregation';
+import { AttentionDot } from '@/components/sidebar/AttentionDot';
 import { useSessionAttentionKinds } from '@/lib/sessionAttentionStore';
 import { useSessionAttentionUrgencySet } from '../../contexts/SessionAttentionUrgencyContext';
 import {
@@ -121,6 +123,9 @@ const MANUAL_PROJECT_SORT_FILTER = 'button, input, textarea, select, a, [data-no
 
 /** 设备段折叠/对话组折叠共用的段 key:本机段 'local',远程段用 deviceId。 */
 const deviceSectionKey = (deviceId: string | null) => deviceId ?? 'local';
+// 单段保留既有伙伴 key;设备分组与对话组同样按段独立记忆,不依赖任务顺序或组名。
+const botGroupKey = (botId: string, sectionKey: string) =>
+  sectionKey === DIALOGUE_GROUP_ALL_KEY ? `bot:${botId}` : `bot:${botId}:${sectionKey}`;
 
 // 优先级排序的「看的时候钉住;只有从完成未读切走才置顶」是模块生命周期内的展示态,
 // 不落盘。放模块级而不是组件 ref:ProjectsSection 重挂(含 React Strict Mode
@@ -467,7 +472,12 @@ export function ProjectsSection({
     }
     return sidebarPriorityContext(
       { runningSessionIds, attentionSessionIds: notifications, waitingSessionIds: waiting },
-      [...projects.flatMap((project) => project.sessions), ...dialogues, ...unclassified],
+      [
+        ...projects.flatMap((project) => project.sessions),
+        ...bots.flatMap((bot) => bot.sessions),
+        ...dialogues,
+        ...unclassified,
+      ],
       (session) => getRemoteSessionActivity(session.id, session.deviceLinkDeviceId)?.phase,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remoteActivityRevision 代表 getRemoteSessionActivity 读到的整表内容
@@ -479,6 +489,7 @@ export function ProjectsSection({
     projects,
     dialogues,
     unclassified,
+    bots,
     remoteActivityRevision,
   ]);
   const hold = useViewedPriorityHold(viewedPriorityHold, viewedIdForSort, naturalPriorityContext);
@@ -491,6 +502,23 @@ export function ProjectsSection({
     [naturalPriorityContext, hold],
   );
 
+  // 聚合灯(2026-08 用户反馈:未读点只亮在最底层会话行,项目层与设备层没有
+  // 灯,多设备下找未读要逐层展开翻找)——项目行 / 对话组行 / 设备段头都从
+  // 各自下方**实际渲染的行集合**聚合灯语(sessionLampAggregation,rail 同源):
+  // running → 图标呼吸橙;未读 → AttentionDot(红 error > 蓝 awaiting > 绿 done)。
+  // remoteActivityRevision 已在上方订阅,依赖注释同 priorityContext。
+  const lampAgg = useCallback(
+    (list: readonly Session[]): SessionLampAggregate =>
+      aggregateSessionLamps(list, {
+        runningSessionIds,
+        notifications,
+        attentionKinds,
+        urgentSessionIds: urgentSet,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- remoteActivityRevision 代表 remoteLampOf 读到的整表内容
+    [runningSessionIds, notifications, attentionKinds, urgentSet, remoteActivityRevision],
+  );
+  const sortingPriorityContext = filter.sortBy === 'priority' ? priorityContext : undefined;
   // starting 只让位给真实 in-flight:本地 isRunning(见 useStartingSessionIds),
   // 远程 running / needs-interaction。终态 attention 不再吸收 —— 旧终态会误伤
   // 新发送,新终态又要代次才能和旧的区分,两边补丁会来回打。没经过 running
@@ -511,9 +539,10 @@ export function ProjectsSection({
     }
     for (const session of dialogues) considerRemote(session);
     for (const session of unclassified) considerRemote(session);
+    for (const bot of bots) for (const session of bot.sessions) considerRemote(session);
     absorbSessionStarting(settled);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remoteActivityRevision 代表 getRemoteSessionActivity 读到的整表内容
-  }, [projects, dialogues, unclassified, remoteActivityRevision]);
+  }, [projects, dialogues, unclassified, bots, remoteActivityRevision]);
 
   // E 期「按设备分组」:有远程设备连接 + 开关开 → 按设备切段(本机在前,
   // 远程按设备切换栏顺序);其余情况单段直渲。切段后按当前排序重排本段。
@@ -574,9 +603,15 @@ export function ProjectsSection({
   // 条目;任何排序/筛选下都生效。
   const entrySessions = getMainListEntrySessions;
   // 折叠视图共用一份参数:非设备分组 = 全列表一份;设备分组 = 每段各一份(见
-  // deviceSections)。attention 豁免用 priorityContext.attentionSessionIds——与
-  // 排序同一口径(含远程活动镜像),远程 waiting/unread 的条目不能被折进
-  // 「显示全部」。
+  // deviceSections)。豁免口径 = attention ∪ running(priorityContext,含远程
+  // 活动镜像)——与聚合灯同口径:上层灯为哪条会话点亮(未读或 running),
+  // 该条目就不能被折进「显示全部」(Greptile P1:此前只豁免 attention,
+  // running-only 会话会让呼吸灯指向不可见的条目)。
+  const lampFoldExemptIds = useMemo(() => {
+    const next = new Set(priorityContext.attentionSessionIds);
+    for (const id of priorityContext.runningSessionIds) next.add(id);
+    return next;
+  }, [priorityContext]);
   const collapseEntries = useCallback(
     (entries: readonly MainListEntry[], showAll: boolean) =>
       getSessionListCollapseView({
@@ -586,10 +621,9 @@ export function ProjectsSection({
         disableCollapse: false,
         isFiltering: false,
         isActiveEntry: (entry) => entrySessions(entry).some((s) => s.id === viewedIdForSort),
-        hasAttentionEntry: (entry) =>
-          entrySessions(entry).some((s) => priorityContext.attentionSessionIds.has(s.id)),
+        hasAttentionEntry: (entry) => entrySessions(entry).some((s) => lampFoldExemptIds.has(s.id)),
       }),
-    [viewedIdForSort, entrySessions, priorityContext],
+    [viewedIdForSort, entrySessions, lampFoldExemptIds],
   );
   const {
     visibleEntries: visibleMixedEntries,
@@ -698,13 +732,12 @@ export function ProjectsSection({
   // 「收起/展开所有分组」只作用于这些可见 key,不动其它模式下的记忆。
   const visibleSessionGroupKeys = useMemo<string[]>(() => {
     const keysFor = (entries: readonly MainListEntry[], scope: string) =>
-      entries.flatMap((entry) =>
-        entry.kind === 'dialogue-group'
-          ? [scope]
-          : entry.kind === 'cindy-make-group'
-            ? [`${CINDY_MAKE_GROUP_KEY}:${scope}`]
-            : [],
-      );
+      entries.flatMap((entry) => {
+        if (entry.kind === 'dialogue-group') return [scope];
+        if (entry.kind === 'cindy-make-group') return [`${CINDY_MAKE_GROUP_KEY}:${scope}`];
+        if (entry.kind === 'bot-group') return [botGroupKey(entry.bot.botId, scope)];
+        return [];
+      });
     if (!deviceGroupingActive) {
       return keysFor(visibleMixedEntries, DIALOGUE_GROUP_ALL_KEY);
     }
@@ -838,6 +871,8 @@ export function ProjectsSection({
         collapsed.has(project.projectKey) ? collapsedAttentionToneFor(project.sessions) : null
       }
       parentSectionCollapsed={false}
+      lamp={lampAgg(project.sessions)}
+      foldExemptSessionIds={lampFoldExemptIds}
       // Unrelated projects keep an undefined selection prop across navigation,
       // so ProjectNode's memo need not rebuild every session list on a click.
       activeSessionId={
@@ -905,6 +940,9 @@ export function ProjectsSection({
           onScheduleAction={onScheduleAction}
           automationGroupCollapsed={isAutomationGroupCollapsed}
           onAutomationGroupCollapsedChange={setAutomationGroupCollapsed}
+          // 顶层自动化组的展开态子运行折叠也要认远程灯豁免(review P2):与项目内 /
+          // 对话组内的 SessionEntryList 同一份 lampFoldExemptIds。
+          foldExemptSessionIds={lampFoldExemptIds}
           sourceLabelMap={dialogueSourceLabelMap}
           sessionVariant={mainSessionVariant}
           // 混排下每条散排对话各是一个单条列表,若都补顶线,会与上一行的底线叠成
@@ -914,12 +952,14 @@ export function ProjectsSection({
       );
     }
     if (entry.kind === 'bot-group') {
-      const groupKey = `bot:${entry.bot.botId}`;
+      const groupKey = botGroupKey(entry.bot.botId, dialogueGroupKey);
       const isCollapsed = collapsedDialogueGroups.has(groupKey);
       return (
         <SessionGroupNode
-          key={`bot-group:${entry.bot.botId}`}
+          key={groupKey}
           sessions={entry.bot.sessions}
+          lamp={lampAgg(entry.bot.sessions)}
+          foldExemptSessionIds={lampFoldExemptIds}
           groupIcon={
             <BotAvatar
               bot={{
@@ -974,6 +1014,8 @@ export function ProjectsSection({
         <SessionGroupNode
           key={`${entry.kind}:${dialogueGroupKey}`}
           sessions={entry.sessions}
+          lamp={lampAgg(entry.sessions)}
+          foldExemptSessionIds={lampFoldExemptIds}
           groupTitle={isMake ? t('settings.cindyMake.title') : undefined}
           groupIcon={
             isMake ? <Hammer size={15} strokeWidth={1.8} className="shrink-0" aria-hidden /> : undefined
@@ -1083,6 +1125,9 @@ export function ProjectsSection({
                   : t('ccAgent.sidebar.deviceGroup.local');
                 const online = section.deviceId ? (device?.online ?? false) : true;
                 const sectionCollapsed = collapsedDevices.has(key);
+                // 设备层聚合灯:聚合本段全部条目的会话(与段内渲染一致)。顶层
+                // 也要有灯,否则未读藏在折叠段/折叠上限之外时只能逐段展开翻找。
+                const sectionLamp = lampAgg(section.entries.flatMap(entrySessions));
                 return (
                   <div key={key} className="flex flex-col gap-1">
                     {/* 设备分组头:可折叠。在线设备不画状态点;离线设备保留灰点与文字提示。 */}
@@ -1106,7 +1151,16 @@ export function ProjectsSection({
                         ) : (
                           <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
                         )}
-                        <MonitorSmartphone size={13} strokeWidth={2} className="shrink-0" />
+                        {/* 段内任一 running → 设备图标呼吸橙(rail 段钮同款灯语)。 */}
+                        <span
+                          className={cn(
+                            'inline-flex shrink-0',
+                            sectionLamp.running &&
+                              'text-[var(--status-bar-accent)] session-status-breathing',
+                          )}
+                        >
+                          <MonitorSmartphone size={13} strokeWidth={2} aria-hidden />
+                        </span>
                         <span className="min-w-0 truncate text-xs font-medium">{name}</span>
                         {!online && (
                           <span
@@ -1116,12 +1170,18 @@ export function ProjectsSection({
                         )}
                         {/* 条数已去掉(2026-08-12 用户裁决):它数的是顶层条目
                             (项目行 + 散排对话 + 对话组),不是任务数,读起来只会误导;
-                            段展开后内容本身就是答案。「离线」接手 ml-auto 保持靠右。 */}
-                        {!online && (
-                          <span className="ml-auto shrink-0 text-xs text-[var(--cmd-palette-item-meta)]">
-                            {t('ccAgent.sidebar.deviceGroup.offline')}
-                          </span>
-                        )}
+                            段展开后内容本身就是答案。右侧改为灯组:聚合未读点
+                            (段级 size 6,rail 段钮同款)+ 离线标注。 */}
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                          {sectionLamp.dotTone && (
+                            <AttentionDot size={6} tone={sectionLamp.dotTone} />
+                          )}
+                          {!online && (
+                            <span className="shrink-0 text-xs text-[var(--cmd-palette-item-meta)]">
+                              {t('ccAgent.sidebar.deviceGroup.offline')}
+                            </span>
+                          )}
+                        </span>
                       </button>
                     </DeviceSectionHeader>
                     <SectionCollapse collapsed={sectionCollapsed}>
@@ -1225,6 +1285,8 @@ export function ProjectsSection({
  */
 export function SessionGroupNode({
   sessions,
+  lamp,
+  foldExemptSessionIds,
   collapsed,
   onToggle,
   onCreateDialogue,
@@ -1251,6 +1313,11 @@ export function SessionGroupNode({
   sessionVariant,
 }: {
   sessions: Session[];
+  /** 组头聚合灯(ProjectNode.lamp 同款语义):running → 图标呼吸橙;
+   *  dotTone → 标题右侧 AttentionDot。聚合集合 = 组内会话(与渲染一致)。 */
+  lamp?: SessionLampAggregate;
+  /** 透传给组内 SessionEntryList 的折叠豁免追加集合(语义见其 prop 注释)。 */
+  foldExemptSessionIds?: ReadonlySet<string>;
   collapsed: boolean;
   onToggle: () => void;
   /**
@@ -1313,17 +1380,30 @@ export function SessionGroupNode({
           'transition-colors hover:bg-sidebar-item-hover',
         )}
       >
-        {groupIcon ?? (
-          <MessagesSquare
-            size={15}
-            strokeWidth={1.8}
-            className="shrink-0 text-[var(--sidebar-list-muted)]"
-          />
-        )}
+        {/* 灯语与 ProjectNode 表头同款:running → 呼吸橙(动画挂 wrapper)。
+            伙伴组头的 groupIcon 是 BotAvatar:头像自带内联身份色与文字色,不继承
+            wrapper 的 currentColor,呼吸也只是身份色头像在闪;reduce-motion 停掉动画后
+            就什么运行标记都没有(Codex review)。因此有 groupIcon 时另加一圈运行色
+            描边——静态、走 --status-bar-accent、与减弱动效无关;线条图标路径仍靠
+            currentColor,不需要描边。 */}
+        <span
+          className={cn(
+            'inline-flex shrink-0',
+            lamp?.running
+              ? 'text-[var(--status-bar-accent)] session-status-breathing'
+              : 'text-[var(--sidebar-list-muted)]',
+            lamp?.running && groupIcon && 'rounded-full ring-2 ring-[var(--status-bar-accent)]',
+          )}
+          data-running-marker={lamp?.running ? (groupIcon ? 'ring' : 'icon') : undefined}
+        >
+          {groupIcon ?? <MessagesSquare size={15} strokeWidth={1.8} aria-hidden />}
+        </span>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 shrink truncate">
             {groupTitle ?? t('ccAgent.sidebar.dialogues')}
           </span>
+          {/* 聚合未读点:ProjectNode 表头同款(size 5,静态,常驻可见)。 */}
+          {lamp?.dotTone && <AttentionDot size={5} tone={lamp.dotTone} className="shrink-0" />}
           <Chevron
             size={13}
             strokeWidth={2}
@@ -1392,6 +1472,7 @@ export function SessionGroupNode({
             collapsible
             collapseLimit={getProjectSessionCollapseLimit()}
             disableCollapse={disableSessionCollapse}
+            foldExemptSessionIds={foldExemptSessionIds}
             sectionCollapsed={parentSectionCollapsed || collapsed}
             sessionVariant={sessionVariant}
           />
