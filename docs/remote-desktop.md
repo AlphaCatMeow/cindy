@@ -425,9 +425,12 @@ existing viewer fallback supplies its localized display name.
 A lease creates one isolated capture window and starts one system picker. Local
 consent may take up to two minutes, independently of each bounded video RPC.
 Offers first check the existing frame operation for a ready surface; while it is
-empty, `DESKTOP_CAPTURE_PENDING` keeps the current viewer's existing retry timer
-active without consuming network retry attempts. Mobile allows an additional two
-minutes only for the `wayland-portal` display. A video attempt timing out stops
+empty, `DESKTOP_CAPTURE_PENDING` keeps the browser viewer's existing retry timer
+active without consuming network retry attempts. Native iOS receivers use their
+existing finite retry configuration with fifteen eight-second consent slots before
+the normal network retry slots; this does not require changing the native binary.
+Mobile allows an additional two minutes only for the `wayland-portal` display.
+A video attempt timing out stops
 only its peer; it does not reopen the picker.
 Subsequent offers clone the same authorized stream, and the existing JPEG frame
 operation snapshots that stream, without enumerating sources again. Frames while
@@ -698,10 +701,13 @@ restoration waits for in-flight actions and does not undo independent local
 workspace navigation. Old viewers/hosts retain their existing shortcuts; the
 relay and its authorization rules are unchanged.
 
-System PiP is offered only when WebKit reports support for this video and the
-native presentation module and host backgroundViewing capability are present.
+System PiP requires the native presentation module and host backgroundViewing
+capability. New iOS binaries use AVKit readiness; browser receivers require WebKit
+support for the video. Native automatic entry is armed in the foreground after the
+first frame, with host authorization completed in parallel during Home entry.
 Entering releases control. A capture-renderer challenge/pong heartbeat renews
-only a view-only lease while the viewer reports actual system PiP presentation.
+only a view-only lease after host authorization while the viewer reports actual
+system PiP presentation.
 Closing PiP, closing WebRTC, local disconnect, revocation and the ordinary finite
 lease timeout all terminate background viewing. This does not grant indefinite
 background control or extend the lifetime of unrelated device links.
