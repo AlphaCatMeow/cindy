@@ -60,6 +60,7 @@ import {
   AgentNotAuthenticatedError,
   AgentStartupStoppedError,
   TurnPermissionPolicyUnsupportedError,
+  PINNED_SKILL_INVOCATION,
   type AgentSessionHandle,
   type AgentDeps,
   type StartSessionOptions,
@@ -67,6 +68,7 @@ import {
   type SendOptions,
   type TurnPermissionPolicy,
 } from '../base-agent.js';
+import { preparePinnedClaudeSkillInvocation } from './pinned-skill-invocation.js';
 import { isBotMcpServerAllowed } from '../shared/bot-runtime-policy.js';
 import { SYSTEM_PROMPT_APPEND as MAKER_SYSTEM_PROMPT_APPEND } from './system-prompt-append.js';
 import { MAKER_MEMORY_RULES } from '../../memory/system-prompt.js';
@@ -6066,9 +6068,20 @@ export class ClaudeCodeAgent extends BaseAgent {
               reviewReadGrants,
             );
           }
+          const pinnedSkill = sendOpts?.[PINNED_SKILL_INVOCATION];
+          let providerContent = message.content;
+          if (pinnedSkill) {
+            if (typeof providerContent !== 'string') {
+              throw new Error('Pinned Claude Skill invocation must be text-only.');
+            }
+            providerContent = await preparePinnedClaudeSkillInvocation(
+              providerContent,
+              pinnedSkill,
+            );
+          }
           // SSH 图片路径属于远端主机，不能在桌面端压缩或读取；保留路径引用交给远端 SDK。
           const content = await toClaudeSdkContent(
-            withLibraryNativeReadContext(message.content, mutableLibraryRoot, activeQueryReadonlyDirs),
+            withLibraryNativeReadContext(providerContent, mutableLibraryRoot, activeQueryReadonlyDirs),
             undefined,
             !opts.remoteHostId,
           );

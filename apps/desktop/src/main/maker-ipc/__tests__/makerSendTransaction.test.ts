@@ -295,7 +295,7 @@ describe('maker SEND transaction', () => {
     );
   });
 
-  it('does not request a Learn grant from a runtime without exact-path dispatch', async () => {
+  it('forwards the exact Learn pin to Claude for provider-boundary expansion', async () => {
     const grant = {
       version: 1 as const,
       sessionInstanceId: 'session-instance-1',
@@ -320,13 +320,16 @@ describe('maker SEND transaction', () => {
       },
     );
 
-    expect(captureCindyLearnInvocation).not.toHaveBeenCalled();
+    expect(captureCindyLearnInvocation).toHaveBeenCalledTimes(1);
     const sendOptions = vi.mocked(claudeSession.send).mock.calls[0]?.[1];
-    expect(sendOptions?.[PINNED_SKILL_INVOCATION]).toBeUndefined();
+    expect(sendOptions?.[PINNED_SKILL_INVOCATION]).toEqual({
+      name: 'learn',
+      path: grant.resolvedSkillPath,
+    });
     expect(deps.createDbMessage).toHaveBeenCalledWith(
       'session-1',
       expect.objectContaining({
-        agentMeta: expect.not.objectContaining({ cindyLearnInvocation: expect.anything() }),
+        agentMeta: expect.objectContaining({ cindyLearnInvocation: grant }),
       }),
       undefined,
     );
