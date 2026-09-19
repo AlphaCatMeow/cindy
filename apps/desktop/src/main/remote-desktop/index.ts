@@ -824,7 +824,9 @@ export function registerRemoteDesktopIpc(
     )
       remoteDesktop.stop();
   });
-  const sessionChanged = () => {
+  let sessionTransition = 0;
+  const sessionChanged = (unlock = false) => {
+    const transition = ++sessionTransition;
     nativeCapture.stop(); // do not retain pixels from the previous OS session state
     hyprlandCapture.stop();
     linuxAudio.stop(); // Clear buffered PCM as well as pixels across lock transitions.
@@ -841,9 +843,36 @@ export function registerRemoteDesktopIpc(
         op: 'capture-reset',
         lease: videoLease,
       } satisfies DesktopHostCommand);
+    const lease = videoLease;
+    const generation = offerGeneration;
+    const owner = host;
+    if (unlock && lease && nativeSettings?.audio && nativeWayland()) {
+      void isLinuxDesktopUnlocked()
+        .then((unlocked) => {
+          if (
+            !unlocked ||
+            transition !== sessionTransition ||
+            generation !== offerGeneration ||
+            lease !== videoLease ||
+            !remoteDesktop.hasLease(lease) ||
+            owner !== host ||
+            !owner ||
+            owner.isDestroyed()
+          )
+            return;
+          linuxAudio.start();
+          owner.send(DESKTOP_LOCAL.COMMAND, {
+            id: randomUUID(),
+            op: 'capture-reset',
+            lease,
+            nativeAudio: true,
+          } satisfies DesktopHostCommand);
+        })
+        .catch(() => {});
+    }
   };
-  powerMonitor.on('lock-screen', sessionChanged);
-  powerMonitor.on('unlock-screen', sessionChanged);
+  powerMonitor.on('lock-screen', () => sessionChanged());
+  powerMonitor.on('unlock-screen', () => sessionChanged(true));
   ipcMain.handle(DESKTOP_LOCAL.NATIVE_FRAME, async (event, lease: unknown) => {
     captureWindow.assertSender(event);
     if (

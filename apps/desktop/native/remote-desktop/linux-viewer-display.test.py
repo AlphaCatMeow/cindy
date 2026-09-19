@@ -47,6 +47,37 @@ class ViewerDisplayTests(unittest.TestCase):
                 owner.resize(width, height)
         self.assertFalse(any(c[0] == "output" for c in calls))
 
+    def test_moves_numbered_and_named_workspaces_in_both_directions(self):
+        for lua in (True, False):
+            owner, _, _ = self.fixture()
+            owner.lua = lua
+            workspaces = [
+                {"id": 2, "name": "2", "monitor": owner.source},
+                {"id": -1337, "name": '工作"区', "monitor": owner.source},
+                {"id": -99, "name": "special:scratch", "monitor": owner.source},
+                {"id": 3, "name": "3", "monitor": "other"},
+            ]
+            calls = []
+            def run(*args):
+                if args == ("-j", "workspaces"):
+                    return json.dumps(workspaces)
+                calls.append(args)
+                return "ok"
+            owner.run = run
+            for source, target in ((owner.source, owner.name), (owner.name, owner.source)):
+                owner.move_workspaces(source, target)
+                self.assertEqual(len(calls), 2)
+                if lua:
+                    self.assertIn("workspace=2,", calls[0][1])
+                    self.assertIn('workspace=' + json.dumps('name:工作"区', ensure_ascii=False), calls[1][1])
+                    self.assertTrue(all('monitor=' + json.dumps(target) in c[1] for c in calls))
+                else:
+                    self.assertEqual(calls, [("dispatch", "moveworkspacetomonitor", "2 " + target),
+                                            ("dispatch", "moveworkspacetomonitor", 'name:工作"区 ' + target)])
+                for workspace in workspaces[:2]:
+                    workspace["monitor"] = target
+                calls.clear()
+
     def test_restores_exact_source_and_removes_only_owned_output(self):
         owner, monitors, _ = self.fixture()
         before = copy.deepcopy(monitors)

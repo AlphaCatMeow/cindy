@@ -27,6 +27,7 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
   let native: Awaited<ReturnType<typeof nativeCaptureStream>> | null = null;
   let audio: Awaited<ReturnType<typeof nativeAudioStream>> | null = null;
   let recoverCapture: (() => void) | null = null;
+  let resetAudio: ((resume: boolean) => void) | null = null;
   let activeLease: string | null = null;
   let attemptId: string | undefined;
   let localCandidates: RemoteDesktopIceCandidate[] = [];
@@ -57,6 +58,7 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
     audio?.stop();
     audio = null;
     recoverCapture = null;
+    resetAudio = null;
     activeLease = null;
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = null;
@@ -133,6 +135,7 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
       if (command.lease === activeLease) {
         native?.clear();
         recoverCapture?.();
+        resetAudio?.(command.nativeAudio === true);
       }
       return;
     }
@@ -396,12 +399,41 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
           command.settings?.audio && !captured.getAudioTracks().length
             ? rtc.getTransceivers().find((item) => item.receiver.track.kind === 'audio')
             : undefined;
-        const audioSender = audioTransceiver?.sender;
+        const audioSender =
+          audioTransceiver?.sender ??
+          rtc.getSenders().find((sender) => sender.track?.kind === 'audio');
         if (audioTransceiver && audioSender) {
           audioTransceiver.direction = 'sendonly';
           // Both receivers must belong to the same stream, including when
           // the viewer observes the initially silent audio track before video.
           audioSender.setStreams(captured);
+        }
+        if (command.nativeAudio && command.settings?.audio && api.nativeAudio && audioSender) {
+          let reset = 0;
+          resetAudio = (resume) => {
+            const revision = ++reset;
+            audio?.stop();
+            audio = null;
+            const valid = () => current === generation && revision === reset;
+            if (!resume) return;
+            void (async () => {
+              let replacement: Awaited<ReturnType<typeof nativeAudioStream>> | undefined;
+              try {
+                replacement = await nativeAudioStream(() => api.nativeAudio!(lease), valid);
+                if (!valid()) return;
+                await audioSender.replaceTrack(replacement.track);
+                if (!valid()) return;
+                captured.getAudioTracks().forEach((track) => captured.removeTrack(track));
+                captured.addTrack(replacement.track);
+                audio = replacement;
+                replacement = undefined;
+              } catch {
+                // Optional audio must not interrupt the live video connection.
+              } finally {
+                replacement?.stop();
+              }
+            })();
+          };
         }
         await rtc.setLocalDescription(await rtc.createAnswer());
         for (const sender of rtc.getSenders()) {
@@ -459,7 +491,7 @@ export function startDesktopCaptureHost(api: DesktopCaptureApi): () => void {
             })();
           }, DESKTOP_AUDIO_RETRY_MS[retry]);
         };
-        if (audioSender) void retryAudio(0);
+        if (audioTransceiver && !command.nativeAudio) void retryAudio(0);
       } catch (error) {
         if (current === generation) {
           stop();

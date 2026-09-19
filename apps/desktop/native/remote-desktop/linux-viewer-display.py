@@ -70,11 +70,18 @@ class ViewerDisplay:
             raise RuntimeError("too many workspaces")
         for workspace in workspaces:
             ident = workspace.get("id")
-            if workspace.get("monitor") == source and isinstance(ident, int) and ident > 0:
+            name = workspace.get("name", "")
+            if workspace.get("monitor") == source and type(ident) is int and ident != 0:
+                if not isinstance(name, str) or name.startswith("special:"):
+                    continue
+                selector = ident if ident > 0 else "name:" + name
+                if ident < 0 and (not name or any(ord(c) < 32 for c in name) or
+                                  (any(c.isspace() for c in name) and not self.lua)):
+                    raise RuntimeError("workspace name unavailable")
                 if self.lua:
-                    result = self.run("eval", f"hl.dispatch(hl.dsp.workspace.move({{workspace={ident},monitor={json.dumps(target)}}}))")
+                    result = self.run("eval", f"hl.dispatch(hl.dsp.workspace.move({{workspace={json.dumps(selector, ensure_ascii=False)},monitor={json.dumps(target)}}}))")
                 else:
-                    result = self.run("dispatch", "moveworkspacetomonitor", f"{ident} {target}")
+                    result = self.run("dispatch", "moveworkspacetomonitor", f"{selector} {target}")
                 if result.strip() != "ok":
                     raise RuntimeError("workspace rejected")
 

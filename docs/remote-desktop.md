@@ -512,6 +512,11 @@ the child on disconnect, capture failure, a stalled producer or absent consumer.
 Native audio launch/read failures clean up only audio resources: the video answer,
 connected video/control channel and lease remain valid. A later offer starts a new
 audio capture; callbacks from a retired capture cannot affect its replacement.
+Lock transitions stop the producer and clear the renderer audio track. A confirmed
+unlock of the still-current lease restarts the producer and replaces the existing
+WebRTC audio sender's track without renegotiating the video connection. A repeated
+lock or ended lease invalidates pending recovery; a failed audio recovery leaves
+video and control available. Locked or unknown compositor state denies audio reads.
 This does not add audio to the compatibility JPEG transport.
 
 Linux host mute uses PipeWire `softMute` on the playback branch, retaining the
@@ -535,6 +540,10 @@ mode changes remain unavailable.
 Hyprland phone-fit uses a uniquely named headless display and temporarily mirrors
 it to the original output. A Python standard-library helper owns the mirror and
 workspace moves. EOF, missed heartbeats and termination restore the source and
+its numbered and named workspaces through the same migration path. Special
+workspaces and workspaces on other outputs are excluded. The legacy dispatcher
+cannot represent workspace names containing whitespace and rejects those names;
+the Lua interface supports them. Cleanup will
 remove only its own output; restoration retries keep the in-memory snapshot alive
 through temporary compositor errors. A missing source is treated as unplugged.
 The helper requires a running user compositor, Python 3 and the native Hyprland

@@ -1019,6 +1019,42 @@ it('does not read or stop replacement Linux audio after a delayed lock check', a
   expect(h.audioRead).not.toHaveBeenCalled();
 });
 
+it.each(['unlock', 'relock', 'stop'])(
+  'resumes Linux audio only for a still-current confirmed unlock: %s',
+  async (outcome) => {
+    h.wayland = h.hyprland = h.linuxAudio = true;
+    const result = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp', {
+      audio: true,
+    });
+    h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+    await flush();
+    const command = h.owner.send.mock.calls.at(-1)[1];
+    h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
+    await result;
+    h.audioStart.mockClear();
+    let resolve!: (value: boolean) => void;
+    h.unlocked.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    h.powerHandlers.get('unlock-screen')!();
+    if (outcome === 'relock') h.powerHandlers.get('lock-screen')!();
+    if (outcome === 'stop') h.deps.stopVideo();
+    resolve(true);
+    await flush();
+    if (outcome === 'unlock') {
+      expect(h.audioStart).toHaveBeenCalledOnce();
+      expect(h.owner.send.mock.calls.at(-1)[1]).toMatchObject({
+        op: 'capture-reset',
+        lease: 'lease',
+        nativeAudio: true,
+      });
+    } else expect(h.audioStart).not.toHaveBeenCalled();
+  },
+);
+
 it.each([true, false])(
   'bounds same-screen audio recovery after the initial grant was consumed=%s',
   async (consumed) => {
