@@ -456,6 +456,8 @@ import {
 } from './database-size-warning-settings';
 import { createDatabaseSizeWarningSettingsWatcher } from './database-size-warning-settings-watcher.js';
 import { createLocalDbMaintenanceIpcHandlers } from './localDb/ipc/maintenance';
+import { createDialogueWorkspaceHandlers, checkDialogueDirectoryWritable, customDialogueWorkspaceRoot } from './dialogue-workspace-ipc.js';
+import { readDialogueWorkspaceSettings, writeDialogueWorkspaceDirectory } from './dialogue-workspace-settings.js';
 import { writeDbSlimmingDevRelaunchSignal } from './localDb/devDbSlimmingRelaunch';
 import {
   cancelDbSlimmingStartupProgress,
@@ -8367,6 +8369,46 @@ const registerIpcHandlers = () => {
         return { cleared: true };
       }),
     );
+
+    // Native folder selection belongs to this computer; intentionally not exposed via device-link.
+    const dialogueWorkspaceHandlers = createDialogueWorkspaceHandlers({
+      captureScope: () => {
+        if (!getActiveAppSession().dataOwnerId || isAppSessionBoundaryPending()) {
+          throwIpcError('PRECONDITION_FAILED', 'dialogue workspace requires an active owner');
+        }
+        return activeOwnerScopeKey();
+      },
+      isScopeCurrent: (scope) => !isAppSessionBoundaryPending() && activeOwnerScopeKey() === scope,
+      read: readDialogueWorkspaceSettings,
+      write: writeDialogueWorkspaceDirectory,
+      chooseDirectory: async () => {
+        const options: Electron.OpenDialogOptions = {
+          title: t('settings.about.storage.dialogueDirectoryChoose'),
+          properties: ['openDirectory', 'createDirectory'],
+        };
+        const ownerWindow = BrowserWindow.getFocusedWindow() ?? mainWindowRef;
+        const result = ownerWindow && !ownerWindow.isDestroyed()
+          ? await dialog.showOpenDialog(ownerWindow, options)
+          : await dialog.showOpenDialog(options);
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+      // Dedicated owner subtree prevents unrelated folders from being treated as managed tasks.
+      resolveDirectory: (selected) => customDialogueWorkspaceRoot(selected, path.basename(ownerScopedUserDataPath())),
+      checkWritable: checkDialogueDirectoryWritable,
+      openDirectory: (directory) => shell.openPath(directory),
+    });
+    for (const action of ['get', 'choose', 'reset', 'open'] as const) {
+      ipcMain.handle('dialogue-workspace:' + action, async (event) => {
+        assertTrustedAppRendererEvent(event);
+        try {
+          return await dialogueWorkspaceHandlers[action]();
+        } catch (error) {
+          if (isIpcError(error)) throw error;
+          dbClientLog.warn('dialogue workspace settings request failed', { action });
+          throwIpcError('INTERNAL', 'dialogue workspace settings request failed');
+        }
+      });
+    }
 
     const localDbMaintenanceHandlers = createLocalDbMaintenanceIpcHandlers({
       captureOwner: () => {

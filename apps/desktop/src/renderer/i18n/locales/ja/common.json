@@ -987,6 +987,18 @@
         "unknown": "不明"
       },
       "storage": {
+        "dialogueDirectoryTitle": "チャットワークスペース",
+        "dialogueDirectoryDescription": "新しいセッションにのみ適用されます。既存のファイルの場所は変わりません。",
+        "dialogueDirectoryOpen": "フォルダーを開く",
+        "dialogueDirectoryChoose": "フォルダーを変更",
+        "dialogueDirectoryReset": "既定の保存先に戻す",
+        "dialogueDirectoryFailed": "チャットワークスペースを更新できませんでした。選択したフォルダーに書き込めることを確認して、もう一度お試しください。",
+        "dialogueDirectoryDefault": "既定",
+        "dialogueDirectoryFullPath": "フルパス",
+        "dialogueDirectoryDetails": "プロジェクトフォルダーを指定していない新しいセッションで使用します。選択したフォルダー内に、このアカウント専用のサブフォルダーを作成します。",
+        "dialogueDirectoryCopy": "パスをコピー",
+        "dialogueDirectoryCopied": "パスをコピーしました",
+        "dialogueDirectoryCopyFailed": "パスをコピーできませんでした。パスを選択して手動でコピーしてください。",
         "mediaSectionTitle": "メディアファイル",
         "databaseSectionTitle": "データベース",
         "overviewTitle": "ローカルストレージ",
@@ -10318,7 +10330,7 @@
     },
     "empty": {
       "promptHeading": "自動化がまだありません",
-      "promptDescription": "cron 自動化を作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
+      "promptDescription": "cron 自動化を作成して、Claude Code、Codex、または Pi にプロンプトをスケジュール実行させましょう。"
     },
     "usageLimitRecovery": {
       "name": "利用上限リセット後にタスクを続行",
@@ -10493,7 +10505,7 @@
         "titleCreate": "自動化を作成",
         "titleProjectCreate": "新しいプロジェクト自動化",
         "titleProjectEdit": "プロジェクト自動化を編集",
-        "subtitle": "Claude または Codex でプロンプトをスケジュール実行します。",
+        "subtitle": "Claude、Codex、または Pi でプロンプトをスケジュール実行します。",
         "subtitleFromGhost": "「{{name}}」が自動化の作成を求めています。モデルを選んで保存すると有効になります。",
         "save": "保存",
         "create": "作成",

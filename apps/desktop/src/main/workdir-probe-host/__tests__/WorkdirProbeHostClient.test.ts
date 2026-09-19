@@ -30,7 +30,7 @@ class FakeChild extends EventEmitter implements WorkdirProbeChildLike {
 
 function createHarness(options: { maxWorkers?: number; maxQueued?: number } = {}) {
   const children: FakeChild[] = [];
-  const log = { info: vi.fn(), warn: vi.fn() };
+  const log = { debug: vi.fn(), warn: vi.fn() };
   const client = new WorkdirProbeHostClient({
     fork: () => {
       const child = new FakeChild();
@@ -48,6 +48,17 @@ afterEach(() => {
 });
 
 describe('WorkdirProbeHostClient', () => {
+  it('keeps successful and non-directory polling results out of release warnings', async () => {
+    const { client, children, log } = createHarness();
+    for (let i = 0; i < 20; i++) {
+      const result = client.probe('/polled/dir', '/polled/dir', 1000);
+      children[0].respond(i % 2 === 0);
+      await expect(result).resolves.toEqual({ ok: true, isDirectory: i % 2 === 0 });
+    }
+    expect(log.warn).not.toHaveBeenCalled();
+    client.dispose();
+  });
+
   it('identifies queue timeout before any request reaches the worker', async () => {
     vi.useFakeTimers();
     const { client, children, log } = createHarness({ maxWorkers: 1 });
@@ -56,7 +67,7 @@ describe('WorkdirProbeHostClient', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await queued).toMatchObject({ code: 'WORKDIR_PROBE_TIMEOUT' });
     expect(children[0].posted).toHaveLength(1);
-    expect(log.warn).toHaveBeenCalledWith('workdir probe failed', expect.objectContaining({
+    expect(log.debug).toHaveBeenCalledWith('workdir probe failed', expect.objectContaining({
       reason: 'queue-timeout', phase: 'before-dispatch', requestId: 2,
       timeoutMs: 50, elapsedMs: 50, queueWaitMs: 50, responseWaitMs: null,
       activeWorkers: 1, terminatingWorkers: 0,
@@ -75,11 +86,11 @@ describe('WorkdirProbeHostClient', () => {
     children[0].emit('exit', 9);
     await vi.advanceTimersByTimeAsync(50);
     expect(await queued).toMatchObject({ code: 'WORKDIR_PROBE_TIMEOUT' });
-    expect(log.warn).toHaveBeenCalledWith('workdir probe failed', expect.objectContaining({
+    expect(log.debug).toHaveBeenCalledWith('workdir probe failed', expect.objectContaining({
       reason: 'response-timeout', phase: 'waiting-result', requestId: 2, workerId: 2,
       elapsedMs: 150, queueWaitMs: 100, responseWaitMs: 50,
     }));
-    expect(log.info).toHaveBeenCalledWith('workdir probe worker exited', expect.objectContaining({
+    expect(log.debug).toHaveBeenCalledWith('workdir probe worker exited', expect.objectContaining({
       workerId: 1, requestId: 1, exitCode: 9, terminationRequested: true,
     }));
     client.dispose();
@@ -97,7 +108,7 @@ describe('WorkdirProbeHostClient', () => {
     if (reason === 'host-error') children[0].emit('error', 'private-type', 'private-location', 'private-report');
     expect(await failure).toMatchObject({ code: 'WORKDIR_PROBE_UNAVAILABLE' });
     expect(log.warn).toHaveBeenCalledWith('workdir probe failed', expect.objectContaining({ reason, requestId: 2 }));
-    expect(JSON.stringify([...log.warn.mock.calls, ...log.info.mock.calls])).not.toContain('private');
+    expect(JSON.stringify([...log.warn.mock.calls, ...log.debug.mock.calls])).not.toContain('private');
     client.dispose();
   });
 
@@ -117,10 +128,11 @@ describe('WorkdirProbeHostClient', () => {
     const result = client.probe('/private/dir', '/private/dir', 1000);
     children[0].emit('message', { kind: 'result', id: 1, result: { ok: false, code } });
     await expect(result).resolves.toEqual({ ok: false, code });
-    expect(log.warn).toHaveBeenCalledWith('workdir probe filesystem result', expect.objectContaining({
+    expect(log.debug).toHaveBeenCalledWith('workdir probe filesystem result', expect.objectContaining({
       reason: 'filesystem-error', code: code === 'PRIVATE_CREDENTIAL' ? 'UNKNOWN' : code, requestId: 1,
     }));
-    expect(JSON.stringify(log.warn.mock.calls)).not.toContain('PRIVATE_CREDENTIAL');
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(JSON.stringify(log.debug.mock.calls)).not.toContain('PRIVATE_CREDENTIAL');
     client.dispose();
   });
 

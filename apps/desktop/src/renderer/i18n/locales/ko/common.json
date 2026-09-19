@@ -987,6 +987,18 @@
         "unknown": "알 수 없음"
       },
       "storage": {
+        "dialogueDirectoryTitle": "대화 작업 공간",
+        "dialogueDirectoryDescription": "새 세션에만 적용됩니다. 기존 파일은 원래 위치에 유지됩니다.",
+        "dialogueDirectoryOpen": "폴더 열기",
+        "dialogueDirectoryChoose": "폴더 변경",
+        "dialogueDirectoryReset": "기본 위치로 복원",
+        "dialogueDirectoryFailed": "대화 작업 공간을 변경하지 못했습니다. 선택한 폴더에 쓰기 권한이 있는지 확인한 후 다시 시도하세요.",
+        "dialogueDirectoryDefault": "기본",
+        "dialogueDirectoryFullPath": "전체 경로",
+        "dialogueDirectoryDetails": "프로젝트 폴더를 지정하지 않은 새 세션에 사용됩니다. 선택한 폴더 안에 현재 계정 전용 하위 폴더가 생성됩니다.",
+        "dialogueDirectoryCopy": "경로 복사",
+        "dialogueDirectoryCopied": "경로가 복사되었습니다",
+        "dialogueDirectoryCopyFailed": "경로를 복사하지 못했습니다. 경로를 선택하여 직접 복사하세요.",
         "mediaSectionTitle": "미디어 파일",
         "databaseSectionTitle": "데이터베이스",
         "overviewTitle": "로컬 저장 공간",
@@ -10318,7 +10330,7 @@
     },
     "empty": {
       "promptHeading": "자동화가 아직 없습니다",
-      "promptDescription": "cron 자동화를 만들어 Claude Code 또는 Codex로 프롬프트를 일정에 따라 실행하세요."
+      "promptDescription": "cron 자동화를 만들어 Claude Code, Codex 또는 Pi로 프롬프트를 일정에 따라 실행하세요."
     },
     "usageLimitRecovery": {
       "name": "사용량 제한 재설정 후 작업 계속",
@@ -10493,7 +10505,7 @@
         "titleCreate": "자동화 만들기",
         "titleProjectCreate": "새 프로젝트 자동화",
         "titleProjectEdit": "프로젝트 자동화 편집",
-        "subtitle": "Claude 또는 Codex로 프롬프트를 일정에 따라 실행합니다.",
+        "subtitle": "Claude, Codex 또는 Pi로 프롬프트를 일정에 따라 실행합니다.",
         "subtitleFromGhost": "\"{{name}}\"에서 자동화 만들기를 요청했습니다. 모델을 고르고 저장하면 적용됩니다.",
         "save": "저장",
         "create": "만들기",

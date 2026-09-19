@@ -987,6 +987,18 @@
         "unknown": "Unknown"
       },
       "storage": {
+        "dialogueDirectoryTitle": "Chat workspace",
+        "dialogueDirectoryDescription": "For new sessions only. Existing files stay where they are.",
+        "dialogueDirectoryOpen": "Open directory",
+        "dialogueDirectoryChoose": "Change directory",
+        "dialogueDirectoryReset": "Restore default location",
+        "dialogueDirectoryFailed": "Could not update the chat workspace. Check that the selected folder is writable and try again.",
+        "dialogueDirectoryDefault": "Default",
+        "dialogueDirectoryFullPath": "Full path",
+        "dialogueDirectoryDetails": "New sessions without a project folder use this location. Cindy creates an account-specific subfolder inside the selected folder.",
+        "dialogueDirectoryCopy": "Copy path",
+        "dialogueDirectoryCopied": "Path copied",
+        "dialogueDirectoryCopyFailed": "Could not copy the path. Select it and copy it manually.",
         "mediaSectionTitle": "Media files",
         "databaseSectionTitle": "Database",
         "overviewTitle": "Local storage overview",
@@ -10333,7 +10345,7 @@
     },
     "empty": {
       "promptHeading": "No Automations yet",
-      "promptDescription": "Create a cron Automation to let Claude Code or Codex run your prompt on a schedule."
+      "promptDescription": "Create a cron Automation to let Claude Code, Codex, or Pi run your prompt on a schedule."
     },
     "usageLimitRecovery": {
       "name": "Continue Task After Usage Resets",
@@ -10508,7 +10520,7 @@
         "titleCreate": "Create Automation",
         "titleProjectCreate": "New project automation",
         "titleProjectEdit": "Edit project automation",
-        "subtitle": "Run a prompt on a schedule with Claude or Codex.",
+        "subtitle": "Run a prompt on a schedule with Claude, Codex, or Pi.",
         "subtitleFromGhost": "\"{{name}}\" is asking you to create an automation. Pick a model and save to enable it.",
         "save": "Save",
         "create": "Create",

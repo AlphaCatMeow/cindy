@@ -3686,6 +3686,13 @@ interface ElectronAPI {
    * 预检(报数)/ 执行清理 / 对账体检。draftUrls 由 renderer 从
    * composerDraftStore 现场收集随参带上(草稿附件是合法零引用,防误删)。
    */
+  dialogueWorkspace: {
+    open(): Promise<{ success: boolean }>;
+    get(): Promise<import('../shared/dialogueWorkspaceSettings').DialogueWorkspaceSettingsState>;
+    choose(): Promise<import('../shared/dialogueWorkspaceSettings').DialogueWorkspaceSettingsState>;
+    reset(): Promise<import('../shared/dialogueWorkspaceSettings').DialogueWorkspaceSettingsState>;
+  };
+
   cindyMediaStorage: {
     /** 本窗口草稿附件 URL 变化时上报(fire-and-forget;多窗口防误删取证)。 */
     reportDraftUrls: (urls: string[]) => void;

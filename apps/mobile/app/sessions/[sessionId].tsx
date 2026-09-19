@@ -77,6 +77,8 @@ import { ScreenBackButton } from '@/components/MobilePrimitives';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/auth/AuthContext';
 import { usePromptRecommendation } from '@/session/usePromptRecommendation';
+import { PromptRecommendation } from '@/session/PromptRecommendation';
+import { usePromptRecommendationVisibility } from '@/session/usePromptRecommendationVisibility';
 import { useGuardedBack } from '@/utils/useGuardedBack';
 import { useGuardedPush } from '@/utils/useGuardedPush';
 import { DEVICE_LINK_API_BASE_URL, MOBILE_VISUAL_MOCK_ENABLED } from '@/config/env';
@@ -1382,6 +1384,8 @@ export default function SessionScreen() {
       }
     };
   }, [sessionId, removePendingUpload]);
+  // 排队编辑复用 composer；推荐只属于用户的普通草稿。
+  const [queueEditing, setQueueEditing] = useState<QueueEditingState | null>(null);
   const [voiceStartPending, setVoiceStartPending] = useState(false);
   const voiceStartPendingSeqRef = useRef(0);
   const voiceStartedOnPressInRef = useRef(false);
@@ -1391,6 +1395,7 @@ export default function SessionScreen() {
     agentKind: recommendationSession ? agentKindForSession(recommendationSession) : null,
     revision: recommendationSession?.lastTurnEndedAt, running: remoteSessionRunning,
     composerSource: composerDraftSource,
+    queueEditing: queueEditing !== null,
     hasAttachments: attachments.length > 0 || pendingUploads.length > 0 || pastePlaceholderCount > 0,
     hasTerminalError: remoteSessionRunStatus.hasTerminalError === true,
     voiceIsBusy: voiceStartPending || voiceState === 'listening'
@@ -1421,7 +1426,6 @@ export default function SessionScreen() {
   // 排队消息「复用 composer 编辑」态:进入时把队列条目的文本/附件载入 composer,
   // 暂存(stash)用户原本的草稿与附件托盘,退出(保存/放弃/条目消失)时恢复。
   // ref 镜像供 send() 等异步闭包读最新值。
-  const [queueEditing, setQueueEditing] = useState<QueueEditingState | null>(null);
   const queueEditingRef = useRef<QueueEditingState | null>(null);
   // 会话切换 cleanup(声明在前)引用组件后段的回收函数,经 ref 断开声明顺序依赖。
   const discardQueueEditTransientAttachmentResourcesRef = useRef<
@@ -1545,6 +1549,8 @@ export default function SessionScreen() {
     });
     const projection = remoteSessionStore.getInputProjection(sessionId);
     const source = remoteSessionStore.getMessages(sessionId);
+    // Capture at send time, not when React later runs the state updater.
+    const observed = latestMessagesRef.current;
     // Match Desktop's idle-send placement. Busy follow-ups retain the existing
     // pending tail until authoritative history supplies their transcript row.
     const busy = projection.pendingQueue.length > 0 || projection.steeringQueueClientIds.length > 0
@@ -1552,7 +1558,7 @@ export default function SessionScreen() {
       || remoteSessionStore.getPendingInteractions(sessionId).length > 0
       || currentTurnHasStreamingAssistant(source);
     if (!busy) setOptimisticUserState((current) => current.sessionId !== sessionId ? current : {
-      sessionId, items: appendOptimisticUserMessage(current.items, source, queued, sessionId),
+      sessionId, items: appendOptimisticUserMessage(current.items, source, queued, sessionId, observed),
     });
     setSendingQueueClientIds((current) => {
       if (current.has(clientId)) return current;
@@ -9312,6 +9318,8 @@ export default function SessionScreen() {
               {showMessageHistory || showSyncingShell ? (
                 <ChatFilePathContext.Provider value={chatFilePathContextValue}>
                   <MessageRenderer
+                    remoteDeviceId={deviceId}
+                    showPluginInvocations={Boolean(currentSession && currentSession.source !== 'bot')}
                     bottomOverlayHeight={bottomOverlayHeight}
                     contentBottomInset={nativeComposerFrameAvailable && sessionOperationLayout.composerSlot === 'editable' && !shareSelectionActive
                       ? MOBILE_MESSAGE_LIST_BOTTOM_PADDING
@@ -10341,7 +10349,7 @@ interface SessionComposerControls {
 }
 interface SessionComposerInputProps {
   promptRecommendation?: string | null;
-  onDismissPromptRecommendation?: () => void;
+  onDismissPromptRecommendation: () => void;
   source: ComposerDraftSource;
   sessionId: string;
   composerInputRef: RefObject<ComposerRichInputHandle | null>;
@@ -10367,7 +10375,7 @@ interface SessionComposerInputProps {
   pendingUploadCount: number;
   visualFocusComposer: boolean;
   applyRichComposerChange: (value: ComposerDocument) => void;
-  setComposerDraft: (value: string) => void;
+  setComposerDraft: (value: SetStateAction<string>) => void;
   handleComposerInputPressIn: () => void;
   onPasteImages: (uris: string[]) => void;
   beginPastePlaceholders: (count: number) => void;
@@ -10409,11 +10417,6 @@ function SessionComposerInput({
   // 引用已是 ComposerDocument 内的 atom；排队编辑同样可能只有引用而没有可见
   // 文本，因此必须计入 payload，否则「保存修改」会被错误禁用。
   const composerQuoteCount = composerDocumentQuotes(composerDocument).length;
-  const visibleRecommendation = promptRecommendation
-    && !draft.trim() && !composerQuoteCount && !attachmentCount && !pendingUploadCount
-    && canUseComposer && !canStopComposer && !sending && !queueBusy
-    && !voiceIsBusy && !voiceStartPending
-    ? promptRecommendation : null;
   // Context 面板是 Modal sheet,不再有内联附件面板 → attachmentPickerOpen 恒 false。
   const composerLayout = useMemo(() => buildSessionComposerLayout({
     attachmentBusy: false,
@@ -10501,6 +10504,18 @@ function SessionComposerInput({
     || permissionSheetOpen
     || voiceIsBusy
     || composerVoiceHoldActive;
+  const recommendationPresentation = usePromptRecommendationVisibility(sessionId, draft, composerCardActive);
+  const visibleRecommendation = promptRecommendation && recommendationPresentation.visible
+    && !composerQuoteCount && !attachmentCount && !pendingUploadCount
+    && canUseComposer && !canStopComposer && !sending && !queueBusy
+    && !voiceIsBusy && !voiceStartPending && !modelSheetOpen && !permissionSheetOpen
+    ? promptRecommendation : null;
+  const acceptRecommendation = useCallback(() => {
+    if (!promptRecommendation) return;
+    recommendationPresentation.hide();
+    setComposerDraft((current) => current ? `${current}\n${promptRecommendation}` : promptRecommendation);
+    composerInputRef.current?.focus();
+  }, [promptRecommendation, recommendationPresentation.hide, setComposerDraft, composerInputRef]);
   useComposerCardTransition(composerCardActive, keyboardState);
   const composerChromeHeight = useMemo(() => {
     const statusReserve = voiceStatusVisible
@@ -10696,6 +10711,17 @@ function SessionComposerInput({
 
   const controls = renderControls({ composerLayout, composerSendUnavailableReason, composerStopDisabledReason, composerStopDisabled, composerShowInlineStop, composerSendSlotIsStop, composerShowSendButton, composerSendDisabled, voiceIsListening, voiceIsProcessing, voiceIsBusy, voiceRecordingTimer, composerVoicePlacement });
   return (
+    <>
+      {visibleRecommendation ? (
+        <View style={{ paddingHorizontal: composerTouchLayout.composerPaddingHorizontal }}>
+          <PromptRecommendation
+            key={`${sessionId}:${visibleRecommendation}`}
+            prompt={visibleRecommendation}
+            onAccept={acceptRecommendation}
+            onDismiss={onDismissPromptRecommendation}
+          />
+        </View>
+      ) : null}
               <Reanimated.View
                 style={[
                   styles.composer,
@@ -10735,6 +10761,7 @@ function SessionComposerInput({
                 ) : null}
                 {/* Keep UIKit's shadow outside the scrolling viewport's rectangular clip. */}
                 <ComposerFrame
+                  onTouchStart={recommendationPresentation.hide}
                   expanded={composerCardActive}
                   unframed={!nativeComposerFrameAvailable}
                   style={styles.composerScrollFrame}
@@ -10754,32 +10781,6 @@ function SessionComposerInput({
                   styles.composerSurface,
                   compactComposer && !composerCardActive && styles.composerSurfaceCompact,
                 ]}>
-                  {visibleRecommendation ? (
-                    <View style={styles.promptRecommendationRow} testID="session.promptRecommendation">
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={visibleRecommendation}
-                        onPress={() => { onDismissPromptRecommendation?.(); setComposerDraft(visibleRecommendation); composerInputRef.current?.focus(); }}
-                        style={styles.promptRecommendationAction}
-                      >
-                        <Sparkles color={colors.statusAccent} size={iconSize.md} strokeWidth={iconStroke.regular} />
-                        <Text numberOfLines={3} style={styles.promptRecommendationText}>
-                          {visibleRecommendation}
-                        </Text>
-                        <ChevronRight color={colors.textSecondary} size={iconSize.md} strokeWidth={iconStroke.regular} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel={t('session.common.dismissRecommendation')}
-                        accessibilityRole="button"
-                        hitSlop={COMPOSER_CONTROL_HIT_SLOP}
-                        onPress={onDismissPromptRecommendation}
-                        style={styles.promptRecommendationDismiss}
-                        testID="session.promptRecommendationDismiss"
-                      >
-                        <X color={colors.textSecondary} size={iconSize.md} strokeWidth={iconStroke.regular} />
-                      </Pressable>
-                    </View>
-                  ) : null}
                   <MobileComposerInputRow
                     key={sessionId}
                     frameOutside={nativeComposerFrameAvailable}
@@ -10872,6 +10873,7 @@ function SessionComposerInput({
                 </GestureDetector>
                 </ComposerFrame>
               </Reanimated.View>
+    </>
 
   );
 }
@@ -11944,39 +11946,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   voiceDraftOverlay: {
     ...StyleSheet.absoluteFill,
     overflow: 'hidden',
-  },
-  promptRecommendationRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginBottom: spacing.sm,
-    minHeight: MOBILE_COMPOSER_MIN_TOUCH_TARGET,
-  },
-  promptRecommendationAction: {
-    minHeight: MOBILE_COMPOSER_MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    // Use the base surface so the recommendation reads as a distinct inset card
-    // inside the lighter composer frame in both themes.
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.container,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    minWidth: 0,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  promptRecommendationText: {
-    ...MOBILE_COMPOSER_DRAFT_TEXT_STYLE,
-    color: colors.textPrimary,
-    flex: 1,
-    marginHorizontal: spacing.sm,
-  },
-  promptRecommendationDismiss: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: MOBILE_COMPOSER_MIN_TOUCH_TARGET,
-    width: MOBILE_COMPOSER_MIN_TOUCH_TARGET,
   },
   // 草稿滚动层填满外层触摸区(外层负责「点输入区停听写」,自身 pointerEvents 关闭)。
   voiceDraftScroll: {
