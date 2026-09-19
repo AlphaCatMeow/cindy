@@ -872,7 +872,10 @@ export function registerRemoteDesktopIpc(
     }
   };
   powerMonitor.on('lock-screen', () => sessionChanged());
-  powerMonitor.on('unlock-screen', () => sessionChanged(true));
+  powerMonitor.on('unlock-screen', () => {
+    sessionChanged(true);
+    void linuxWindows.unlock().catch(() => {});
+  });
   ipcMain.handle(DESKTOP_LOCAL.NATIVE_FRAME, async (event, lease: unknown) => {
     captureWindow.assertSender(event);
     if (

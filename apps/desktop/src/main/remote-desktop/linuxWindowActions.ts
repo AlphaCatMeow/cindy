@@ -32,6 +32,7 @@ type Monitor = { name: string; activeWorkspace: { id: number; name: string } };
 export class LinuxWindowActions {
   private tail: Promise<unknown> = Promise.resolve();
   private generation = 0;
+  private restorePending = false;
   private lua?: boolean;
   private desktop?: { monitor: string; original: number; temporary: string };
   constructor(
@@ -166,11 +167,23 @@ export class LinuxWindowActions {
       await this.dispatch('workspace', String(saved.original), check);
     }
     this.desktop = undefined;
+    this.restorePending = false;
   }
   stop(): Promise<void> {
     this.generation++;
+    this.restorePending = true;
     const stopped = this.tail.catch(() => {}).then(() => this.restore());
     this.tail = stopped;
     return stopped;
+  }
+  /** Retry a lock-deferred workspace restore after the compositor unlocks. */
+  unlock(): Promise<void> {
+    const restored = this.tail
+      .catch(() => {})
+      .then(() => {
+        if (this.restorePending) return this.restore();
+      });
+    this.tail = restored;
+    return restored;
   }
 }

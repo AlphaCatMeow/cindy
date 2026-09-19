@@ -22,8 +22,15 @@ interface Sink {
 /** Mute playback only, leaving the monitor branch audible remotely. Object
  * serial protects against numeric ID reuse after unplug. Writes are serialized. */
 export class LinuxDesktopMute {
-  private original: Sink | null = null;
+  private original = new Map<string, Sink>();
   private tail: Promise<void> = Promise.resolve();
+  private watchTimer: ReturnType<typeof setInterval> | undefined;
+  private restoreTimer: ReturnType<typeof setTimeout> | undefined;
+  private restoreAttempt = 0;
+  private enabled = false;
+  private key(sink: Sink): string {
+    return `${sink.id}:${sink.serial}`;
+  }
   constructor(
     private readonly run = async (tool: string, args: string[]) => {
       const { stdout } = await exec(`/usr/bin/${tool}`, args, {
@@ -55,35 +62,101 @@ export class LinuxDesktopMute {
         : [];
     });
   }
-  set(enabled: boolean): Promise<void> {
+  private async apply(enabled: boolean): Promise<void> {
+    const sinks = await this.sinks();
+    if (enabled) {
+      const name = (await this.run('pactl', ['get-default-sink'])).trim();
+      const current = sinks.find((sink) => sink.name === name);
+      if (!current) {
+        if (this.original.size) return;
+        throw new Error('DESKTOP_HOST_MUTE_UNAVAILABLE');
+      }
+      this.original.set(this.key(current), this.original.get(this.key(current)) ?? current);
+      for (const sink of sinks) {
+        if (!this.original.has(this.key(sink))) continue;
+        await this.run('pw-cli', ['set-param', String(sink.id), 'Props', `{ softMute: true }`]);
+      }
+      return;
+    }
+    const present = new Set(sinks.map((sink) => this.key(sink)));
+    for (const key of this.original.keys()) {
+      if (!present.has(key)) this.original.delete(key);
+    }
+    for (const sink of sinks) {
+      const saved = this.original.get(this.key(sink));
+      if (!saved) continue;
+      await this.run('pw-cli', [
+        'set-param',
+        String(sink.id),
+        'Props',
+        `{ softMute: ${saved.muted ? 'true' : 'false'} }`,
+      ]);
+      this.original.delete(this.key(sink));
+    }
+    // A missing exact id/serial is conclusively unplugged and must not be
+    // applied to a replacement node.
+    if (this.original.size === 0) this.restoreAttempt = 0;
+  }
+  private startWatch(): void {
+    if (this.watchTimer) return;
+    this.watchTimer = setInterval(() => {
+      void this.enqueue(true, true).catch(() => {});
+    }, 1000);
+    this.watchTimer.unref?.();
+  }
+  private stopWatch(): void {
+    clearInterval(this.watchTimer);
+    this.watchTimer = undefined;
+    clearTimeout(this.restoreTimer);
+    this.restoreTimer = undefined;
+    this.restoreAttempt = 0;
+    this.original.clear();
+  }
+  private scheduleRestore(): void {
+    if (this.enabled || this.restoreTimer || !this.original.size || this.restoreAttempt >= 5)
+      return;
+    const delay = [250, 500, 1000, 2000, 4000][this.restoreAttempt++];
+    this.restoreTimer = setTimeout(() => {
+      this.restoreTimer = undefined;
+      void this.enqueue(false, true)
+        .then(() => {
+          if (this.original.size) this.scheduleRestore();
+        })
+        .catch(() => this.scheduleRestore());
+    }, delay);
+    this.restoreTimer.unref?.();
+  }
+  private enqueue(enabled: boolean, background = false): Promise<void> {
     const result = this.tail
       .then(async () => {
-        if (!enabled && !this.original) return;
-        const sinks = await this.sinks();
-        if (!this.original) {
-          const name = (await this.run('pactl', ['get-default-sink'])).trim();
-          const sink = sinks.find((s) => s.name === name);
-          if (!sink) throw new Error('DESKTOP_HOST_MUTE_UNAVAILABLE');
-          this.original = sink;
-        }
-        const original = this.original;
-        if (!sinks.some((s) => s.id === original.id && s.serial === original.serial)) {
-          this.original = null;
-          if (enabled) throw new Error('DESKTOP_HOST_MUTE_UNAVAILABLE');
-          return;
-        }
-        await this.run('pw-cli', [
-          'set-param',
-          String(original.id),
-          'Props',
-          `{ softMute: ${enabled || original.muted ? 'true' : 'false'} }`,
-        ]);
-        if (!enabled) this.original = null;
+        if (background && enabled !== this.enabled) return;
+        if (!enabled && !this.original.size) return;
+        await this.apply(enabled);
       })
       .catch(() => {
         throw new Error('DESKTOP_HOST_MUTE_UNAVAILABLE');
       });
     this.tail = result.catch(() => {});
     return result;
+  }
+  set(enabled: boolean): Promise<void> {
+    this.enabled = enabled;
+    clearTimeout(this.restoreTimer);
+    this.restoreTimer = undefined;
+    this.restoreAttempt = 0;
+    if (enabled) {
+      const result = this.enqueue(true);
+      this.startWatch();
+      return result;
+    }
+    clearInterval(this.watchTimer);
+    this.watchTimer = undefined;
+    const result = this.enqueue(false);
+    void result.catch(() => this.scheduleRestore());
+    return result;
+  }
+  stop(): void {
+    this.enabled = false;
+    this.stopWatch();
   }
 }

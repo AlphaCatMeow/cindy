@@ -76,6 +76,24 @@ it('toggles an empty workspace and restores it on disconnect', async () => {
   await h.windows.stop();
   expect(h.workspace()).toBe('1');
 });
+it('retries a lock-deferred restore after the compositor unlocks', async () => {
+  const h = fixture();
+  await h.windows.request('desktop', undefined, 'hyprland:eDP-2', () => true);
+  h.unlocked.mockResolvedValue(false);
+  await expect(h.windows.stop()).rejects.toThrow('DESKTOP_INPUT_UNAVAILABLE');
+  expect(h.workspace()).toMatch(/^cindy-desktop-/);
+  h.unlocked.mockResolvedValue(true);
+  await h.windows.unlock();
+  expect(h.workspace()).toBe('1');
+});
+it('does not restore an active desktop toggle merely because the host unlocks', async () => {
+  const h = fixture();
+  await h.windows.request('desktop', undefined, 'hyprland:eDP-2', () => true);
+  await h.windows.unlock();
+  expect(h.workspace()).toMatch(/^cindy-desktop-/);
+  await h.windows.stop();
+  expect(h.workspace()).toBe('1');
+});
 it('uses typed Lua dispatchers on current Omarchy without replaying actions', async () => {
   const h = fixture(true);
   await h.windows.request('desktop', undefined, 'hyprland:eDP-2', () => true);

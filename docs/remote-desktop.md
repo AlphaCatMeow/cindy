@@ -520,9 +520,12 @@ video and control available. Locked or unknown compositor state denies audio rea
 This does not add audio to the compatibility JPEG transport.
 
 Linux host mute uses PipeWire `softMute` on the playback branch, retaining the
-monitor signal for the phone. It restores the original state of the exact output
-object (including its serial), even if the default output changes; an unplugged
-output cannot cause restoration to modify a reused node ID. Requires `pactl`,
+monitor signal for the phone. While the generic remote-session `hostMute` lease is
+active, it follows default-output changes and tracks every exact output object
+(id plus serial), so newly selected outputs are muted too. On release it restores
+each saved `softMute` value; an unplugged output is discarded and cannot cause
+restoration to modify a reused node ID. Transient PipeWire failures use bounded
+backoff retries while the snapshots remain owned by the lease. Requires `pactl`,
 `pw-dump` and `pw-cli`. A null-output integration test verifies that playback mute
 leaves the captured tone nonzero; Chromium/WebRTC tests verify remote decoding.
 
@@ -625,7 +628,10 @@ monitor (`r-1` / `r+1`); the menu button uses Omarchy's own `menu toggle`, so a
 second press closes it even when the menu was opened locally.
 
 Linux's window picker supplies selection/switching, not macOS Mission Control's
-thumbnail animation. Quickshell auto-unlock remains unavailable under the
+thumbnail animation. Its temporary empty-workspace restore retains the snapshot
+when disconnect happens while locked and retries on unlock. This applies to
+Hyprland window actions independently of the optional Omarchy menu.
+Quickshell auto-unlock remains unavailable under the
 existing-system-interface constraint. These differences and the unverified
 physical phone scenarios must not be described as complete macOS parity.
 
