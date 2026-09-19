@@ -1112,8 +1112,8 @@ export function ProjectsSection({
                   : t('ccAgent.sidebar.deviceGroup.local');
                 const online = section.deviceId ? (device?.online ?? false) : true;
                 const sectionCollapsed = collapsedDevices.has(key);
-                // 设备层聚合灯:聚合本段全部条目的会话(与段内渲染一致)。顶层
-                // 也要有灯,否则未读藏在折叠段/折叠上限之外时只能逐段展开翻找。
+                // 设备层聚合灯:聚合本段全部条目的会话(与段内渲染一致)。
+                // 仅收起时显示运行态与未读点,展开后由下层内容提示。
                 const sectionLamp = lampAgg(section.entries.flatMap(entrySessions));
                 return (
                   <div key={key} className="flex flex-col gap-1">
@@ -1138,11 +1138,12 @@ export function ProjectsSection({
                         ) : (
                           <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
                         )}
-                        {/* 段内任一 running → 设备图标呼吸橙(rail 段钮同款灯语)。 */}
+                        {/* 设备段收起时才用图标呼吸提示内部运行态,展开后由下层内容提示。 */}
                         <span
                           className={cn(
                             'inline-flex shrink-0',
-                            sectionLamp.running &&
+                            sectionCollapsed &&
+                              sectionLamp.running &&
                               'text-[var(--status-bar-accent)] session-status-breathing',
                           )}
                         >
@@ -1157,10 +1158,10 @@ export function ProjectsSection({
                         )}
                         {/* 条数已去掉(2026-08-12 用户裁决):它数的是顶层条目
                             (项目行 + 散排对话 + 对话组),不是任务数,读起来只会误导;
-                            段展开后内容本身就是答案。右侧改为灯组:聚合未读点
-                            (段级 size 6,rail 段钮同款)+ 离线标注。 */}
+                            段展开后内容本身就是答案。右侧改为灯组:仅收起时显示聚合未读点
+                            (段级 size 6,rail 段钮同款);离线标注始终保留。 */}
                         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                          {sectionLamp.dotTone && (
+                          {sectionCollapsed && sectionLamp.dotTone && (
                             <AttentionDot size={6} tone={sectionLamp.dotTone} />
                           )}
                           {!online && (

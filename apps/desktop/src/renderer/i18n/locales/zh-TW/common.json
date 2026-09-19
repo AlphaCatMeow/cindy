@@ -987,6 +987,18 @@
         "unknown": "未知"
       },
       "storage": {
+        "dialogueDirectoryTitle": "對話工作區",
+        "dialogueDirectoryDescription": "僅用於新建任務，現有檔案保留原位置。",
+        "dialogueDirectoryOpen": "開啟目錄",
+        "dialogueDirectoryChoose": "變更目錄",
+        "dialogueDirectoryReset": "恢復預設位置",
+        "dialogueDirectoryFailed": "無法更新對話工作區，請確認所選目錄可寫入後再試。",
+        "dialogueDirectoryDefault": "預設",
+        "dialogueDirectoryFullPath": "完整路徑",
+        "dialogueDirectoryDetails": "未指定專案資料夾的新任務使用此位置。Cindy 會在所選資料夾中建立目前帳號獨立的子目錄。",
+        "dialogueDirectoryCopy": "複製路徑",
+        "dialogueDirectoryCopied": "路徑已複製",
+        "dialogueDirectoryCopyFailed": "無法複製路徑，請選取路徑後手動複製。",
         "mediaSectionTitle": "媒體檔案",
         "databaseSectionTitle": "資料庫",
         "overviewTitle": "本機儲存空間",
@@ -12322,7 +12334,8 @@
     },
     "dialogs": {
       "subscription": {
-        "title": "選擇訂閱套餐"
+        "title": "選擇訂閱套餐",
+        "confirmTitle": "確認訂閱"
       },
       "topup": {
         "title": "餘額充值"
@@ -12455,6 +12468,39 @@
       "targetLabel": "目標套餐：{{name}}",
       "pendingDowngrade": "已排期降級至 {{name}}，{{date}} 生效。",
       "undo": "撤銷降級"
+    },
+    "comparison": {
+      "select": "選擇{{name}}",
+      "topup": "儲值",
+      "topupUnlock": "儲值後可解鎖額外用量。",
+      "rollover": "{{amount}} 可結轉至{{period}}",
+      "changeUnavailable": "無法進行此變更",
+      "upgrade": "升級",
+      "downgrade": "降級",
+      "free": "免費",
+      "freeUsage": "按量使用",
+      "topupExpiry": "儲值餘額用完為止",
+      "priceFromSuffix": "起",
+      "subscription": "訂閱",
+      "includesFree": "包含免費版全部能力",
+      "creditMultiple": "包含金額是{{name}}的 {{multiple}} 倍",
+      "credits": {
+        "MONTH": "每月 {{amount}}",
+        "YEAR": "每年 {{amount}}",
+        "OTHER": "{{amount}}"
+      },
+      "nextPeriod": {
+        "MONTH": "下個月",
+        "YEAR": "明年",
+        "OTHER": "下一週期"
+      },
+      "agent": "Agent 任務",
+      "apiKey": "使用自有 API Key",
+      "existingSubscription": "沿用既有訂閱",
+      "localModels": "本機模型",
+      "basicModels": "基礎模型",
+      "advancedModels": "進階模型",
+      "managedService": "託管服務"
     }
   },
   "fileAccess": {

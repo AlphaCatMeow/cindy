@@ -6,6 +6,19 @@
   "punctuationExempt": ["desktop:settings.help.qnaFeedbackBodyTemplate"],
   "terms": [
     {
+      "id": "chat-workspace",
+      "status": "proposed",
+      "en": "Chat workspace",
+      "translations": {
+        "zh-CN": "对话工作区",
+        "zh-TW": "對話工作區",
+        "ja": "チャットワークスペース",
+        "ko": "대화 작업 공간"
+      },
+      "checkCase": false,
+      "note": "用户于 2026-09-18 明确指定的存储设置名称，表示未绑定项目的新任务工作目录的分配位置。单个任务的 working directory 仍称工作目录，不改其术语。"
+    },
+    {
       "id": "cindy-make-history",
       "status": "proposed",
       "en": "Make history",
