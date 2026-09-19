@@ -1,16 +1,7 @@
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { ScriptTarget, transpileModule } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkingDirectoryRecovery } from '../workingDirectoryRecovery';
-
-// Execute the production preflight with isolated IO, without booting Electron.
-const register = readFileSync(new URL('../register.ts', import.meta.url), 'utf8');
-const start = register.indexOf('async function checkWorkDirExists(');
-const end = register.indexOf('\n/**', start);
-const compiled = transpileModule(register.slice(start, end), {
-  compilerOptions: { target: ScriptTarget.ES2022 },
-}).outputText;
+import { createWorkingDirectoryPreflight } from '../workingDirectoryPreflight';
 
 function harness(originalState: 'EACCES' | 'file' | 'ENOENT' | 'ready', saved = true) {
   const original = path.resolve('original-project');
@@ -28,31 +19,25 @@ function harness(originalState: 'EACCES' | 'file' | 'ENOENT' | 'ready', saved = 
   const allocate = vi.fn(async () => fallback);
   const recovery = createWorkingDirectoryRecovery({ stat, mkdir, findFallback }, allocate);
   const emit = vi.fn();
-  const readiness = vi.fn(async () => 'ready');
+  const readiness = vi.fn(async (): Promise<'ready' | 'gone' | 'retry'> => 'ready');
   const managedBase = vi.fn((_dir: string): string | null => null);
   const isCindyMake = vi.fn(() => false);
   const deps = {
-    path,
-    app: { getPath: () => path.resolve('test-profile') },
-    isCindyMakeManagedWorktreePath: isCindyMake,
-    assertCindyMakeWorkspace: vi.fn(async () => {}),
     workingDirectoryRecovery: recovery,
     statWorkingDirectory: stat,
+    readBoundWorkingDir: vi.fn(async () => original),
+    getUserDataPath: () => path.resolve('test-profile'),
+    isCindyMakeWorktreePath: isCindyMake,
+    assertCindyMakeWorkspace: vi.fn(async () => {}),
     getManagedWorktreeBasePath: managedBase,
     getManagedWorktreeReadinessForSession: readiness,
-    workdirDiagnosticContext: () => ({}),
-    workdirDiagnosticId: () => 'redacted',
-    workdirDiagnosticErrorCode: (error: NodeJS.ErrnoException) => error.code,
-    workdirLog: { warn: vi.fn(), info: vi.fn() },
-    log: { warn: vi.fn(), info: vi.fn() },
-    emitWorkDirMissingError: emit,
-    isUnavailableFilesystemError: () => false,
     findSimilarDirOnDisk: vi.fn(async () => null),
-    getMaker: () => ({ listActiveSessions: () => [] }),
+    listActiveSessions: () => [],
+    workdirLog: { debug: vi.fn(), warn: vi.fn() },
+    log: { debug: vi.fn(), warn: vi.fn() },
+    emitWorkDirMissingError: emit,
   };
-  const check = new Function(...Object.keys(deps), compiled + '\nreturn checkWorkDirExists;')(
-    ...Object.values(deps),
-  ) as (id: string, dir: string, kind: string, remote?: string, opts?: { suppressMissingBroadcast: boolean }) => Promise<boolean>;
+  const check = createWorkingDirectoryPreflight(deps);
   return { original, fallback, stat, mkdir, findFallback, allocate, recovery, emit, readiness, managedBase, isCindyMake, check };
 }
 
@@ -74,19 +59,28 @@ describe('persistent ordinary recovery in workdir preflight', () => {
     },
   );
 
-  it.each(['EACCES', 'file'] as const)('still blocks %s without a saved workspace', async (state) => {
-    const h = harness(state, false);
-    h.readiness.mockResolvedValue('not-managed');
+  it('preserves EACCES without a saved workspace instead of reporting missing', async () => {
+    const h = harness('EACCES', false);
+    h.readiness.mockResolvedValue('retry');
+    await expect(h.check('task', h.original, 'codex')).rejects.toMatchObject({ code: 'EACCES' });
+    expect(h.recovery.isFallback('task', h.original)).toBe(false);
+    expect(h.allocate).not.toHaveBeenCalled();
+    expect(h.mkdir).not.toHaveBeenCalled();
+    expect(h.emit).not.toHaveBeenCalled();
+  });
+
+  it('blocks a non-directory result without entering missing recovery', async () => {
+    const h = harness('file', false);
     expect(await h.check('task', h.original, 'codex')).toBe(false);
     expect(h.recovery.isFallback('task', h.original)).toBe(false);
     expect(h.allocate).not.toHaveBeenCalled();
     expect(h.mkdir).not.toHaveBeenCalled();
-    expect(h.emit).toHaveBeenCalledOnce();
+    expect(h.emit).toHaveBeenCalledWith('task', h.original, 'codex', 'not-dir');
   });
 
   it('leaves a missing-path first probe to the caller with a DB repair candidate', async () => {
     const h = harness('ENOENT', false);
-    h.readiness.mockResolvedValue('not-managed');
+    h.readiness.mockResolvedValue('retry');
     expect(await h.check('task', h.original, 'codex', undefined, { suppressMissingBroadcast: true })).toBe(false);
     expect(h.mkdir).not.toHaveBeenCalled();
     expect(h.allocate).not.toHaveBeenCalled();
