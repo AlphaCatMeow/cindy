@@ -8809,9 +8809,10 @@
     },
     "unreadFailedScheduleBanner": {
       "text": "An automatic run failed.",
-      "precheck": "Automatic checks are temporarily blocked.",
-      "rateLimited": "Automatic checks are temporarily blocked by a request rate limit.",
-      "dismissTitle": "Dismiss past failure notice"
+      "precheck": "A previous automatic run did not start because its pre-run check failed.",
+      "rateLimited": "A previous automatic run did not start because its pre-run check was rate-limited.",
+      "dismissTitle": "Dismiss past failure notice",
+      "viewDetails": "View Details"
     },
     "worktreeRestoreBanner": {
       "text": "This session's worktree has been cleaned up (directory missing).",

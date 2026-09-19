@@ -8802,9 +8802,10 @@
     },
     "unreadFailedScheduleBanner": {
       "text": "先前有自動執行失敗。",
-      "precheck": "自動檢查暫時受阻。",
-      "rateLimited": "自動檢查暫時受阻：請求限流。",
-      "dismissTitle": "關閉歷史失敗提示"
+      "precheck": "先前一次自動執行未啟動：執行前檢查失敗。",
+      "rateLimited": "先前一次自動執行未啟動：檢查時請求受到速率限制。",
+      "dismissTitle": "關閉歷史失敗提示",
+      "viewDetails": "查看詳情"
     },
     "worktreeRestoreBanner": {
       "text": "該任務的 worktree 已被回收（目錄不存在）。",
