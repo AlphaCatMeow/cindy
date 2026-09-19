@@ -95,7 +95,7 @@ export interface ProjectNodeProps {
   hideRemoteMachineLabel?: boolean;
   /**
    * 项目行运行灯:仅收起时文件夹图标呼吸橙,展开后由子任务提示运行状态。
-   * 未读仍走 collapsedAttentionTone 右侧状态槽,不在标题旁重复显示。
+   * 未读仍走右侧状态槽;待回复蓝点由 lamp 补齐,不在标题旁重复显示。
    * 聚合集合由父层按实际渲染的会话提供。
    */
   lamp?: SessionLampAggregate;
@@ -300,6 +300,13 @@ const ProjectHeader = memo(function ProjectHeader({
   // 常驻在标题左侧;展开/收起指示箭头移到标题右侧、hover 才渐显(见下方 Chevron)。
   const FolderIcon = isCollapsed ? Folder : FolderOpen;
   const Chevron = isCollapsed ? ChevronRight : ChevronDown;
+  // 红绿汇总保留既有判据;收起文件夹还需承接机器展开后下放的待回复提示。
+  const collapsedStatusTone =
+    collapsedAttentionTone === 'error'
+      ? 'error'
+      : lamp?.dotTone === 'awaiting'
+        ? 'awaiting'
+        : collapsedAttentionTone;
   // 右键菜单：参照 ChatImageView 的 controlled DropdownMenu + 隐形定位 trigger 模式，
   // 鼠标点击位置即菜单出现位置。
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -512,7 +519,7 @@ const ProjectHeader = memo(function ProjectHeader({
         {!isEditingName && (
           <div className="group/slot relative ml-auto flex h-6 shrink-0 items-center justify-end">
             <div className="grid h-6 grid-cols-[max-content] items-center justify-items-end">
-              {isCollapsed && collapsedAttentionTone ? (
+              {isCollapsed && collapsedStatusTone ? (
                 <div
                   className={cn(
                     'col-start-1 row-start-1 flex items-center gap-1',
@@ -521,7 +528,7 @@ const ProjectHeader = memo(function ProjectHeader({
                     menuPos !== null && 'opacity-0',
                   )}
                 >
-                  <SidebarRightStatusIndicator kind={collapsedAttentionTone} isActive={false} />
+                  <SidebarRightStatusIndicator kind={collapsedStatusTone} isActive={false} />
                 </div>
               ) : null}
               <div
