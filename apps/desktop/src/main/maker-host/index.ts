@@ -57,6 +57,7 @@ import { createMessage } from '../localDb/ipc/messages.js';
 import { createCindyMakeMcpProvider } from '../cindy-make/mcpProvider.js';
 import { captureMakeHistoryStore } from '../cindy-make/historyOwner.js';
 import { captureMakeHistoryCompletion } from '../cindy-make/historyCapture.js';
+import { broadcastMakeRemoteChanged } from '../cindy-make/remoteBroadcast.js';
 import { captureDataOwnerBroadcastScope, isDataOwnerBroadcastScopeCurrent } from '../device-link/broadcast-tap.js';
 import {
   collectCindyMakeChanges,
@@ -1113,6 +1114,7 @@ export function getMaker(): Maker {
         });
         if (isDataOwnerBroadcastScopeCurrent(scope) && session?.workDir)
           captureMakeHistoryCompletion(history, path.basename(session.workDir), clientId, meta);
+        broadcastMakeRemoteChanged(sessionId, scope);
       },
       logger: desktopMakerLogger,
     });

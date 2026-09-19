@@ -52,7 +52,7 @@ function harness(initial: Partial<CindyMakeCompletionMeta> = {}) {
     meta = { ...meta, ...patch };
     return meta;
   });
-  const launch = vi.fn(async (_context, signal: AbortSignal) => {
+  const launch = vi.fn<MakeTestControllerDeps['launch']>(async (_context, signal) => {
     signal.addEventListener('abort', stop, { once: true });
     return { ready: ready.promise, closed: closed.promise, stop };
   });
@@ -92,6 +92,62 @@ function harness(initial: Partial<CindyMakeCompletionMeta> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe('Main-owned Cindy Make test lifecycle', () => {
+  it('blocks Continue Editing during startup, then allows it once the test is ready', async () => {
+    const h = harness();
+    await h.controller.act('session', 'completion', 'start');
+    await expect(h.controller.act('session', 'completion', 'continue')).rejects.toMatchObject({
+      code: 'unavailable',
+    });
+    expect(h.stop).not.toHaveBeenCalled();
+    expect(h.meta().continuedAt).toBeUndefined();
+    h.ready.resolve();
+    await vi.waitFor(() => expect(h.meta().test?.status).toBe('ready'));
+    await h.controller.act('session', 'completion', 'continue');
+    expect(h.controller.isUsingSession('session')).toBe(false);
+    expect(h.leased()).toBe(false);
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+    expect(h.meta().continuedAt).toBe(123);
+  });
+  it('orders slow progress writes before readiness and ignores progress after readiness', async () => {
+    const h = harness();
+    const persistence = deferred<void>();
+    const original = h.save.getMockImplementation()!;
+    h.save.mockImplementation(async (context, patch) => {
+      if (patch.test?.step === 'dependencies') await persistence.promise;
+      return original(context, patch);
+    });
+    await h.controller.act('session', 'completion', 'start');
+    const publish = h.launch.mock.calls[0][2];
+    publish('dependencies');
+    publish('assets');
+    h.ready.resolve();
+    expect(h.meta().test?.status).toBe('starting');
+    persistence.resolve();
+    await vi.waitFor(() => expect(h.meta().test).toEqual({ status: 'ready' }));
+    const count = h.save.mock.calls.length;
+    publish('launching');
+    await Promise.resolve();
+    expect(h.save).toHaveBeenCalledTimes(count);
+    h.closed.resolve();
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+  });
+  it('retains the failed step and starts a fresh attempt on retry', async () => {
+    const h = harness();
+    h.launch.mockImplementationOnce(async (_context, _signal, publish) => {
+      publish('dependencies');
+      throw makeTestError('environment');
+    });
+    await h.controller.act('session', 'completion', 'start');
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+    expect(h.meta().test).toEqual({ status: 'failed', step: 'dependencies', error: 'environment' });
+    await h.controller.act('session', 'completion', 'start');
+    expect(h.launch).toHaveBeenCalledTimes(2);
+    expect(h.meta().test).toEqual({ status: 'starting', step: 'waiting' });
+    h.ready.resolve();
+    await vi.waitFor(() => expect(h.meta().test?.status).toBe('ready'));
+    h.closed.resolve();
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+  });
   it('coalesces repeated starts, broadcasts readiness and keeps a workspace lease until exit', async () => {
     const h = harness();
     await h.controller.act('session', 'completion', 'start');
@@ -131,9 +187,11 @@ describe('Main-owned Cindy Make test lifecycle', () => {
     const h = harness();
     h.launch.mockRejectedValueOnce(makeTestError('changed'));
     await h.controller.act('session', 'completion', 'start');
-    await vi.waitFor(() => expect(h.meta().test).toEqual({ status: 'failed', error: 'changed' }));
-    expect(h.leased()).toBe(false);
-    expect(h.controller.isUsingWorkspace('/profile/task')).toBe(false);
+    await vi.waitFor(() => {
+      expect(h.meta().test).toEqual({ status: 'failed', step: 'waiting', error: 'changed' });
+      expect(h.leased()).toBe(false);
+      expect(h.controller.isUsingWorkspace('/profile/task')).toBe(false);
+    });
     void h.ready.promise.catch(() => {});
   });
   it('stops owned processes on account change without publishing to the new owner', async () => {
@@ -164,6 +222,77 @@ const installer: PersonalArtifact = {
 };
 
 describe('personal build completion choices', () => {
+  it('does not let a concurrent stop overwrite the final adopted artifact', async () => {
+    const h = harness();
+    h.build.mockImplementationOnce(async () => h.artifact.promise);
+    const entered = deferred<void>();
+    const persistence = deferred<void>();
+    const save = h.save.getMockImplementation()!;
+    h.save.mockImplementation(async (context, patch) => {
+      if (patch.personal?.status === 'ready') {
+        entered.resolve();
+        await persistence.promise;
+      }
+      return save(context, patch);
+    });
+    await h.controller.act('session', 'completion', 'build');
+    const id = h.meta().personal!.buildId!;
+    h.artifact.resolve(installer);
+    await entered.promise;
+    const stopping = h.controller.cancelBuild(id);
+    persistence.resolve();
+    await stopping;
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+    expect(h.meta().personal).toMatchObject({ buildId: id, status: 'ready', ...installer });
+    expect(h.meta().personal?.stopping).toBeUndefined();
+  });
+  it('preserves cleanup failures instead of reporting a completed cancellation', async () => {
+    const h = harness();
+    h.build.mockImplementationOnce(async (_context, signal) => {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+      throw Object.assign(new Error('locked'), { code: 'cleanupFailed' });
+    });
+    await h.controller.act('session', 'completion', 'build');
+    await h.controller.cancelBuild(h.meta().personal!.buildId!);
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+    expect(h.meta().personal).toMatchObject({ status: 'failed', error: 'cleanupFailed' });
+  });
+  it('stops only the current build, keeps cleanup leased, and gives retry a new identity', async () => {
+    const h = harness();
+    const cleanup = deferred<void>();
+    let signal!: AbortSignal;
+    h.build.mockImplementationOnce(async (_context, abort, publish) => {
+      signal = abort;
+      await publish({ status: 'packaging' });
+      await cleanup.promise;
+      abort.throwIfAborted();
+      throw new Error('unreachable');
+    });
+    await h.controller.act('session', 'completion', 'build');
+    await vi.waitFor(() => expect(h.meta().personal?.status).toBe('packaging'));
+    const id = h.meta().personal!.buildId!;
+    await h.controller.cancelBuild('stale-build');
+    expect(signal.aborted).toBe(false);
+    await h.controller.cancelBuild(id);
+    expect(signal.aborted).toBe(true);
+    expect(h.meta().personal).toMatchObject({ buildId: id, stopping: true });
+    expect(h.leased()).toBe(true);
+    cleanup.resolve();
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+    expect(h.meta()).toMatchObject({
+      personal: { buildId: id, status: 'failed', error: 'cancelled' },
+    });
+    expect(h.meta().continuedAt).toBeUndefined();
+    await h.controller.act('session', 'completion', 'build');
+    await vi.waitFor(() => expect(h.meta().personal?.status).toBe('packaging'));
+    expect(h.meta().personal?.buildId).not.toBe(id);
+    await h.controller.cancelBuild(id);
+    expect(h.meta().personal?.stopping).toBeUndefined();
+    await h.controller.cancelBuild(h.meta().personal!.buildId!);
+    await vi.waitFor(() => expect(h.controller.hasActiveJobs()).toBe(false));
+  });
   it('coalesces build clicks, persists progress and opens only the recorded installer', async () => {
     const h = harness();
     await Promise.all([
@@ -244,7 +373,7 @@ describe('personal build completion choices', () => {
     h.build.mockRejectedValueOnce(Object.assign(new Error('conflict'), { code: 'conflict' }));
     await h.controller.act('session', 'completion', 'build');
     await vi.waitFor(() =>
-      expect(h.meta().personal).toEqual({ status: 'failed', error: 'conflict' }),
+      expect(h.meta().personal).toMatchObject({ status: 'failed', error: 'conflict' }),
     );
     expect(h.leased()).toBe(false);
   });

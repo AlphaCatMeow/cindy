@@ -312,7 +312,10 @@ import {
 } from './rsb-browser-bridge/native-popup-surfaces.js';
 import { disposeAndroidAdb } from './mcp-integrations/android.js';
 import { shutdownCodexEnvironment } from './mcp-integrations/codexEnvironment.js';
-import { invalidatePiEnvironment, shutdownPiEnvironment } from './mcp-integrations/piEnvironment.js';
+import {
+  invalidatePiEnvironment,
+  shutdownPiEnvironment,
+} from './mcp-integrations/piEnvironment.js';
 import { fetchRemoteMediaImageBytes } from './device-link/remoteMediaProtocol';
 import * as imageCacheStore from './imageCacheStore';
 import {
@@ -361,7 +364,8 @@ import {
   isCindyMakeManagedWorktreePath,
 } from './cindy-make/sourcePaths.js';
 import { prepareCindyMakeWorkspace } from './cindy-make/taskWorkspace.js';
-import { restoreCindyMakeTaskState, startCindyMakeTask } from './cindy-make/taskRuntime.js';
+import { restoreCindyMakeTaskState, startCindyMakeTask, configureCindyMakeEditingGuard } from './cindy-make/taskRuntime.js';
+import { registerMakeRemoteResources } from './cindy-make/remoteRuntime.js';
 import {
   configureCindyMakeTaskManagement,
   manageCindyMakeTask,
@@ -456,8 +460,15 @@ import {
 } from './database-size-warning-settings';
 import { createDatabaseSizeWarningSettingsWatcher } from './database-size-warning-settings-watcher.js';
 import { createLocalDbMaintenanceIpcHandlers } from './localDb/ipc/maintenance';
-import { createDialogueWorkspaceHandlers, checkDialogueDirectoryWritable, customDialogueWorkspaceRoot } from './dialogue-workspace-ipc.js';
-import { readDialogueWorkspaceSettings, writeDialogueWorkspaceDirectory } from './dialogue-workspace-settings.js';
+import {
+  createDialogueWorkspaceHandlers,
+  checkDialogueDirectoryWritable,
+  customDialogueWorkspaceRoot,
+} from './dialogue-workspace-ipc.js';
+import {
+  readDialogueWorkspaceSettings,
+  writeDialogueWorkspaceDirectory,
+} from './dialogue-workspace-settings.js';
 import { writeDbSlimmingDevRelaunchSignal } from './localDb/devDbSlimmingRelaunch';
 import {
   cancelDbSlimmingStartupProgress,
@@ -4107,7 +4118,8 @@ const createWindow = () => {
       restoreFullscreen: shouldRestoreMacFullscreen,
     });
     refreshWindowsAppBadge();
-    if (!app.isPackaged || isCindyVersionLaunchPending()) markDesktopDevWindowReady();
+    if (!app.isPackaged || isCindyVersionLaunchPending())
+      markDesktopDevWindowReady(mainWindow.webContents.getOSProcessId());
     void runComputerUseSmokeIfRequested();
     // 资源用量窗口不应与主窗口首帧争 CPU。主窗口可见后再后台完成 BrowserWindow、
     // renderer 和首份进程快照预热；回调绑定当代主窗口，重建/退出后不会创建孤儿窗。
@@ -7638,6 +7650,8 @@ const registerIpcHandlers = () => {
   configureCindyMakeTestRuntime(
     (id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false,
   );
+  configureCindyMakeEditingGuard((id) => cindyMakeTestController.isUsingSession(id));
+  registerMakeRemoteResources((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
   configureMakeHistory((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
   ipcMain.handle('app:cindy-make-history', async (event, selected?: unknown) => {
     assertTrustedAppRendererEvent(event);
@@ -8387,13 +8401,15 @@ const registerIpcHandlers = () => {
           properties: ['openDirectory', 'createDirectory'],
         };
         const ownerWindow = BrowserWindow.getFocusedWindow() ?? mainWindowRef;
-        const result = ownerWindow && !ownerWindow.isDestroyed()
-          ? await dialog.showOpenDialog(ownerWindow, options)
-          : await dialog.showOpenDialog(options);
+        const result =
+          ownerWindow && !ownerWindow.isDestroyed()
+            ? await dialog.showOpenDialog(ownerWindow, options)
+            : await dialog.showOpenDialog(options);
         return result.canceled ? null : (result.filePaths[0] ?? null);
       },
       // Dedicated owner subtree prevents unrelated folders from being treated as managed tasks.
-      resolveDirectory: (selected) => customDialogueWorkspaceRoot(selected, path.basename(ownerScopedUserDataPath())),
+      resolveDirectory: (selected) =>
+        customDialogueWorkspaceRoot(selected, path.basename(ownerScopedUserDataPath())),
       checkWritable: checkDialogueDirectoryWritable,
       openDirectory: (directory) => shell.openPath(directory),
     });

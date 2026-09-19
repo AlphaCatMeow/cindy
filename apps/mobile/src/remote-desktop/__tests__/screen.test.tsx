@@ -246,6 +246,8 @@ vi.mock("lucide-react-native", () => ({
   createLucideIcon: () => () => null,
   Clipboard: () => null,
   ArrowLeft: () => null,
+  ArrowRight: () => null,
+  Menu: () => null,
   RotateCw: () => null,
   Volume2: () => null,
   VolumeX: () => null,
@@ -361,8 +363,12 @@ const visibleInputHint = () =>
 const button = (key: string) =>
   host.querySelector<HTMLButtonElement>(`[aria-label="remoteDesktop.${key}"]`)!;
 beforeEach(async () => {
-  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.show-mouse-buttons.v1").catch(() => undefined);
-  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.audio.v1").catch(() => undefined);
+  await AsyncStorage.removeItem(
+    "cindy.mobile.remote-desktop.show-mouse-buttons.v1",
+  ).catch(() => undefined);
+  await AsyncStorage.removeItem("cindy.mobile.remote-desktop.audio.v1").catch(
+    () => undefined,
+  );
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   fixture.beginBackgroundTransition.mockImplementation(
@@ -450,6 +456,41 @@ const connect = async () => {
 };
 
 describe("remote desktop controls", () => {
+  it.each([false, true])(
+    "allows the Wayland consent window while keeping the overall wait bounded (native=%s)",
+    async (native) => {
+      fixture.nativeMedia = native;
+      const original = fixture.invoke.getMockImplementation()!;
+      fixture.invoke.mockImplementation(async (...args) => {
+        const result = await original(...args);
+        if (args[2][0].op === "capabilities")
+          return {
+            ...result,
+            displays: [{ ...display, id: "wayland-portal" }],
+          };
+        return result;
+      });
+      await act(async () => {
+        fixture.message!({ nativeEvent: { data: '{"type":"ready"}' } });
+      });
+      if (native) {
+        const init = fixture.nativeReceive.mock.calls
+          .map(([message]) => message as Record<string, any>)
+          .find((message) => message.type === "init");
+        expect(init?.net.retryMs).toEqual([
+          ...Array(15).fill(8000),
+          1000,
+          3000,
+          8000,
+        ]);
+      }
+      await act(async () => vi.advanceTimersByTimeAsync(90_000));
+      expect(host.textContent).not.toContain("remoteDesktop.connectionTimeout");
+      await act(async () => vi.advanceTimersByTimeAsync(90_000));
+      expect(host.textContent).toContain("remoteDesktop.connectionTimeout");
+    },
+  );
+
   it("bounds repeated failures without renewing the deadline on each retry", async () => {
     fixture.openLink.mockRejectedValue(new Error("INVOKE_TIMEOUT"));
     await act(async () => {
@@ -510,6 +551,33 @@ describe("remote desktop controls", () => {
     expect(host.textContent).not.toContain("remoteDesktop.connectionTimeout");
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(host.textContent).toContain("remoteDesktop.connectionTimeout");
+  });
+
+  it("uses advertised Omarchy actions instead of the legacy desktop buttons", async () => {
+    const original = fixture.invoke.getMockImplementation()!;
+    fixture.invoke.mockImplementation(async (...args) => {
+      const result = await original(...args);
+      return args[2][0].op === "capabilities"
+        ? {
+            ...result,
+            platform: "linux",
+            workspaceNavigation: true,
+            omarchyMenu: true,
+          }
+        : result;
+    });
+    await connect();
+    for (const action of ["workspaceLeft", "workspaceRight", "omarchyMenu"])
+      await act(async () => button(action).click());
+    expect(requests().filter((r) => r.op === "windowAction")).toEqual(
+      ["workspaceLeft", "workspaceRight", "omarchyMenu"].map((action) => ({
+        op: "windowAction",
+        action,
+        lease: "lease",
+      })),
+    );
+    expect(button("showDesktop")).toBeNull();
+    expect(button("allWindows")).toBeNull();
   });
 
   const nativePresentation = async (
@@ -2051,7 +2119,6 @@ describe("remote desktop controls", () => {
   it.each([
     ["android", "darwin"],
     ["ios", "win32"],
-    ["ios", "linux"],
     ["ios", undefined],
   ])(
     "hides unsupported unlock settings for %s / %s while retaining exit locking",
@@ -2221,6 +2288,27 @@ describe("remote desktop controls", () => {
     expect(requests().filter((r) => r.op === "stop")).toEqual([
       { op: "stop", lease: "lease", lockScreen: true },
     ]);
+  });
+  it("prepares Linux unlock before capture without waiting for a first frame", async () => {
+    fixture.hostPlatform = "linux";
+    let finish!: () => void;
+    const prompt = vi.fn();
+    fixture.maybeUnlock.mockImplementationOnce(async (beforeAuthentication) => {
+      await beforeAuthentication!();
+      prompt();
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await act(async () => {
+      fixture.message!({ nativeEvent: { data: '{"type":"ready"}' } });
+    });
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(requests().some((r) => r.op === "start")).toBe(false);
+    await act(async () => {
+      finish();
+    });
+    expect(requests().filter((r) => r.op === "start")).toHaveLength(1);
   });
   it.each(["framePresented", "streaming"])(
     "prepares authentication alongside capture and waits for %s before Face ID",
@@ -3018,6 +3106,53 @@ describe("remote desktop controls", () => {
     expect(fixture.invoke).toHaveBeenCalledTimes(1);
     expect(requests().some((r) => r.op === "start")).toBe(false);
   });
+  it("replaces the foreground lease after even a brief relay interruption", async () => {
+    await connect();
+    act(() =>
+      fixture.message!({
+        nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+      }),
+    );
+    fixture.status = "offline";
+    act(() => root.render(<RemoteDesktopScreen />));
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
+    fixture.status = "online";
+    await act(async () => root.render(<RemoteDesktopScreen />));
+    await act(async () => vi.advanceTimersByTimeAsync(9000));
+    expect(requests().filter((r) => r.op === "start")).toHaveLength(2);
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
+  });
+  it("immediately releases foreground video when signaling goes offline", async () => {
+    await connect();
+    act(() =>
+      fixture.message!({
+        nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+      }),
+    );
+    fixture.status = "offline";
+    act(() => root.render(<RemoteDesktopScreen />));
+    expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
+  });
+  it.each(["DEVICE_OFFLINE", "ACCESS_REVOKED"])(
+    "discards the foreground lease on a definitive heartbeat error: %s",
+    async (code) => {
+      await connect();
+      act(() =>
+        fixture.message!({
+          nativeEvent: { data: '{"type":"streaming","epoch":"lease"}' },
+        }),
+      );
+      const original = fixture.invoke.getMockImplementation()!;
+      fixture.invoke.mockImplementation((...args) =>
+        args[2][0].op === "heartbeat"
+          ? Promise.reject(Object.assign(new Error(code), { code }))
+          : original(...args),
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(3100));
+      expect(requests().filter((r) => r.op === "stop")).toHaveLength(1);
+    },
+  );
   it("renews again after a lost heartbeat reply without replacing the live lease", async () => {
     await connect();
     const original = fixture.invoke.getMockImplementation()!;
@@ -3505,7 +3640,9 @@ describe("remote desktop controls", () => {
     await connect();
     act(() => button("operations").click());
     expect(button("rightClick")).toBeNull();
-    expect(button("showMouseButtons").getAttribute("aria-checked")).toBe("false");
+    expect(button("showMouseButtons").getAttribute("aria-checked")).toBe(
+      "false",
+    );
     await act(async () => button("showMouseButtons").click());
     expect(button("showMouseButtons").getAttribute("aria-checked")).toBe(
       "true",

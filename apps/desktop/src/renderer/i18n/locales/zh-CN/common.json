@@ -12964,6 +12964,13 @@
       }
     },
     "test": {
+      "resume": {
+        "title": "继续测试",
+        "description": "先检查当前修改，通过后恢复测试和生成个人版的选项。",
+        "action": "检查并继续",
+        "failed": "未能开始检查，请重试。",
+        "request": "请检查当前修改，完成后恢复测试和生成个人版的选项，等待我选择下一步。"
+      },
       "title": "修改已完成，选择下一步",
       "description": "可以继续修改、启动隔离版测试，或直接生成个人版安装包。",
       "readyHint": "请在测试窗口体验修改。点击“继续修改”会关闭测试版并恢复输入。",
@@ -12984,6 +12991,19 @@
         "launchFailed": "未能启动隔离版，请重试；仍失败可返回继续修改。",
         "timeout": "隔离版启动超时，请重试。",
         "interrupted": "上次测试已中断，请重新启动隔离版。"
+      },
+      "retry": "重试启动",
+      "startingHint": "启动完成前暂时不能继续修改，请等待当前步骤完成。",
+      "currentStep": "当前步骤：{{step}}",
+      "failedStep": "中断步骤：{{step}}",
+      "steps": {
+        "waiting": "等待启动",
+        "environment": "检查测试环境",
+        "workspace": "核验修改内容",
+        "stopping": "准备隔离实例",
+        "dependencies": "检查并准备依赖",
+        "assets": "检查并准备运行资源",
+        "launching": "编译并打开测试窗口"
       }
     },
     "history": {
