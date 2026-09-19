@@ -239,8 +239,9 @@ import {
 } from '../localDb/client/current.js';
 import { createBotRuntimeRestoreCoordinator } from './botRuntimeRestore.js';
 import { createWorkingDirectoryRecovery, isUnavailableFilesystemError } from './workingDirectoryRecovery.js';
+import { createWorkingDirectoryPreflight } from './workingDirectoryPreflight.js';
 import { allocateDialogueRecoveryWorkspace, findDialogueRecoveryWorkspace, requiredDialogueRecoveryRoot } from './dialogueRecoveryWorkspace.js';
-import { workdirDiagnosticContext, workdirDiagnosticErrorCode, workdirDiagnosticId } from '../workdirDiagnostics.js';
+import { workdirDiagnosticContext, workdirDiagnosticErrorCode } from '../workdirDiagnostics.js';
 import { statWorkingDirectory, mkdirWorkingDirectory, realpathWorkingDirectory, findSimilarWorkingDirectory } from '../workdir-probe-host/index.js';
 import { getMessagesForHistory } from '../localDb/chatHistoryReader.js';
 import {
@@ -18115,162 +18116,25 @@ async function materializeCodexImage(
  * agentSource 为了让 reducer / 事件类型对齐，老 session 没法准确知道 source 时
  * 走 'claude-code' 兜底；banner 不在乎 source，只显示 message。
  */
-async function checkWorkDirExists(
-  sessionId: string,
-  requestedWorkingDir: string | undefined | null,
-  agentKind: AgentKind | undefined,
-  remoteHostId?: string | null,
-  opts?: { suppressMissingBroadcast?: boolean },
-): Promise<boolean> {
-  // 远端 session: workdir 在远端机器上, 本地 fs.stat 必然 ENOENT 但完全没意义。
-  // 这条 guard 当初是为本地 session 兜底 "用户在 Finder 把目录删了 / 改名了" 的
-  // 场景, 远端走自己的 probe (StartRemoteSessionPanel 创建前 stat-remote-path,
-  // 或者 agent 真跑起来时由远端 codex 自己报 ENOENT)。这里直接放行。
-  if (remoteHostId) return true;
-  if (!requestedWorkingDir?.trim()) return true;
-  const cindyMakeWorkspace = isCindyMakeManagedWorktreePath(app.getPath('userData'), requestedWorkingDir);
-  if (cindyMakeWorkspace) workingDirectoryRecovery.discard(sessionId);
-  let workingDir = workingDirectoryRecovery.resolve(sessionId, requestedWorkingDir);
-  const source: AgentKind = agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'claude-code';
-  // suppressMissingBroadcast: 调用方(SEND 事务)手里还有 DB 权威值可兜底时,
-  // 首检失败只记日志不广播错误横幅——兜底成功的话用户不该看到假错误。
-  const suppress = opts?.suppressMissingBroadcast === true;
-  const startedAt = Date.now();
-  const diagnosticContext = {
-    ...workdirDiagnosticContext(sessionId, workingDir),
-    suppressMissingBroadcast: suppress,
-    usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
-  };
-  try {
-    if (cindyMakeWorkspace) await assertCindyMakeWorkspace(app.getPath('userData'), workingDir);
-    // Resume the previously selected ordinary workspace before probing a path
-    // that may now be inaccessible or a file. Do not allocate a new fallback here.
-    if (!cindyMakeWorkspace &&
-      !workingDirectoryRecovery.isFallback(sessionId, workingDir) &&
-      getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) === null) {
-      if (!await workingDirectoryRecovery.recover(sessionId, workingDir, undefined, [], 'ordinary', { existingFallbackOnly: true })) {
-        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'saved-recovery-lookup-failed' });
-        return false;
-      }
-      workingDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
-    }
-    const stat = await statWorkingDirectory(workingDir);
-    if (!stat.isDirectory()) {
-      workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'not-directory' });
-      if (suppress) {
-        log.warn('send: workdir not a directory (broadcast suppressed, caller has fallback)', {
-          sessionId,
-          workingDir,
-        });
-      } else {
-        emitWorkDirMissingError(sessionId, workingDir, source, 'not-dir');
-      }
-      return false;
-    }
-    // Managed worktrees need a stronger readiness check than directory existence: another send
-    // may observe `git worktree add` before snapshot apply finishes, and a previous apply conflict
-    // deliberately leaves the directory present while keeping the session blocked.
-    const normalizedWorkingDir = path.resolve(workingDir).replace(/\\/g, '/');
-    if (getManagedWorktreeBasePath(normalizedWorkingDir) !== null) {
-      const ready = await getManagedWorktreeReadinessForSession(sessionId, workingDir);
-      if (ready !== 'ready') {
-        if (ready === 'gone' && !suppress && await workingDirectoryRecovery.recover(sessionId, workingDir, undefined, [], 'unrestored-worktree')) return true;
-        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'managed-worktree-not-ready' });
-        if (suppress) {
-          log.warn('send: managed worktree not ready (broadcast suppressed, caller has fallback)', {
-            sessionId,
-            workingDir,
-          });
-        } else {
-          emitWorkDirMissingError(sessionId, workingDir, source, 'not-exist');
-        }
-        return false;
-      }
-    }
-    if (!cindyMakeWorkspace && getManagedWorktreeBasePath(normalizedWorkingDir) === null) {
-      if (!await workingDirectoryRecovery.recover(sessionId, workingDir)) {
-        workdirLog.warn('workdir preflight rejected', { ...diagnosticContext, reason: 'recovery-failed-after-stat' });
-        return false;
-      }
-      await workingDirectoryRecovery.observe(sessionId, workingDir);
-    }
-    workdirLog.info('workdir preflight ready', {
-      ...diagnosticContext,
-      usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
-      resolvedDirectoryRef: workdirDiagnosticId(workingDirectoryRecovery.resolve(sessionId, workingDir)),
-      elapsedMs: Date.now() - startedAt,
-    });
-    return true;
-  } catch (error) {
-    workdirLog.warn('workdir preflight failed', {
-      ...diagnosticContext, code: workdirDiagnosticErrorCode(error), elapsedMs: Date.now() - startedAt,
-    });
-    if (cindyMakeWorkspace) {
-      if (!suppress) emitWorkDirMissingError(sessionId, workingDir, source, 'not-exist');
-      return false;
-    }
-    // Cindy 托管 worktree 被外部 PR cleanup / 手动 git 命令移除时，先按 DB 中
-    // 的精确 worktree_path 从本地或 origin tracking 分支重建，保留原代码与快照。
-    const restored = await getManagedWorktreeReadinessForSession(sessionId, workingDir);
-    if (restored === 'ready') {
-      workdirLog.info('workdir preflight recovered', { ...diagnosticContext, action: 'managed-worktree-restored' });
-      log.info('send: restored missing managed worktree', { sessionId, workingDir });
-      return true;
-    }
-    // Preserve the existing sibling-path diagnostic before mkdir makes the probe pass.
-    // A fuzzy match is a lead for the agent, not authority to switch project identity.
-    const unavailable = isUnavailableFilesystemError(error);
-    let similar: string | null = null;
-    if (
-      restored === 'gone' && !suppress &&
-      ((error as NodeJS.ErrnoException).code === 'ENOENT' || unavailable) &&
-      getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) !== null &&
-      await workingDirectoryRecovery.recover(sessionId, workingDir, undefined, [], 'unrestored-worktree')
-    ) return true;
-    // A missing ordinary/dialogue cwd must not stop the conversation. Prefer a repaired
-    // DB path when the caller has one; never turn a managed Git recovery into
-    // an empty project, or treat permission/non-directory failures as ENOENT.
-    if (
-      !suppress &&
-      ((error as NodeJS.ErrnoException).code === 'ENOENT' || unavailable) &&
-      getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) === null &&
-      await workingDirectoryRecovery.recover(sessionId, workingDir, async () => {
-        similar = await findSimilarDirOnDisk(workingDir);
-        return similar;
-      },
-        getMaker().listActiveSessions()
-          .filter((session) => !session.remoteHostId)
-          .map((session) => ({ id: session.id, workingDir: session.workDir })))
-    ) {
-      const resolvedDir = workingDirectoryRecovery.resolve(sessionId, workingDir);
-      workdirLog.info('workdir preflight recovered', {
-        ...diagnosticContext, code: workdirDiagnosticErrorCode(error),
-        resolvedDirectoryRef: workdirDiagnosticId(resolvedDir),
-        usingFallback: workingDirectoryRecovery.isFallback(sessionId, workingDir),
-        sameDirectory: path.resolve(workingDir) === path.resolve(resolvedDir),
-        elapsedMs: Date.now() - startedAt,
-      });
-      log.info('send: working directory recovery completed', { sessionId, workingDir });
-      return true;
-    }
-    if (suppress) {
-      log.warn('send: workdir missing (broadcast suppressed, caller has fallback)', {
-        sessionId,
-        workingDir,
-      });
-      return false;
-    }
-    workdirLog.warn('workdir preflight blocked', {
-      ...diagnosticContext, code: workdirDiagnosticErrorCode(error), reportedReason: 'not-exist',
-      recoveryEligible: (error as NodeJS.ErrnoException).code === 'ENOENT' || unavailable,
-      managedWorktree: getManagedWorktreeBasePath(path.resolve(workingDir).replace(/\\/g, '/')) !== null,
-      similarPathFound: !!similar, elapsedMs: Date.now() - startedAt,
-    });
-    emitWorkDirMissingError(sessionId, workingDir, source, 'not-exist', similar);
-    return false;
-  }
-}
-
+const checkWorkDirExists = createWorkingDirectoryPreflight({
+  workingDirectoryRecovery,
+  statWorkingDirectory,
+  readBoundWorkingDir: async (sessionId) => {
+    const liveWorkingDir = getMakerIfReady()?.getSession(sessionId)?.workDir || null;
+    const persistedWorkingDir = await readSessionWorkingDirFromDb(sessionId).catch(() => null);
+    return [liveWorkingDir, persistedWorkingDir];
+  },
+  getUserDataPath: () => app.getPath('userData'),
+  isCindyMakeWorktreePath: isCindyMakeManagedWorktreePath,
+  assertCindyMakeWorkspace,
+  getManagedWorktreeBasePath,
+  getManagedWorktreeReadinessForSession,
+  findSimilarDirOnDisk,
+  listActiveSessions: () => getMaker().listActiveSessions(),
+  emitWorkDirMissingError,
+  workdirLog,
+  log,
+});
 /**
  * ENOENT 兜底:扫一下 parent 目录,找一个 trim/大小写 后等于目标 basename 的真实条目。
  * 命中的最典型场景是 macOS Finder 里目录名末尾带了不可见空格,而 sessions.ts 写库时

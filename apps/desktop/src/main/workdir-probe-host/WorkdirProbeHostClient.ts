@@ -27,7 +27,7 @@ export interface WorkdirProbeChildLike {
 }
 
 export interface WorkdirProbeLoggerLike {
-  info?(...args: unknown[]): void;
+  debug?(...args: unknown[]): void;
   warn(...args: unknown[]): void;
 }
 
@@ -206,7 +206,6 @@ export class WorkdirProbeHostClient {
     const child = this.deps.fork();
     const worker: ProbeWorker = { child, id: this.nextWorkerId++ };
     this.workers.push(worker);
-    this.deps.log.info?.('workdir probe worker created', { workerId: worker.id, ...this.poolDiagnostics() });
     child.on('message', (message) => {
       this.handleMessage(worker, message);
     });
@@ -276,12 +275,12 @@ export class WorkdirProbeHostClient {
     if (entry.probeTimer) clearTimeout(entry.probeTimer);
     worker.active = undefined;
     if (!message.result.ok) {
-      this.deps.log.warn('workdir probe filesystem result', {
+      this.deps.log.debug?.('workdir probe filesystem result', {
         ...this.probeDiagnostics(entry), code: workdirDiagnosticErrorCode(message.result),
         reason: 'filesystem-error',
       });
     } else if (entry.kind === 'probe' && !message.result.isDirectory) {
-      this.deps.log.warn('workdir probe filesystem result', {
+      this.deps.log.debug?.('workdir probe filesystem result', {
         ...this.probeDiagnostics(entry), reason: 'not-directory',
       });
     }
@@ -297,8 +296,9 @@ export class WorkdirProbeHostClient {
     worker.active = undefined;
     if (entry?.probeTimer) clearTimeout(entry.probeTimer);
     if (entry) this.rejectProbe(entry, error, reason);
-    this.deps.log.warn('workdir probe worker termination requested', {
-      workerId: worker.id, requestId: worker.lastRequestId, reason, ...this.poolDiagnostics(),
+    this.deps.log.debug?.('workdir probe worker termination requested', {
+      workerId: worker.id, requestId: worker.lastRequestId, reason,
+      ...this.poolDiagnostics(),
     });
     try {
       if (!worker.child.kill()) {
@@ -325,7 +325,7 @@ export class WorkdirProbeHostClient {
     if (entry) this.rejectProbe(entry,
       new WorkdirProbeClientError('WORKDIR_PROBE_UNAVAILABLE', 'probe host exited'), 'host-exited',
     );
-    this.deps.log.info?.('workdir probe worker exited', {
+    this.deps.log.debug?.('workdir probe worker exited', {
       workerId: worker.id, requestId: worker.lastRequestId, exitCode: code,
       terminationRequested: worker.terminating === true,
       terminationWaitMs: worker.terminationRequestedAt === undefined ? null : Date.now() - worker.terminationRequestedAt,
@@ -360,7 +360,8 @@ export class WorkdirProbeHostClient {
   }
 
   private rejectProbe(entry: ProbeEntry, error: WorkdirProbeClientError, reason: string, cause?: unknown): void {
-    this.deps.log.warn('workdir probe failed', {
+    const report = error.code === 'WORKDIR_PROBE_TIMEOUT' ? this.deps.log.debug : this.deps.log.warn;
+    report?.('workdir probe failed', {
       ...this.probeDiagnostics(entry), reason, code: workdirDiagnosticErrorCode(error),
       ...(cause === undefined ? {} : { causeCode: workdirDiagnosticErrorCode(cause) }),
     });

@@ -10,6 +10,37 @@ afterEach(async () => {
 });
 
 describe('working directory conversation recovery', () => {
+  it('accepts a later preflight stat after deferring bootstrap observation', async () => {
+    const io = {
+      stat: vi.fn(async () => ({ isDirectory: () => true, dev: 7 })),
+      mkdir: vi.fn(),
+    };
+    const recovery = createWorkingDirectoryRecovery(io);
+    recovery.deferObservationUntilNextProbe('s', '/repo');
+    await recovery.observe('s', '/repo');
+    expect(io.stat).not.toHaveBeenCalled();
+    await recovery.observe('s', '/repo', { isDirectory: () => true, dev: 7 });
+    await recovery.observe('s', '/repo');
+    expect(io.stat).not.toHaveBeenCalled();
+  });
+
+  it.each(['discard', 'clear', 'move', 'other-session'] as const)(
+    'does not leak deferred observation across %s',
+    async (change) => {
+      const io = {
+        stat: vi.fn(async () => ({ isDirectory: () => true, dev: 7 })),
+        mkdir: vi.fn(),
+      };
+      const recovery = createWorkingDirectoryRecovery(io);
+      recovery.deferObservationUntilNextProbe('s', '/repo');
+      if (change === 'discard') recovery.discard('s');
+      if (change === 'clear') recovery.clear();
+      const dir = change === 'move' ? '/new-project' : '/repo';
+      await recovery.observe(change === 'other-session' ? 'other' : 's', dir);
+      expect(io.stat).toHaveBeenCalledExactlyOnceWith(dir);
+    },
+  );
+
   it.each(['EACCES', 'EIO'])('does not abandon a saved recovery workspace when lookup fails with %s', async (code) => {
     const io = {
       stat: vi.fn(async () => ({ isDirectory: () => true })),

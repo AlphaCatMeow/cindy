@@ -35,7 +35,7 @@ export function createWorkingDirectoryRecovery(io: {
   requiredRoot?(dir: string): string | undefined;
   findFallback?(sessionId: string, workingDir: string): Promise<string | undefined>;
 } = fsp, allocateFallback?: (sessionId: string, workingDir: string, mode: 'ordinary' | 'unrestored-worktree') => Promise<string>, log?: WorkdirDiagnosticLogger) {
-  const pending = new Map<string, { workingDir: string; note: string | null; device?: number; fallback?: string }>();
+  const pending = new Map<string, { workingDir: string; note: string | null; device?: number; fallback?: string; observationDeferred?: boolean }>();
   function entryFor(sessionId: string, dir: string) {
     const entry = pending.get(sessionId);
     if (entry && entry.workingDir !== path.resolve(dir) && entry.fallback !== path.resolve(dir)) {
@@ -106,12 +106,24 @@ export function createWorkingDirectoryRecovery(io: {
     }
   }
   return {
-    async observe(sessionId: string, workingDir: string): Promise<void> {
+    // The send preflight already spent its deadline. Bootstrap must not probe
+    // again just to collect device metadata. A later successful preflight can
+    // supply its stat; this flag never bypasses the next send's existence check.
+    deferObservationUntilNextProbe(sessionId: string, workingDir: string): void {
+      const entry = entryFor(sessionId, workingDir) ?? { workingDir: path.resolve(workingDir), note: null };
+      pending.set(sessionId, { ...entry, observationDeferred: true });
+    },
+    async observe(
+      sessionId: string,
+      workingDir: string,
+      observedStat?: { isDirectory(): boolean; dev?: number },
+    ): Promise<void> {
       const existing = entryFor(sessionId, workingDir);
       if (existing?.device !== undefined || existing?.fallback) return;
+      if (existing?.observationDeferred && !observedStat) return;
       const entry = existing ?? { workingDir: path.resolve(workingDir), note: null };
       pending.set(sessionId, entry);
-      const stat = await io.stat(workingDir);
+      const stat = observedStat ?? await io.stat(workingDir);
       // Do not revive a record cleared while observing the filesystem.
       if (pending.get(sessionId) !== entry) return;
       pending.set(sessionId, { workingDir: path.resolve(workingDir), note: existing?.note ?? null, device: stat.dev });
