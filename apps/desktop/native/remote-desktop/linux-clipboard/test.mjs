@@ -19,11 +19,37 @@ test('clipboard parser bounds formats and binary data without a compositor', () 
     fs.writeFileSync(
       target,
       `
+#include "wlr-data-control-unstable-v1.h"
+#include <assert.h>
+struct fake_offer { int destroyed; const struct zwlr_data_control_offer_v1_listener *listener; };
+static void destroy_offer(struct zwlr_data_control_offer_v1 *offer) {
+  struct fake_offer *fake=(struct fake_offer *)offer;
+  assert(!fake->destroyed); fake->destroyed=1;
+}
+static int listen_offer(struct zwlr_data_control_offer_v1 *offer, const struct zwlr_data_control_offer_v1_listener *listener, void *data) {
+  (void)data; ((struct fake_offer *)offer)->listener=listener; return 0;
+}
+#define zwlr_data_control_offer_v1_destroy destroy_offer
+#define zwlr_data_control_offer_v1_add_listener listen_offer
 #define main clipboard_main
 #include ${JSON.stringify(path.join(source, 'main.c'))}
 #undef main
 #include <assert.h>
 int main(void) {
+  for (int primary=0;primary<2;primary++) {
+    struct fake_offer fake={0};
+    struct zwlr_data_control_offer_v1 *o=(struct zwlr_data_control_offer_v1 *)&fake;
+    device_listener.data_offer(NULL,NULL,o);
+    assert(!fake.destroyed && fake.listener);
+    fake.listener->offer(NULL,o,"text/plain");
+    fake.listener->offer(NULL,o,"text/html");
+    assert(!fake.destroyed);
+    if (primary) device_listener.primary_selection(NULL,NULL,o);
+    else device_listener.selection(NULL,NULL,o);
+    assert(fake.destroyed);
+  }
+  device_listener.selection(NULL,NULL,NULL);
+  device_listener.primary_selection(NULL,NULL,NULL);
   unsigned char *bytes=NULL;size_t length=0;
   assert(!decode("YQ==",4,&bytes,&length) && length==1 && bytes[0]=='a');free(bytes);
   assert(decode("Y!==",4,&bytes,&length)==-1);

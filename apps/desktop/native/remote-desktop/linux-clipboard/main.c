@@ -64,17 +64,29 @@ static void replaced(void *d, struct zwlr_data_control_source_v1 *s) {
 }
 static const struct zwlr_data_control_source_v1_listener source_listener = {
     send_data, replaced};
+static void offered_mime(void *d, struct zwlr_data_control_offer_v1 *o,
+                         const char *mime) {
+  (void)d;
+  (void)o;
+  (void)mime;
+}
+static const struct zwlr_data_control_offer_v1_listener offer_listener = {
+    .offer = offered_mime};
 static void offer(void *d, struct zwlr_data_control_device_v1 *s,
                   struct zwlr_data_control_offer_v1 *o) {
   (void)d;
   (void)s;
-  zwlr_data_control_offer_v1_destroy(o);
+  /* MIME events precede selection; keep the proxy until that event arrives. */
+  zwlr_data_control_offer_v1_add_listener(o, &offer_listener, NULL);
 }
 static void selection(void *d, struct zwlr_data_control_device_v1 *s,
                       struct zwlr_data_control_offer_v1 *o) {
   (void)d;
   (void)s;
-  (void)o;
+  /* This write-only helper never receives selection contents. Both regular
+   * and primary selections can be discarded once their announcement ends. */
+  if (o)
+    zwlr_data_control_offer_v1_destroy(o);
 }
 static void finished(void *d, struct zwlr_data_control_device_v1 *s) {
   (void)d;

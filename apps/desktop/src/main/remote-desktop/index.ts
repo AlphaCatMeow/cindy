@@ -56,6 +56,7 @@ import { NativeDesktopCapture } from './nativeCapture';
 import { HyprlandCapture, supportsHyprlandCapture } from './hyprlandCapture';
 import { readLinuxDesktopInputSupport } from './linuxInput';
 import { LinuxDesktopAudio, supportsLinuxAudio } from './linuxAudio';
+import { isLinuxDesktopUnlocked } from './linuxSessionLock';
 import { supportsLinuxClipboard, stopLinuxClipboardWriter } from './linuxClipboardNative';
 import {
   supportsLinuxDisplay,
@@ -364,7 +365,13 @@ async function offer(
       throw new Error('DESKTOP_LEASE_EXPIRED');
     nativeSettings = settings;
     setVideoLease(lease.lease);
-    if (hyprland && settings?.audio) linuxAudio.start();
+    if (hyprland && settings?.audio) {
+      const unlocked = await isLinuxDesktopUnlocked();
+      if (!current() || host !== currentHost || currentHost.isDestroyed())
+        throw new Error('DESKTOP_LEASE_EXPIRED');
+      if (unlocked) linuxAudio.start();
+      else linuxAudio.stop();
+    }
     videoAttempt = attemptId;
     const result = await requestHost(
       {
@@ -820,6 +827,7 @@ export function registerRemoteDesktopIpc(
   const sessionChanged = () => {
     nativeCapture.stop(); // do not retain pixels from the previous OS session state
     hyprlandCapture.stop();
+    linuxAudio.stop(); // Clear buffered PCM as well as pixels across lock transitions.
     if (remoteDesktop.state?.controlling) {
       try {
         input.input([{ kind: 'release' }]);
@@ -855,7 +863,7 @@ export function registerRemoteDesktopIpc(
     if (generation !== offerGeneration || !remoteDesktop.hasLease(lease)) return null;
     return jpeg;
   });
-  ipcMain.handle(DESKTOP_LOCAL.NATIVE_AUDIO, (event, lease: unknown) => {
+  ipcMain.handle(DESKTOP_LOCAL.NATIVE_AUDIO, async (event, lease: unknown) => {
     captureWindow.assertSender(event);
     if (
       event.sender !== host ||
@@ -867,6 +875,15 @@ export function registerRemoteDesktopIpc(
     )
       throwIpcError('PERMISSION_DENIED', 'Invalid desktop audio lease');
     try {
+      const generation = offerGeneration;
+      const unlocked = await isLinuxDesktopUnlocked();
+      // A late check must not read or stop a replacement capture's audio.
+      if (generation !== offerGeneration || lease !== videoLease || !remoteDesktop.hasLease(lease))
+        throw new Error('DESKTOP_LEASE_EXPIRED');
+      if (!unlocked) {
+        linuxAudio.stop();
+        throw new Error('DESKTOP_LOCKED');
+      }
       return linuxAudio.read();
     } catch {
       throwIpcError('PERMISSION_DENIED', 'Desktop audio unavailable');

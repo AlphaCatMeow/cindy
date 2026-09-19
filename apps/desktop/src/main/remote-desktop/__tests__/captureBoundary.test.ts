@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   hyprland: false,
   linuxInput: false,
   linuxAudio: false,
+  unlocked: vi.fn(async () => true),
+  powerHandlers: new Map<string, () => void>(),
   audioRead: vi.fn(() => new Uint8Array(8)),
   audioStart: vi.fn(),
   audioStop: vi.fn(),
@@ -62,6 +64,7 @@ vi.mock('../linuxDesktop', () => ({
   linuxDisplay: () => ({ id: 'hyprland:eDP-2', name: 'eDP-2', width: 1600, height: 1000 }),
 }));
 vi.mock('../linuxCapture', () => ({ readLinuxCursorSupport: async () => false }));
+vi.mock('../linuxSessionLock', () => ({ isLinuxDesktopUnlocked: h.unlocked }));
 vi.mock('../linuxAudio', () => ({
   supportsLinuxAudio: () => h.linuxAudio,
   LinuxDesktopAudio: class {
@@ -94,7 +97,7 @@ vi.mock('../viewerDisplay', () => ({
 }));
 vi.mock('electron', () => ({
   app: { on: vi.fn() },
-  powerMonitor: { on: vi.fn() },
+  powerMonitor: { on: (name: string, fn: () => void) => h.powerHandlers.set(name, fn) },
   shell: {},
   nativeImage: {},
   screen: {
@@ -248,6 +251,7 @@ beforeEach(() => {
   h.hyprland = false;
   h.linuxInput = false;
   h.linuxAudio = false;
+  h.unlocked.mockReset().mockResolvedValue(true);
   h.audioRead.mockClear();
   h.audioStart.mockClear();
   h.audioStop.mockClear();
@@ -950,16 +954,69 @@ it('binds Linux audio to the exact capture window, opted-in video lease and stop
   expect(command.nativeAudio).toBe(true);
   expect(h.audioStart).toHaveBeenCalledOnce();
   const read = h.handlers.get(DESKTOP_LOCAL.NATIVE_AUDIO);
-  expect(read(event(), 'lease')).toHaveLength(8);
-  expect(() => read(event({ mainFrame: {} }), 'lease')).toThrow('PERMISSION_DENIED');
-  expect(() => read(event(), 'old-lease')).toThrow('PERMISSION_DENIED');
+  await expect(read(event(), 'lease')).resolves.toHaveLength(8);
+  h.unlocked.mockResolvedValue(false);
+  h.audioStop.mockClear();
+  await expect(read(event(), 'lease')).rejects.toThrow('PERMISSION_DENIED');
+  expect(h.audioStop).toHaveBeenCalledOnce();
+  await expect(read(event({ mainFrame: {} }), 'lease')).rejects.toThrow('PERMISSION_DENIED');
+  await expect(read(event(), 'old-lease')).rejects.toThrow('PERMISSION_DENIED');
   h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
   await result;
   const owner = h.owner;
   h.deps.stopVideo();
   expect(h.audioStop).toHaveBeenCalled();
-  expect(() => read(event(owner), 'lease')).toThrow('PERMISSION_DENIED');
+  await expect(read(event(owner), 'lease')).rejects.toThrow('PERMISSION_DENIED');
   expect(h.audioRead).toHaveBeenCalledOnce();
+});
+
+it('does not start Linux audio while locked or unknown, and denies samples after locking', async () => {
+  h.wayland = h.hyprland = h.linuxAudio = true;
+  h.unlocked.mockResolvedValue(false);
+  const result = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp', {
+    audio: true,
+  });
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  expect(h.audioStart).not.toHaveBeenCalled();
+  const command = h.owner.send.mock.calls.at(-1)[1];
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
+  await result;
+  const read = h.handlers.get(DESKTOP_LOCAL.NATIVE_AUDIO);
+  await expect(read(event(), 'lease')).rejects.toThrow('PERMISSION_DENIED');
+  expect(h.audioRead).not.toHaveBeenCalled();
+  h.audioStop.mockClear();
+  h.powerHandlers.get('lock-screen')!();
+  expect(h.audioStop).toHaveBeenCalledOnce();
+  h.powerHandlers.get('unlock-screen')!();
+  expect(h.audioStop).toHaveBeenCalledTimes(2);
+  expect(h.audioStart).not.toHaveBeenCalled();
+});
+
+it('does not read or stop replacement Linux audio after a delayed lock check', async () => {
+  h.wayland = h.hyprland = h.linuxAudio = true;
+  const result = h.deps.offer({ lease: 'lease', display: { id: 'wayland-portal' } }, 'sdp', {
+    audio: true,
+  });
+  h.handlers.get(DESKTOP_LOCAL.REGISTER)(event());
+  await flush();
+  const command = h.owner.send.mock.calls.at(-1)[1];
+  h.handlers.get(DESKTOP_LOCAL.REPLY)(event(), command.id, 'answer');
+  await result;
+  let resolve!: (value: boolean) => void;
+  h.unlocked.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((done) => {
+        resolve = done;
+      }),
+  );
+  const pending = h.handlers.get(DESKTOP_LOCAL.NATIVE_AUDIO)(event(), 'lease');
+  h.deps.stopVideo();
+  h.audioStop.mockClear();
+  resolve(false);
+  await expect(pending).rejects.toThrow('PERMISSION_DENIED');
+  expect(h.audioStop).not.toHaveBeenCalled();
+  expect(h.audioRead).not.toHaveBeenCalled();
 });
 
 it.each([true, false])(
