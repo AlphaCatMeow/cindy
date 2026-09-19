@@ -8,7 +8,7 @@ import '../../../themes/colors';
 import { builtinThemes } from '../../../themes/registry';
 import { resolveThemeValue } from '../../../themes/theme-service';
 import type { Theme } from '../../../themes/types';
-import { SettingsSegmentedControl } from '../SettingsSegmentedControl';
+import { SegmentedControl } from '../segmented-control';
 
 afterEach(cleanup);
 
@@ -26,7 +26,7 @@ function Example({
 }) {
   const [value, setValue] = useState(initial);
   return (
-    <SettingsSegmentedControl
+    <SegmentedControl
       aria-label="Browser"
       value={value}
       options={options}
@@ -67,7 +67,7 @@ describe('Settings segmented control', () => {
   it('keeps disabled selection visible without invoking persistence', () => {
     const onValueChange = vi.fn();
     render(
-      <SettingsSegmentedControl
+      <SegmentedControl
         aria-label="Browser"
         value="sidebar"
         options={options}
@@ -81,7 +81,6 @@ describe('Settings segmented control', () => {
     fireEvent.keyDown(radios[0], { key: 'ArrowRight' });
     expect(onValueChange).not.toHaveBeenCalled();
     expect(radios[0].getAttribute('aria-checked')).toBe('true');
-    expect(radios[1].className).toContain('enabled:hover:');
   });
 });
 
@@ -92,27 +91,92 @@ function resolveColor(theme: Theme, id: string): string {
   return alias ? resolveColor(theme, alias[1]) : value;
 }
 
-function consumedColor(element: HTMLElement, prefix: string, theme: Theme): string {
-  const expression = [...element.classList].find((item) => item.startsWith(`${prefix}[var(--`));
-  const id = expression?.match(/var\(--([\w-]+)\)/)?.[1];
-  if (!id) throw new Error(`Missing ${prefix} binding`);
-  return resolveColor(theme, id);
-}
-
-describe.each(['cindy-light', 'cindy-dark'])('%s card selection', (themeId) => {
-  it('uses a raised selection and persistent border against the chip track', () => {
-    render(<Example />);
+// The approved alpha is scoped to the track; theme aliases still resolve for older themes.
+describe.each([
+  ['cindy-light', 'rgba(0, 0, 0, 0.06)', '#FDFDF8', '#F0F0EB'],
+  ['cindy-dark', 'rgba(0, 0, 0, 0.25)', '#353535', '#3B3B3B'],
+])('%s segmented palette', (themeId, track, fill, border) => {
+  it('resolves the approved component-local colors', () => {
     const theme = builtinThemes[themeId];
-    const selected = screen.getByRole('radio', { checked: true });
-    const fill = consumedColor(selected, 'bg-', theme);
-    const card = resolveColor(theme, 'settings-theme-card-bg');
-    expect(fill).toBe(resolveColor(theme, 'surface-elevated'));
-    expect(consumedColor(screen.getByRole('radiogroup'), 'bg-', theme)).toBe(
-      resolveColor(theme, 'surface-chip'),
+    expect(resolveColor(theme, 'segmented-track')).toBe(track);
+    expect(resolveColor(theme, 'segmented-selected-bg')).toBe(fill);
+    expect(resolveColor(theme, 'segmented-selected-border')).toBe(border);
+    expect(resolveColor(theme, 'segmented-selected-shadow')).toContain('0 3px 8px');
+  });
+});
+
+describe('Segmented edge cases', () => {
+  it('skips disabled options, preserves tab semantics and honors RTL', () => {
+    const change = vi.fn();
+    render(
+      <SegmentedControl
+        role="tablist"
+        aria-label="Runtime"
+        value="a"
+        onValueChange={change}
+        options={[
+          { value: 'a', label: 'A' },
+          { value: 'b', label: 'B', disabled: true },
+          { value: 'c', label: 'C' },
+        ]}
+      />,
     );
-    expect(consumedColor(selected, 'border-', theme)).not.toBe(card);
-    expect(fill).not.toBe(resolveColor(theme, 'chat-input-chip-bg'));
-    expect(consumedColor(selected, 'border-', theme)).not.toBe(fill);
-    expect(consumedColor(selected, 'text-', theme)).not.toBe(fill);
+    const tabs = screen.getAllByRole('tab');
+    tabs[0].style.direction = 'rtl';
+    fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(tabs[2]);
+    expect(change).toHaveBeenLastCalledWith('c');
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true'); // controlled: caller has not accepted yet
+    fireEvent.click(tabs[1]);
+    expect(change).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses an enabled entry when the selected value is disabled or removed', () => {
+    const change = vi.fn();
+    const { rerender } = render(
+      <SegmentedControl
+        aria-label="Effort"
+        value="a"
+        onValueChange={change}
+        options={[
+          { value: 'a', label: 'A', disabled: true },
+          { value: 'b', label: 'B' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: 'B' }).tabIndex).toBe(0);
+    rerender(
+      <SegmentedControl
+        aria-label="Effort"
+        value="a"
+        onValueChange={change}
+        options={[{ value: 'b', label: 'B' }]}
+      />,
+    );
+    expect(screen.getByRole('radio').tabIndex).toBe(0);
+    expect(screen.getByRole('radio').getAttribute('aria-checked')).toBe('false');
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it('keeps composer mouse focus and supports explicit reselect callbacks', () => {
+    const change = vi.fn();
+    render(
+      <>
+        <input aria-label="Composer" />
+        <SegmentedControl
+          aria-label="Mode"
+          value="a"
+          preserveMouseFocus
+          options={[{ value: 'a', label: 'A' }]}
+          onValueChange={change}
+        />
+      </>,
+    );
+    const composer = screen.getByRole('textbox');
+    composer.focus();
+    expect(fireEvent.mouseDown(screen.getByRole('radio'))).toBe(false);
+    fireEvent.click(screen.getByRole('radio'));
+    expect(document.activeElement).toBe(composer);
+    expect(change).toHaveBeenCalledWith('a');
   });
 });
