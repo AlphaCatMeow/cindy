@@ -1477,8 +1477,13 @@ export function mountRemoteDesktopViewer(root, postMessage, config) {
     release();
     closeRtc();
     post({ type: "fallback", attemptId: failedAttempt, reason });
-    if (canRetry && epoch && retries < net.retryMs.length) {
-      const delay = net.retryMs[retries++];
+    // Local consent is bounded by the host's picker lifetime. Reuse this retry
+    // timer without consuming the finite network-recovery attempts.
+    const capturePending = reason === "capture-pending";
+    if (canRetry && epoch && (capturePending || retries < net.retryMs.length)) {
+      const delay = capturePending
+        ? net.retryMs[net.retryMs.length - 1]
+        : net.retryMs[retries++];
       retryTimer = setTimeout(() => {
         retryTimer = null;
         if (epoch) connect();
@@ -2047,7 +2052,10 @@ export function mountRemoteDesktopViewer(root, postMessage, config) {
         break;
       case "fallback":
         if (message.epoch === epoch && message.attemptId === attemptId)
-          failRtc("host", message.retry !== false);
+          failRtc(
+            message.capturePending === true ? "capture-pending" : "host",
+            message.retry !== false,
+          );
         break;
       case "frame": {
         if ("cursor" in message) receiveCursor(message.cursor);
