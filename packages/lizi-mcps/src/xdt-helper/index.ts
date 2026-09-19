@@ -158,6 +158,7 @@ export {
 } from './submit_github_issue.js';
 export {
   registerStartSkillLearningTool,
+  type AuthorizedSkillLearningContext,
   type AuthorizeSkillLearningCallback,
   type StartSkillLearningCallback,
   type StartSkillLearningParams,

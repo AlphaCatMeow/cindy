@@ -398,17 +398,21 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
             message: 'Cindy Learn is not ready yet.',
           };
         }
-        if (!deps.isCurrentLocalSessionInstance?.(
-          request.callerSessionId,
-          context.sessionInstanceId,
-        )) {
+        const sessionInstanceId = context.sessionInstanceId;
+        if (
+          !sessionInstanceId
+          || !deps.isCurrentLocalSessionInstance?.(request.callerSessionId, sessionInstanceId)
+        ) {
           return {
             ok: false,
             errorCode: 'USER_REQUEST_REQUIRED',
             message: 'Cindy Learn is not authorized for this task instance.',
           };
         }
-        return consumeLearnInvocationGrant(request, context.sessionInstanceId);
+        const authorization = await consumeLearnInvocationGrant(request, sessionInstanceId);
+        return authorization.ok
+          ? { ok: true, sessionInstanceId }
+          : authorization;
       },
       skillLearning: async ({
         callerSessionId,
@@ -416,7 +420,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
         sourceKind,
         hubSlug,
         hubCatalogScope,
-      }) => {
+      }, authorization) => {
         try {
           if (!isCindyLearnSkillEnabled()) {
             return {
@@ -431,6 +435,16 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
               ok: false,
               errorCode: 'HOST_NOT_READY',
               message: 'Cindy Learn is not ready yet.',
+            };
+          }
+          if (!deps.isCurrentLocalSessionInstance?.(
+            callerSessionId,
+            authorization.sessionInstanceId,
+          )) {
+            return {
+              ok: false,
+              errorCode: 'USER_REQUEST_REQUIRED',
+              message: 'Cindy Learn is not authorized for this task instance.',
             };
           }
           const { runId } = await controller.startLearn({

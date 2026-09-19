@@ -12,13 +12,19 @@ export interface StartSkillLearningParams {
   hubCatalogScope?: 'market' | 'team';
 }
 
+export interface AuthorizedSkillLearningContext {
+  /** Host-attested runtime identity; never sourced from model tool arguments. */
+  sessionInstanceId: string;
+}
+
 export type AuthorizeSkillLearningCallback = (
   params: StartSkillLearningParams,
   context: LiziMcpSessionContext,
-) => Promise<ControlResult<object, string>>;
+) => Promise<ControlResult<AuthorizedSkillLearningContext, string>>;
 
 export type StartSkillLearningCallback = (
   params: StartSkillLearningParams,
+  authorization: AuthorizedSkillLearningContext,
 ) => Promise<ControlResult<{ runId: string }, string>>;
 
 export function registerStartSkillLearningTool(
@@ -74,7 +80,9 @@ export function registerStartSkillLearningTool(
         return errorPayload(authorization.errorCode, authorization.message);
       }
 
-      const result = await deps.startSkillLearning(request);
+      const result = await deps.startSkillLearning(request, {
+        sessionInstanceId: authorization.sessionInstanceId,
+      });
       return result.ok
         ? okPayload({
             run_id: result.runId,
