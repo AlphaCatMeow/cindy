@@ -247,12 +247,39 @@ describe('registerSkillhubIpc usage handlers', () => {
       marketService: marketService as never,
       publishService: { publish, cancel } as never,
     });
-    const event = { sender: { id: 12 } };
+    scanAllSkills.mockResolvedValueOnce({
+      skills: [{
+        id: 'builtin:cindy-skill-creator',
+        kind: 'skill',
+        name: 'cindy-skill-creator',
+        absolutePath: builtInRoot,
+        discoveredPath: builtInRoot,
+        scope: 'global',
+        builtIn: true,
+      }],
+      sources: [],
+    });
+    const event = { sender: { id: 12, on: vi.fn(), once: vi.fn() } };
+    await handlers.get('skillhub:scan')!(event, { projects: [] });
 
     await expect(handlers.get('skillhub:publish')!(event, {
       absolutePath: builtInFile,
     })).resolves.toMatchObject({ success: false, message: expect.stringContaining('cannot be published') });
     expect(assertTrustedAppRendererEvent).toHaveBeenCalledWith(event);
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('rejects publishing a path absent from the sender latest scan', async () => {
+    const event = { sender: { id: 13, on: vi.fn(), once: vi.fn() } };
+
+    await expect(handlers.get('skillhub:publish')!(event, {
+      absolutePath: '/repo/.pi/skills/authorized/demo',
+      name: 'demo',
+      isFirstPublish: true,
+    })).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('Refresh'),
+    });
     expect(publish).not.toHaveBeenCalled();
   });
 
@@ -578,6 +605,11 @@ describe('registerSkillhubIpc usage handlers', () => {
 
   it.each(['unchanged', 'grant-wait', 'mutation-wait', 'boundary-pending'] as const)(
     'guards local rename at its original owner generation: %s', async (transition) => {
+      resolveExistingSkillPathForGrant.mockImplementation((candidate: string) => {
+        if (candidate.includes('/authorized/demo')) return '/physical/demo';
+        if (candidate === '/physical/renamed') return '/physical/renamed';
+        return null;
+      });
       const sender = { id: 71, on: vi.fn(), once: vi.fn() };
       scanAllSkills.mockResolvedValueOnce({ skills: [{
         absolutePath: '/physical/demo', discoveredPath: '/repo/.pi/skills/authorized/demo',
@@ -606,6 +638,45 @@ describe('registerSkillhubIpc usage handlers', () => {
       }
     },
   );
+
+  it('carries a scanned user Skill grant across rename into immediate publish', async () => {
+    resolveExistingSkillPathForGrant.mockImplementation((candidate: string) => {
+      if (candidate.includes('/authorized/demo')) return '/physical/demo';
+      if (candidate === '/physical/renamed') return '/physical/renamed';
+      return null;
+    });
+    isExistingSkillPathGranted.mockImplementation((candidate: string, roots: Set<string>) => (
+      (candidate.includes('/authorized/demo') && roots.has('/physical/demo'))
+      || (candidate === '/physical/renamed' && roots.has('/physical/renamed'))
+    ));
+    scanAllSkills.mockResolvedValueOnce({ skills: [{
+      absolutePath: '/physical/demo',
+      discoveredPath: '/repo/.pi/skills/authorized/demo',
+      scope: 'project',
+      projectRoot: '/repo',
+    }], sources: [] });
+    renameLocalSkill.mockResolvedValueOnce({
+      success: true,
+      newAbsolutePath: '/physical/renamed',
+    });
+    publish.mockResolvedValueOnce({ success: true });
+    const sender = { id: 72, on: vi.fn(), once: vi.fn() };
+
+    await handlers.get('skillhub:scan')!({ sender }, { projects: [] });
+    await expect(handlers.get('skillhub:rename-local')!({ sender }, {
+      absolutePath: '/repo/.pi/skills/authorized/demo',
+      newName: 'renamed',
+    })).resolves.toEqual({ success: true, newAbsolutePath: '/physical/renamed' });
+    const publishParams = {
+      absolutePath: '/physical/renamed',
+      name: 'renamed',
+      isFirstPublish: true,
+    };
+
+    await expect(handlers.get('skillhub:publish')!({ sender }, publishParams))
+      .resolves.toEqual({ success: true });
+    expect(publish).toHaveBeenCalledWith(publishParams);
+  });
 
   it('revokes project scan grants after the last active project session disappears', async () => {
     const sender = { id: 12, on: vi.fn(), once: vi.fn() };

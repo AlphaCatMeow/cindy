@@ -639,7 +639,18 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
       }
       if (!canMutate()) return { success: false, error: 'Skill mutation context changed' };
       const result = await renameLocalSkill(params, canMutate);
-      if (result.success) broadcastLocalChange();
+      if (result.success) {
+        // The publish dialog intentionally continues with the renamed path.
+        // Carry forward the exact non-built-in grant that authorized the
+        // rename so publish can remain fail-closed without forcing a rescan
+        // between the two operations.
+        const renamedRoot = resolveExistingSkillPathForGrant(result.newAbsolutePath);
+        if (!renamedRoot) {
+          return { success: false, error: 'Skill was renamed; refresh the Skill list and retry' };
+        }
+        grant.root = renamedRoot;
+        broadcastLocalChange();
+      }
       return result;
     },
   );
@@ -997,8 +1008,23 @@ export function registerSkillhubIpc(options: RegisterSkillhubIpcOptions): void {
     'skillhub:publish',
     async (event, params: PublishParams) => {
       const grant = await findScannedSkillGrant(event, params.absolutePath);
-      if (grant?.builtIn || isBuiltInSkillPath(params.absolutePath)) {
-        return { success: false as const, errorCode: 'INTERNAL' as const, message: 'Cindy built-in Skills cannot be published' };
+      if (!grant) {
+        const message = 'Refresh the Skill list before publishing';
+        return {
+          success: false as const,
+          errorCode: 'INTERNAL' as const,
+          error: message,
+          message,
+        };
+      }
+      if (grant.builtIn || isBuiltInSkillPath(params.absolutePath)) {
+        const message = 'Cindy built-in Skills cannot be published';
+        return {
+          success: false as const,
+          errorCode: 'INTERNAL' as const,
+          error: message,
+          message,
+        };
       }
       return publishService.publish(params);
     },
