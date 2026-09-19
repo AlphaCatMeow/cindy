@@ -191,7 +191,8 @@ static SP<ITexture> artwork(const unsigned char *bytes, size_t size) {
   SP<ITexture> texture;
   if (cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS) {
     texture = g_pHyprRenderer->createTexture(surface);
-    texture->m_imageDescription = NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION;
+    if (texture)
+      texture->m_imageDescription = NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION;
   }
   cairo_surface_destroy(surface);
   return texture;
@@ -407,17 +408,20 @@ static bool copy(CHyprOpenGLImpl *self, const CBox &box) {
       auto texture = g_pHyprRenderer->renderText(label, foreground(), 18, false, "", 510);
       // Cairo text is sRGB. The final-copy renderer needs an explicit image
       // description, unlike the ordinary surface pass's implicit fallback.
-      texture->m_imageDescription = NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION;
+      if (texture)
+        texture->m_imageDescription = NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION;
       texts.push_back(texture);
     }
   }
   bool dialog = gate.phase == PrivacyGate::Confirming;
   const auto scale = dialogScale(monitor);
   double left = (full.w / scale - 560) / 2, top = (full.h / scale - 220) / 2;
-  auto text = [&](size_t index, double x, double y) {
+  auto text = [&](size_t index, double x, double y, bool centered = false) {
     if (index >= texts.size() || !texts[index])
       return;
     auto size = texts[index]->m_size;
+    if (centered)
+      x -= size.x / 2;
     self->renderTexture(
         texts[index],
         CBox{x * scale, y * scale, size.x * scale, size.y * scale}, {});
@@ -446,8 +450,8 @@ static bool copy(CHyprOpenGLImpl *self, const CBox &box) {
       self->renderTexture(heroTexture, CBox{heroX * scale, heroY * scale, heroWidth * scale, heroHeight * scale}, {});
     if (wordmarkTexture)
       self->renderTexture(wordmarkTexture, CBox{(portrait ? (w - markWidth) / 2 : copyX) * scale, copyY * scale, markWidth * scale, markHeight * scale}, {});
-    text(0, portrait ? (w - texts[0]->m_size.x) / 2 : copyX, copyY + markHeight + 32);
-    text(1, portrait ? (w - texts[1]->m_size.x) / 2 : copyX, copyY + markHeight + 100);
+    text(0, portrait ? w / 2 : copyX, copyY + markHeight + 32, portrait);
+    text(1, portrait ? w / 2 : copyX, copyY + markHeight + 100, portrait);
   } else {
     text(2, left + 24, top + 30);
     text(3, left + 24, top + 78);
