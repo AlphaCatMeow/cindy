@@ -187,6 +187,10 @@ Cindy 在 X 上发出的那条公开回复。zh-CN 取「回帖」以强调它�
 
 登录邮箱发码前的 CAPTCHA(Cloudflare Turnstile)挑战。中文用「安全验证」(腾讯/阿里系产品的通行叫法,2026-08-19 用户反馈弃用「人机验证」;与「验证码」= verification code 消歧——后者已被 login.codePlaceholder 占用指 6 位数字码);en 用 Security check 而非品牌词 Turnstile 或缩写 CAPTCHA。消费处:login.captcha.* 与 login.errors.CAPTCHA_*(desktop 五语 + mobile 影子 catalog)。
 
+### Chat workspace
+
+用户于 2026-09-18 明确指定的存储设置名称，表示未绑定项目的新任务工作目录的分配位置。单个任务的 working directory 仍称工作目录，不改其术语。
+
 ### China
 
 模型目录中由服务端显式 group:"china" 标记的来源分组。它描述模型或供应商来自中国，不表示相对于当前用户或发行区域的‘国内’；英文词条保持自然大小写 China，设置页分组头由统一 uppercase 样式显示为 CHINA。
