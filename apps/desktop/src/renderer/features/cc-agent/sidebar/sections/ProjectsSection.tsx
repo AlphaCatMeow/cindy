@@ -1138,11 +1138,12 @@ export function ProjectsSection({
                         ) : (
                           <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
                         )}
-                        {/* 段内任一 running → 设备图标呼吸橙(rail 段钮同款灯语)。 */}
+                        {/* 设备段收起时才用图标呼吸提示内部运行态,展开后由下层内容提示。 */}
                         <span
                           className={cn(
                             'inline-flex shrink-0',
-                            sectionLamp.running &&
+                            sectionCollapsed &&
+                              sectionLamp.running &&
                               'text-[var(--status-bar-accent)] session-status-breathing',
                           )}
                         >

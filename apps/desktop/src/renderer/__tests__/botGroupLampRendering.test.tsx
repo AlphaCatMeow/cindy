@@ -218,7 +218,7 @@ describe('Bot groups across devices', () => {
     expectLamp(deviceHeader('Device A'), null);
     const a = deviceHeader('Device A').parentElement!;
     const b = deviceHeader('Device B').parentElement!;
-    expectLamp(deviceHeader('Device B'), phase);
+    expectLamp(deviceHeader('Device B'), phase === 'running' ? null : phase);
     expectLamp(botHeader(a), null);
     expectLamp(botHeader(b), phase);
     expect(within(a).queryByTestId('row-lit')).toBeNull();
@@ -230,6 +230,12 @@ describe('Bot groups across devices', () => {
     expect(p.onSessionClick).toHaveBeenCalledWith('lit');
     fireEvent.click(within(b).getByRole('button', { name: 'bots.sidebar.newTaskWith' }));
     expect(p.onOpenBot).toHaveBeenCalledWith('demo');
+    fireEvent.click(deviceHeader('Device B'));
+    expect(deviceHeader('Device B').getAttribute('aria-expanded')).toBe('false');
+    expectLamp(deviceHeader('Device B'), phase);
+    fireEvent.click(deviceHeader('Device B'));
+    expect(deviceHeader('Device B').getAttribute('aria-expanded')).toBe('true');
+    expectLamp(deviceHeader('Device B'), phase === 'running' ? null : phase);
   });
 
   it('keeps show-all state per device and stable across task reorder and Bot rename', () => {
