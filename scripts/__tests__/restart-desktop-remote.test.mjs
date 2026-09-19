@@ -601,6 +601,23 @@ test("desktop restart runner keeps the kill-before-deps order by default", () =>
 	]);
 });
 
+test("desktop restart reports each real step before running it and stops progress on failure", () => {
+	const events = [];
+	const run = (step) => {
+		events.push('run:' + step.progress);
+		if (step.progress === 'assets') throw new Error('missing runtime');
+	};
+	assert.throws(() => runDesktopRestart(
+		['--isolated=progress-test'], '/repo/cindy', run,
+		(step) => events.push('step:' + step),
+	), /missing runtime/);
+	assert.deepEqual(events, [
+		'step:stopping', 'run:stopping',
+		'step:dependencies', 'run:dependencies',
+		'step:assets', 'run:assets',
+	]);
+});
+
 test("desktop restart process-control phase does not initialize startup configuration", () => {
 	const processControlEnv = {};
 	assert.equal(

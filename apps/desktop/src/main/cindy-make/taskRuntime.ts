@@ -48,20 +48,36 @@ type SendTask = (
 ) => Promise<DesktopMakerSendResult>;
 let sendTask: SendTask | undefined;
 let readClearBoundary: ((sessionId: string) => number | null) | undefined;
+let isEditingBlocked: (sessionId: string) => boolean = () => false;
+
+/** Every sender, including a phone with stale UI, must respect the same workspace lease. */
+export function configureCindyMakeEditingGuard(probe: typeof isEditingBlocked): void {
+  isEditingBlocked = probe;
+}
 
 /** Dispatch a Main-created task without opting it into the personal-build lifecycle. */
-export async function dispatchCindyMakeMergeTask(
-  sessionId: string, message: string, createOpts: Record<string, unknown>,
-  isCurrent: () => boolean, clientId: string,
+export async function dispatchCindyMakeTask(
+  sessionId: string,
+  message: string,
+  createOpts: Record<string, unknown>,
+  isCurrent: () => boolean,
+  clientId: string,
 ): Promise<void> {
   if (!sendTask || !isCurrent()) throwIpcError('PRECONDITION_FAILED', 'Task runner is not ready');
   const expectedClearBoundaryMs = readClearBoundary?.(sessionId) ?? null;
   const sent = await sendTask(sessionId, message, createOpts, {
     expectedClearBoundaryMs,
-    persistUserMessage: { clientId, content: message, expectedClearBoundaryMs, shouldBroadcast: isCurrent },
+    persistUserMessage: {
+      clientId,
+      content: message,
+      expectedClearBoundaryMs,
+      shouldBroadcast: isCurrent,
+    },
   });
-  if (!sent.accepted) throwIpcError('PRECONDITION_FAILED', 'Could not start upstream merge task');
+  if (!sent.accepted) throwIpcError('PRECONDITION_FAILED', 'Could not start Cindy Make task');
 }
+
+export const dispatchCindyMakeMergeTask = dispatchCindyMakeTask;
 
 export function configureCindyMakeTaskSender(
   sender: SendTask,
@@ -148,6 +164,8 @@ export async function restoreCindyMakeTaskState(): Promise<void> {
 }
 
 export async function assertCindyMakeTaskReady(sessionId: string): Promise<void> {
+  if (isEditingBlocked(sessionId))
+    throwIpcError('PRECONDITION_FAILED', 'Stop Cindy Make testing or building before editing');
   const [card] = await getDbClient()
     .drizzle.select({ content: messages.content })
     .from(messages)
@@ -339,10 +357,12 @@ export async function startCindyMakeTask(raw: unknown, sender: number): Promise<
           throwIpcError('PRECONDITION_FAILED', 'Task preparation was cleared');
         const data = JSON.parse(previous.content).__cindyMakeCard?.data;
         if (
-          data?.report?.task?.originSessionId !== input.originSessionId ||
+          (input.originSessionId !== undefined &&
+            data?.report?.task?.originSessionId !== input.originSessionId) ||
           data?.request !== input.request
         )
           throwIpcError('INVALID_PARAMS', 'Task run does not match');
+        input.originSessionId = data.report.task?.originSessionId;
         sessionId = previous.sessionId;
         expectedClearBoundaryMs = previous.clearedAt;
         checkPreparationCurrent();

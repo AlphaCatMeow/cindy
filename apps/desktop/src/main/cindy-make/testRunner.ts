@@ -12,7 +12,7 @@ import {
   makeTaskWorktreePath,
   makeWorktreesRoot,
 } from './sourcePaths.js';
-import type { CindyMakeTestState } from '../../shared/cindyMakeSession.js';
+import type { CindyMakeTestState, CindyMakeTestStep } from '../../shared/cindyMakeSession.js';
 
 export type MakeTestError = NonNullable<CindyMakeTestState['error']>;
 export function makeTestError(code: MakeTestError): Error & { code: MakeTestError } {
@@ -43,6 +43,17 @@ const OS_ENV_KEYS = new Set([
   'lang',
   'lc_all',
   'lc_ctype',
+  // The child must reconnect to the user's desktop session on X11 and Wayland.
+  // Keep this explicit: XDT overrides, credentials and loader hooks stay excluded.
+  'display',
+  'wayland_display',
+  'xauthority',
+  'xdg_runtime_dir',
+  'xdg_session_type',
+  'xdg_current_desktop',
+  'xdg_session_desktop',
+  'desktop_session',
+  'dbus_session_bus_address',
   'pnpm_home',
   'corepack_home',
   'node_extra_ca_certs',
@@ -176,6 +187,7 @@ export function launchMakeTest(
   region: 'cn' | 'global',
   signal: AbortSignal,
   spawn: PtySpawnFn = defaultPtySpawn,
+  onStep?: (step: CindyMakeTestStep) => void,
 ): MakeTestProcess {
   signal.throwIfAborted();
   const sandbox =
@@ -217,6 +229,7 @@ export function launchMakeTest(
   let stopping = false;
   let pending = '';
   let verdict: Record<string, string> | undefined;
+  let lastStep: CindyMakeTestStep | undefined;
   const timeout = setTimeout(() => fail('timeout'), 25 * 60_000);
   const finish = () => {
     if (stopped) return;
@@ -266,6 +279,27 @@ export function launchMakeTest(
     pending = lines.pop() ?? '';
     for (const raw of lines) {
       const line = raw.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').trim();
+      if (!settled && !stopping) {
+        // Older checkouts have no step protocol. Read only fixed stage prefixes;
+        // arbitrary terminal output is never forwarded or persisted.
+        const step = /^DESKTOP_DEV_STEP=(stopping|dependencies|assets|launching)$/.exec(
+          line,
+        )?.[1] as CindyMakeTestStep | undefined;
+        const next =
+          step ??
+          (line.startsWith('[ensure-deps]')
+            ? 'dependencies'
+            : line.startsWith('[ensure-dev-runtime-assets]')
+              ? 'assets'
+              : line === '==> Starting desktop remote dev...' ||
+                  line === '==> Starting desktop local dev...'
+                ? 'launching'
+                : undefined);
+        if (next && next !== lastStep) {
+          lastStep = next;
+          onStep?.(next);
+        }
+      }
       if (line === 'DESKTOP_DEV_VERDICT=failed') {
         fail('launchFailed');
         return;

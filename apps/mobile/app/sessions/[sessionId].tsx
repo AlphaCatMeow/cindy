@@ -4,6 +4,8 @@ import { getActiveMobileSessionRealm } from '@/config/env';
 import { FailedScheduleNotice } from '@/session/FailedScheduleNotice';
 import { shouldShowFailedScheduleNotice, type FailedScheduleRunSnapshot } from '@cindy/maker-shared/schedule-model';
 import { useRemoteResourceSession } from '@/session/useRemoteResourceSession';
+import { useSessionResourceCards } from '@/session/useSessionResourceCards';
+import { SessionResourceCards } from '@/session/SessionResourceCards';
 import { mobileDebugLog } from '@/debug/mobileDebugLog';
 import { isInFlightDeviceLinkError } from '@cindy/device-link';
 import { takeRefinementContextTail, truncateRefinementReply } from '@cindy/voice-input-core';
@@ -2224,6 +2226,9 @@ export default function SessionScreen() {
       && contentRecoveryKey !== null && contentSyncedKey === contentRecoveryKey
       && !outboxRecoverySyncHeld && !loading);
   const lastAckKeyRef = useRef<string | null>(null);
+  const sessionResourceCards = useSessionResourceCards(
+    deviceId, deviceName, sessionId, currentSession?.source, remoteSessionRunning,
+  );
   // AppState 门槛:锁屏 / 切后台时导航焦点不变,useFocusEffect 的 cleanup 不会跑,
   // 驻留计时器可能在没有真实前台展示的情况下(甚至后台恢复补跑时)发出 explicit
   // 回执。把 AppState 作为回执 effect 的重算信号:离开 active 立刻取消未到期的
@@ -2399,7 +2404,7 @@ export default function SessionScreen() {
       setPendingPlanViewerState('half');
     }
   }, [activePendingKind, activePendingRequestId, sessionOperationLayout.composerSlot]);
-  const canUseComposer = sessionOperationLayout.canUseComposer;
+  const canUseComposer = sessionOperationLayout.canUseComposer && !sessionResourceCards.blocked;
   const canUseRemoteSessionControls = canUseComposer
     && !sessionSettingsLocked
     && !remoteRealtimeControlsUnavailable;
@@ -2412,7 +2417,9 @@ export default function SessionScreen() {
   );
   const composerDisabledReason = composerDisabledReasonKey
     ? t(composerDisabledReasonKey)
-    : sessionOperationLayout.composerDisabledReason;
+    : sessionOperationLayout.composerDisabledReason
+      ?? (sessionResourceCards.blocked
+        ? sessionResourceCards.blockedReason ?? t('shared.syncing') : null);
   // inline 队列操作可用性:旧队列弹层由 showQueue 整体隐藏(离线/被撤销、pending
   // interaction 等),inline 化后气泡必须留在消息流里,故改为保留渲染、按同一规则
   // 禁用操作(取消/编辑/插话/重试/恢复),禁用理由沿用 composerDisabledReason。
@@ -9640,7 +9647,8 @@ export default function SessionScreen() {
                   <Text style={styles.queueEditBarText}>{composerAgentAuthHint}</Text>
                 </View>
               ) : null}
-              <SessionComposerInput
+              <SessionResourceCards state={sessionResourceCards} />
+              {!sessionResourceCards.blocked ? <SessionComposerInput
                 promptRecommendation={promptRecommendation}
                 onDismissPromptRecommendation={dismissPromptRecommendation}
                 key={activeComposerDraftScopeKey}
@@ -9678,7 +9686,7 @@ export default function SessionScreen() {
                 onPasteImages={(uris) => void addPastedImageAttachments(uris)}
                 onDragActiveChange={handleComposerDragActiveChange}
                 renderControls={renderComposerControls}
-              />
+              /> : null}
             </>
         )}
           {shareSelectionActive ? (

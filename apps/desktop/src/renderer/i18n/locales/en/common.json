@@ -12968,6 +12968,13 @@
       }
     },
     "test": {
+      "resume": {
+        "title": "Continue testing",
+        "description": "Check the current changes to restore the test and personal build options.",
+        "action": "Check and continue",
+        "failed": "Could not start the checks. Please try again.",
+        "request": "Check the current changes, then restore the test and personal build options and wait for me to choose the next step."
+      },
       "title": "Changes Complete — Choose Next Step",
       "description": "Continue editing, try an isolated test build, or build your personal installer.",
       "readyHint": "Try the changes in the test window. Continue Editing closes it and restores input.",
@@ -12988,6 +12995,19 @@
         "launchFailed": "The test build could not start. Retry or return to editing.",
         "timeout": "The test build took too long to start. Retry the launch.",
         "interrupted": "The previous test was interrupted. Launch the isolated build again."
+      },
+      "retry": "Retry Launch",
+      "startingHint": "Editing is paused until startup finishes. Wait for the current step to complete.",
+      "currentStep": "Current step: {{step}}",
+      "failedStep": "Interrupted step: {{step}}",
+      "steps": {
+        "waiting": "Waiting to start",
+        "environment": "Checking the test environment",
+        "workspace": "Verifying the changes",
+        "stopping": "Preparing the isolated instance",
+        "dependencies": "Checking and preparing dependencies",
+        "assets": "Checking and preparing runtime assets",
+        "launching": "Compiling and opening the test window"
       }
     },
     "history": {
