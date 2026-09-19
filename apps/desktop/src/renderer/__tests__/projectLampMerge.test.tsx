@@ -77,13 +77,13 @@ describe('project lamp after upstream sidebar merge', () => {
     expect(header.querySelector('.session-status-breathing')).not.toBeNull();
   });
 
-  it('leaves expanded project attention to its child rows', () => {
+  it('leaves expanded project attention and running state to its child rows', () => {
     const { container } = render(
       <ProjectNode
         {...props()}
         isCollapsed={false}
         collapsedAttentionTone="error"
-        lamp={{ running: false, dotTone: 'error' }}
+        lamp={{ running: true, dotTone: 'error' }}
       />,
     );
     const header = container.querySelector('[data-project-header]')!;

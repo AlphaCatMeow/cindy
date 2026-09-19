@@ -94,8 +94,9 @@ export interface ProjectNodeProps {
    */
   hideRemoteMachineLabel?: boolean;
   /**
-   * 项目行运行灯:文件夹图标呼吸橙。未读仍走上游既定的 collapsedAttentionTone
-   * 右侧状态槽,不在标题旁重复显示。聚合集合由父层按实际渲染的会话提供。
+   * 项目行运行灯:仅收起时文件夹图标呼吸橙,展开后由子任务提示运行状态。
+   * 未读仍走 collapsedAttentionTone 右侧状态槽,不在标题旁重复显示。
+   * 聚合集合由父层按实际渲染的会话提供。
    */
   lamp?: SessionLampAggregate;
   /** 透传给项目内 SessionEntryList 的折叠豁免追加集合(语义见其 prop 注释)。 */
@@ -427,11 +428,11 @@ const ProjectHeader = memo(function ProjectHeader({
           !isEditingName && 'hover:bg-sidebar-item-hover',
         )}
       >
-        {/* 灯语与 rail 浮层面板项目行同款:running → 呼吸橙(动画挂 wrapper)。 */}
+        {/* 仅收起时汇总运行态,避免与展开的子任务同时呼吸(动画挂 wrapper)。 */}
         <span
           className={cn(
             'inline-flex shrink-0',
-            lamp?.running
+            isCollapsed && lamp?.running
               ? 'text-[var(--status-bar-accent)] session-status-breathing'
               : 'text-[var(--sidebar-list-muted)]',
           )}
