@@ -2102,13 +2102,6 @@ const config: ForgeConfig = {
           target: 'preload',
         },
         {
-          entry: 'src/main/workdir-probe-host/workdirProbeHostProcess.ts',
-          config: 'vite.preload.config.ts',
-          // UNC/SMB stat 不可取消；独立 utility process 超时后可直接终止，
-          // 避免把挂死 I/O 留在 Electron main 的 libuv 线程池。
-          target: 'preload',
-        },
-        {
           entry: 'src/main/cindy-brain/piSubagentRunnerProcess.ts',
           config: 'vite.preload.config.ts',
           // 正式包关闭 RunAsNode；Pi Subagent 后台管理程序通过固定的
