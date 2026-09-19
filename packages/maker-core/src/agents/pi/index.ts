@@ -66,6 +66,7 @@ import {
   AgentStartupStoppedError,
   BaseAgent,
   MAIN_OWNED_SEND_CONTEXT,
+  PINNED_SKILL_INVOCATION,
   PiManagedPackageMutationCancelledError,
   PiManagedPackageMutationFailedError,
   projectPiPackageCommandDiagnostic,
@@ -194,6 +195,7 @@ import type { PiRemoteFileOps } from '../base-agent.js';
 import {
   capturePiRuntimeCapabilityManifest,
   identifyManagedPiPackageCommandNames,
+  preparePinnedPiSkillInvocation,
   snapshotManagedPiPackageSkills,
 } from './runtime-capabilities.js';
 import {
@@ -6608,6 +6610,7 @@ export class PiAgent extends BaseAgent {
             await assertReviewMessageContentPaths(message.content, opts.workingDir, reviewReadGrants);
           }
           let { text, images } = await buildPiPrompt(message, { remote });
+          const pinnedSkill = sendOpts?.[PINNED_SKILL_INVOCATION];
           rejectIfCancelled(sendOpts, 'send');
           assertImageInputSupported(images);
           setAutoReviewIntent(appendAutoReviewUserIntent(priorAutoReviewIntent(), message.content, sendOpts), { authority: autoReviewContext() });
@@ -6624,6 +6627,12 @@ export class PiAgent extends BaseAgent {
           // erase the user message/receipt while leaving an installed package.
           if (!managedPackageRoute.accepted) rejectIfCancelled(sendOpts, 'send');
           await awaitRuntimeCapabilitiesForSlashCommand(text);
+          if (pinnedSkill && !runtimeCapabilityManifest) {
+            await runtimeCapabilityRefreshPromise;
+          }
+          if (pinnedSkill) {
+            text = preparePinnedPiSkillInvocation(text, pinnedSkill, runtimeCapabilityManifest);
+          }
           if (!managedPackageRoute.accepted) rejectIfCancelled(sendOpts, 'send');
           // setExtraDirs 是热更新；Pi 没有独立的 mid-session system-prompt RPC，所以在
           // 后续 user turn 前附上短引用目录段(但 /skill: 起始时不前置,见 composePiPromptText)。
