@@ -536,13 +536,18 @@ function activeBundleTarget(root: string, bundle: string): string {
   return path.join(root, VERSIONS_DIRECTORY, bundle);
 }
 
-async function readActiveBundle(root: string): Promise<string | null> {
+type ActiveBundlePointer =
+  | { kind: 'missing' }
+  | { kind: 'valid'; bundle: string }
+  | { kind: 'stale' };
+
+async function inspectActiveBundlePointer(root: string): Promise<ActiveBundlePointer> {
   const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
   let stat: fs.Stats;
   try {
     stat = await fsp.lstat(activePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' };
     throw error;
   }
   if (!stat.isSymbolicLink()) {
@@ -558,9 +563,12 @@ async function readActiveBundle(root: string): Promise<string | null> {
   );
   const segments = relative.split(path.sep);
   if (segments.length !== 1 || !validActiveBundle(segments[0])) {
-    throw new Error(`built-in Skill active pointer has an invalid target: ${target}`);
+    // The entry is still Cindy's pointer shape, so recover it like any other
+    // stale publication. A non-link entry remains user-owned and is rejected
+    // above rather than overwritten.
+    return { kind: 'stale' };
   }
-  return segments[0];
+  return { kind: 'valid', bundle: segments[0] };
 }
 
 async function switchActiveBundle(
@@ -572,7 +580,8 @@ async function switchActiveBundle(
   if (!(await fsp.stat(target).catch(() => null))?.isDirectory()) {
     throw new Error(`built-in Skill bundle is unavailable: ${target}`);
   }
-  if (await readActiveBundle(root) === bundle) return false;
+  const activePointer = await inspectActiveBundlePointer(root);
+  if (activePointer.kind === 'valid' && activePointer.bundle === bundle) return false;
 
   const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
   const replacement = `${activePath}.next-${randomUUID()}`;
@@ -592,8 +601,8 @@ async function switchActiveBundle(
 
 async function removeActiveBundlePointer(root: string): Promise<boolean> {
   const activePath = path.join(root, ACTIVE_BUNDLE_LINK);
-  const activeBundle = await readActiveBundle(root);
-  if (activeBundle === null) return false;
+  const activePointer = await inspectActiveBundlePointer(root);
+  if (activePointer.kind === 'missing') return false;
   await fsp.unlink(activePath);
   return true;
 }

@@ -443,6 +443,59 @@ describe('built-in Skills', () => {
     expect(fs.realpathSync(sharedLink)).toBe(committedCreatorBytes);
   });
 
+  it('repairs a committed active pointer redirected outside the managed versions directory', async () => {
+    const input = fixture();
+    const initial = await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const activePath = path.join(root, '.active');
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(root, '.cindy-system-skills.json'), 'utf8'),
+    );
+    const committedRoot = path.join(root, '.versions', manifest.activeBundle);
+    const redirectedRoot = path.join(input.appDataDir, 'redirected-system-skills');
+    const redirectedCreator = path.join(redirectedRoot, 'cindy-skill-creator');
+    fs.mkdirSync(redirectedCreator, { recursive: true });
+    fs.writeFileSync(path.join(redirectedCreator, 'SKILL.md'), '# Redirected\n');
+    fs.unlinkSync(activePath);
+    fs.symlinkSync(redirectedRoot, activePath, process.platform === 'win32' ? 'junction' : 'dir');
+    const sharedLink = path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator');
+    expect(fs.realpathSync(sharedLink)).toBe(fs.realpathSync(redirectedCreator));
+
+    const recovered = await prepareBuiltInSkills(input);
+
+    expect(recovered.changed).toBe(true);
+    expect(recovered.projectionSafe).toBe(true);
+    expect(recovered.warnings).toEqual([]);
+    expect(fs.realpathSync(activePath)).toBe(fs.realpathSync(committedRoot));
+    expect(fs.realpathSync(sharedLink)).toBe(fs.realpathSync(initial.descriptors[0]!.absolutePath));
+    expect(fs.readFileSync(path.join(redirectedCreator, 'SKILL.md'), 'utf8')).toBe(
+      '# Redirected\n',
+    );
+  });
+
+  it('does not overwrite a non-link active pointer placeholder', async () => {
+    const input = fixture();
+    await prepareBuiltInSkills(input);
+    const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+    const activePath = path.join(root, '.active');
+    fs.unlinkSync(activePath);
+    fs.mkdirSync(path.join(activePath, 'cindy-skill-creator'), { recursive: true });
+    fs.writeFileSync(
+      path.join(activePath, 'cindy-skill-creator', 'SKILL.md'),
+      '# User placeholder\n',
+    );
+
+    const failed = await prepareBuiltInSkills(input);
+
+    expect(failed.changed).toBe(false);
+    expect(failed.projectionSafe).toBe(false);
+    expect(failed.warnings.join('\n')).toContain('active pointer is not a link');
+    expect(fs.lstatSync(activePath).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(activePath, 'cindy-skill-creator', 'SKILL.md'), 'utf8')).toBe(
+      '# User placeholder\n',
+    );
+  });
+
   it('restores the previous manifest and active pointer when publication fails', async () => {
     const input = fixture();
     const initial = await prepareBuiltInSkills(input);
