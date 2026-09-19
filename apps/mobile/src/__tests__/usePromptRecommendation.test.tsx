@@ -33,6 +33,34 @@ it('historical navigation only requests a cached host result', async () => {
   expect(value.prompt).toBe('Suggested next step');
 });
 
+it.each(['queueEditing', 'hasAttachments', 'voiceIsBusy'] as const)(
+  'defers prediction and hides retained results while %s is active', async (blocker) => {
+  await render({ [blocker]: true }); await advance();
+  expect(request).not.toHaveBeenCalled();
+  expect(value.prompt).toBeNull();
+  await render({ [blocker]: false }); await advance();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(value.prompt).toBe('Suggested next step');
+  await render({ [blocker]: true }); await advance();
+  expect(value.prompt).toBeNull();
+  await render({ [blocker]: false }); await advance();
+  expect(value.prompt).toBe('Suggested next step');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it.each(['queueEditing', 'hasAttachments', 'voiceIsBusy'] as const)(
+  'hides a prediction that resolves after %s begins', async (blocker) => {
+  let resolve!: (result: { prompt: string }) => void;
+  request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await render(); await advance();
+  await render({ [blocker]: true });
+  await act(async () => resolve({ prompt: 'Late suggestion' }));
+  expect(value.prompt).toBeNull();
+  await render({ [blocker]: false });
+  expect(value.prompt).toBe('Late suggestion');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
 it('waits for the new completion revision even when stopped arrives first', async () => {
   await render({ running: true }); await advance();
   expect(request).not.toHaveBeenCalled();
@@ -62,18 +90,19 @@ it('an observed run authorizes only its completion, and a later run can predict 
   expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ cacheOnly: false, completionRevision: 40 }));
 });
 
-it('voice input consumes a completion before transcription, without reviving it when voice ends', async () => {
+it('defers prediction during voice input and permits it after voice ends', async () => {
   await render({ running: true, voiceIsBusy: true });
   await render({ running: false, revision: 20 }); await advance();
   expect(request).not.toHaveBeenCalled();
   await render({ voiceIsBusy: false }); await advance();
-  expect(request).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(value.prompt).toBe('Suggested next step');
   await render({ running: true });
   await render({ running: false, revision: 30 }); await advance();
   expect(value.prompt).toBe('Suggested next step');
 });
 
-it('starting voice cancels a scheduled request and rejects an already pending result', async () => {
+it('starting voice defers a scheduled request and retains an already pending result', async () => {
   await render({ running: true });
   await render({ running: false, revision: 20 });
   await render({ voiceIsBusy: true }); await advance();
@@ -83,9 +112,9 @@ it('starting voice cancels a scheduled request and rejects an already pending re
   request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   await render({ running: false, revision: 30 }); await advance();
   await render({ voiceIsBusy: true });
-  await act(async () => resolve({ prompt: 'Stale suggestion' }));
+  await act(async () => resolve({ prompt: 'Retained suggestion' }));
   await render({ voiceIsBusy: false }); await advance();
-  expect(value.prompt).toBeNull();
+  expect(value.prompt).toBe('Retained suggestion');
   expect(request).toHaveBeenCalledTimes(1);
 });
 
@@ -144,17 +173,18 @@ it('consumes terminal failures without predicting, but permits the next successf
   expect(value.prompt).toBe('Suggested next step');
 });
 
-it('consumes an occupied completion and does not resurrect it when the draft is cleared', async () => {
+it('defers an occupied completion until the draft is cleared', async () => {
   const composerSource = createComposerDraftSource(textComposerDocument('My next question'));
   await render({ running: true, composerSource });
   await render({ running: false, revision: 20 }); await advance();
   expect(request).not.toHaveBeenCalled();
   await act(async () => composerSource.setDocument(textComposerDocument('')));
   await advance();
-  expect(request).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(value.prompt).toBe('Suggested next step');
 });
 
-it('does not charge for attachment-only input, and rejects results arriving after input is added', async () => {
+it('defers attachment-only input and retains results arriving after input is added', async () => {
   await render({ hasAttachments: true }); await advance();
   expect(request).not.toHaveBeenCalled();
   await render({ hasAttachments: false, running: true });
@@ -162,9 +192,9 @@ it('does not charge for attachment-only input, and rejects results arriving afte
   request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   await render({ running: false, revision: 20 }); await advance();
   await render({ hasAttachments: true });
-  await act(async () => resolve({ prompt: 'Stale suggestion' }));
+  await act(async () => resolve({ prompt: 'Retained suggestion' }));
   await render({ hasAttachments: false }); await advance();
-  expect(value.prompt).toBeNull();
+  expect(value.prompt).toBe('Retained suggestion');
   expect(request).toHaveBeenCalledTimes(1);
 });
 
@@ -186,4 +216,66 @@ it('bounds cache retries and cancels them on dismissal', async () => {
   await act(async () => value.dismiss());
   await act(async () => vi.advanceTimersByTimeAsync(60_000));
   expect(request).toHaveBeenCalledTimes(5);
+});
+
+
+it('finishes bounded cache retries while editing, then reuses the result after clearing', async () => {
+  const composerSource = createComposerDraftSource(textComposerDocument(''));
+  request.mockResolvedValueOnce({ prompt: null });
+  await render({ composerSource }); await advance();
+  await act(async () => composerSource.setDocument(textComposerDocument('Typing')));
+  await act(async () => vi.advanceTimersByTimeAsync(1_000));
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.every(([args]) => args.cacheOnly === true)).toBe(true);
+  await act(async () => composerSource.setDocument(textComposerDocument('')));
+  await advance();
+  expect(value.prompt).toBe('Suggested next step');
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it('keeps retries bounded across repeated typing and clearing', async () => {
+  const composerSource = createComposerDraftSource(textComposerDocument(''));
+  request.mockResolvedValue({ prompt: null });
+  await render({ composerSource }); await advance();
+  for (let i = 0; i < 6; i++) {
+    await act(async () => composerSource.setDocument(textComposerDocument('Typing')));
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    await act(async () => composerSource.setDocument(textComposerDocument('')));
+    await advance();
+  }
+  expect(request).toHaveBeenCalledTimes(4);
+});
+
+it('retains the same recommendation through typing, clearing and attachment changes without another request', async () => {
+  const composerSource = createComposerDraftSource(textComposerDocument(''));
+  await render({ composerSource }); await advance();
+  await act(async () => composerSource.setDocument(textComposerDocument('My draft')));
+  expect(value.prompt).toBe('Suggested next step'); // Presentation owns temporary hiding.
+  await render({ hasAttachments: true });
+  expect(value.prompt).toBeNull();
+  await render({ hasAttachments: false });
+  await act(async () => composerSource.setDocument(textComposerDocument('')));
+  await advance();
+  expect(value.prompt).toBe('Suggested next step');
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(async () => value.dismiss());
+  await act(async () => composerSource.setDocument(textComposerDocument('More typing')));
+  await act(async () => composerSource.setDocument(textComposerDocument('')));
+  await advance();
+  expect(value.prompt).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it('retains a prediction arriving during editing without dispatching it twice', async () => {
+  const composerSource = createComposerDraftSource(textComposerDocument(''));
+  let resolve!: (result: { prompt: string }) => void;
+  request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await render({ running: true, composerSource });
+  await render({ running: false, revision: 20 }); await advance();
+  await act(async () => composerSource.setDocument(textComposerDocument('Typing')));
+  await act(async () => composerSource.setDocument(textComposerDocument('')));
+  await advance();
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(async () => resolve({ prompt: 'Still relevant' }));
+  expect(value.prompt).toBe('Still relevant');
 });
