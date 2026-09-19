@@ -177,6 +177,11 @@ async function readLatestUserInvocation(
         eq(messages.role, 'user'),
         isNull(messages.rewindAt),
         sql`(${messages.agentMeta} IS NULL OR CASE WHEN json_valid(${messages.agentMeta}) THEN json_extract(${messages.agentMeta}, '$.autoResume') END IS NOT 1)`,
+        // Same-turn steering is persisted as a newer user row, but it does not
+        // start a new turn or replace the original turn's Learn authorization.
+        // Keep ordinary later turns as blockers so an old grant cannot leak
+        // across turn boundaries.
+        sql`CASE WHEN json_valid(${messages.agentMeta}) THEN json_extract(${messages.agentMeta}, '$.delivery') END IS NOT 'steer'`,
         or(isNull(sessions.clearedAt), gt(messages.createdAt, sessions.clearedAt)),
       ),
     )

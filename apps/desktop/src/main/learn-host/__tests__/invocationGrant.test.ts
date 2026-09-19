@@ -1,9 +1,52 @@
-import { describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  consumeLearnInvocationGrant,
   createLearnInvocationGrantConsumer,
   parseDirectLearnInvocation,
 } from '../invocationGrant.js';
+import type { DbClient } from '../../localDb/client/DbClient.js';
+import { clearCurrentDbClient, setCurrentDbClient } from '../../localDb/client/current.js';
+import * as schema from '../../localDb/schema.js';
+
+let activeDb: { sqlite: Database.Database; client: DbClient } | null = null;
+
+function createInvocationDb(): Database.Database {
+  const sqlite = new Database(':memory:');
+  sqlite.exec(`
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      cleared_at INTEGER
+    );
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tool_use_id TEXT,
+      agent_meta TEXT,
+      created_at INTEGER NOT NULL,
+      rewind_at INTEGER
+    );
+  `);
+  const client = {
+    drizzle: drizzle(sqlite, { schema }),
+    exec: async (sql: string, params: unknown[] = []) => sqlite.prepare(sql).run(...params),
+  } as unknown as DbClient;
+  setCurrentDbClient(client, 'learn-invocation-test');
+  activeDb = { sqlite, client };
+  return sqlite;
+}
+
+afterEach(() => {
+  if (!activeDb) return;
+  clearCurrentDbClient(activeDb.client);
+  activeDb.sqlite.close();
+  activeDb = null;
+});
 
 describe('Learn invocation grant', () => {
   const grant = (sessionInstanceId = 'instance-1') => ({
@@ -164,6 +207,72 @@ describe('Learn invocation grant', () => {
       ok: true,
     });
     await expect(createPersistentConsumer(readLatest, consumed)(request)).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'USER_REQUEST_REQUIRED',
+    });
+  });
+
+  it('keeps the original Learn grant current across newer same-turn steer rows', async () => {
+    const sqlite = createInvocationDb();
+    sqlite.prepare('INSERT INTO sessions (id, cleared_at) VALUES (?, NULL)').run('session-1');
+    const insert = sqlite.prepare(`
+      INSERT INTO messages (
+        id, client_id, session_id, role, content, agent_meta, created_at, rewind_at
+      ) VALUES (?, ?, 'session-1', 'user', ?, ?, 1000, NULL)
+    `);
+    insert.run(
+      'learn-turn',
+      'learn-turn-client',
+      JSON.stringify({ text: '/learn release flow' }),
+      JSON.stringify({ delivery: 'turn', cindyLearnInvocation: grant() }),
+    );
+    insert.run(
+      'same-turn-steer',
+      'same-turn-steer-client',
+      JSON.stringify({ text: 'also preserve rollback steps' }),
+      JSON.stringify({ delivery: 'steer' }),
+    );
+
+    await expect(consumeLearnInvocationGrant({
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext',
+    }, 'instance-1')).resolves.toEqual({ ok: true });
+    expect(JSON.parse(sqlite.prepare(
+      'SELECT agent_meta FROM messages WHERE id = ?',
+    ).pluck().get('learn-turn') as string)).toMatchObject({
+      cindyLearnInvocationConsumed: 1,
+    });
+  });
+
+  it('does not let an old Learn grant cross a later ordinary turn', async () => {
+    const sqlite = createInvocationDb();
+    sqlite.prepare('INSERT INTO sessions (id, cleared_at) VALUES (?, NULL)').run('session-1');
+    const insert = sqlite.prepare(`
+      INSERT INTO messages (
+        id, client_id, session_id, role, content, agent_meta, created_at, rewind_at
+      ) VALUES (?, ?, 'session-1', 'user', ?, ?, ?, NULL)
+    `);
+    insert.run(
+      'learn-turn',
+      'learn-turn-client',
+      JSON.stringify({ text: '/learn release flow' }),
+      JSON.stringify({ delivery: 'turn', cindyLearnInvocation: grant() }),
+      1000,
+    );
+    insert.run(
+      'later-turn',
+      'later-turn-client',
+      JSON.stringify({ text: 'new task' }),
+      JSON.stringify({ delivery: 'turn' }),
+      1001,
+    );
+
+    await expect(consumeLearnInvocationGrant({
+      callerSessionId: 'session-1',
+      input: 'release flow',
+      sourceKind: 'freetext',
+    }, 'instance-1')).resolves.toMatchObject({
       ok: false,
       errorCode: 'USER_REQUEST_REQUIRED',
     });
