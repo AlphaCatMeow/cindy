@@ -114,8 +114,32 @@ export function builtInSkillDescriptors(
   const root = appDataDir
     ? sharedBuiltInSkillsRoot(appDataDir)
     : builtInSkillsRoot(userDataDir);
-  const activeRoot = activeBuiltInSkillsRoot(root);
-  return builtInSkillDescriptorsAtRoot(activeRoot, userDataDir);
+  // These descriptors confer official identity. Never infer trust from a path's
+  // existence, including after preparation failed or another process changed it.
+  try {
+    const raw = readAtomicFileSync(path.join(root, MANIFEST_FILE));
+    const manifest = raw === null ? null : parseManifest(raw);
+    if (manifest?.schemaVersion !== 3 || !manifest.activeBundle) return [];
+    const active = path.join(root, ACTIVE_BUNDLE_LINK);
+    const target = activeBundleTarget(root, manifest.activeBundle);
+    if (!fs.lstatSync(active).isSymbolicLink()) return [];
+    if (!samePath(path.resolve(root, fs.readlinkSync(active)), target)) return [];
+    // A lexical in-root link must not escape through a substituted parent,
+    // bundle, or Skill directory either.
+    for (const directory of [path.dirname(target), target]) {
+      if (!fs.lstatSync(directory).isDirectory()) return [];
+    }
+    if (!samePath(fs.realpathSync.native(active), fs.realpathSync.native(target))) return [];
+    const descriptors = stableBuiltInSkillDescriptors(root, userDataDir);
+    for (const descriptor of descriptors) {
+      if (!fs.lstatSync(descriptor.absolutePath).isDirectory()) return [];
+      if (hashDirectorySync(descriptor.absolutePath) !== manifest.fingerprints[descriptor.name]) return [];
+      if (!fs.lstatSync(path.join(descriptor.absolutePath, 'SKILL.md')).isFile()) return [];
+    }
+    return descriptors;
+  } catch {
+    return [];
+  }
 }
 
 function builtInSkillDescriptorsAtRoot(
@@ -213,6 +237,25 @@ function activeBuiltInSkillsRoot(root: string): string {
     // stable link and never guess an immutable version directory.
     return active;
   }
+}
+
+/** Same fingerprint format as materialization, for synchronous identity readers. */
+function hashDirectorySync(root: string): string {
+  const hash = createHash('sha256');
+  const visit = (directory: string): void => {
+    const entries = fs.readdirSync(directory, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(root, absolute).split(path.sep).join('/');
+      hash.update(entry.isDirectory() ? `d\0${relative}\0` : `f\0${relative}\0`);
+      if (entry.isDirectory()) visit(absolute);
+      else if (entry.isFile()) hash.update(fs.readFileSync(absolute));
+      else throw new Error(`unsupported bundled Skill entry: ${relative}`);
+    }
+  };
+  visit(root);
+  return hash.digest('hex');
 }
 
 async function hashDirectory(root: string): Promise<string> {
@@ -998,7 +1041,9 @@ export async function prepareBuiltInSkills(
     await fsp.mkdir(root, { recursive: true });
     const homeDir = options.homeDir ?? os.homedir();
     const stableDescriptors = stableBuiltInSkillDescriptors(root, options.userDataDir);
-    let descriptors = builtInSkillDescriptors(options.userDataDir, options.appDataDir);
+    // Preparation needs destinations even before a trusted bundle exists.
+    // Keep these private; public readers receive only verified descriptors.
+    let descriptors = builtInSkillDescriptorsAtRoot(activeBuiltInSkillsRoot(root), options.userDataDir);
     let manifest: MaterializationManifest;
     try {
       manifest = await readManifest(root);
@@ -1240,7 +1285,7 @@ export async function prepareBuiltInSkills(
   }
 
   return {
-    descriptors: builtInSkillDescriptors(options.userDataDir, options.appDataDir),
+    descriptors: projectionSafe ? builtInSkillDescriptors(options.userDataDir, options.appDataDir) : [],
     projectionSafe,
     changed,
     warnings,

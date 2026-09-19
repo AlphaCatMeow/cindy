@@ -2,6 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Maker } from '@cindy/maker-core';
+import { scanAllSkills } from '../../skillhub/scanner';
+
+vi.mock('../../skillhub/registry', () => ({
+  registryService: { listAllInstalls: vi.fn(async () => []), getInstall: vi.fn(async () => null) },
+}));
 
 import {
   activeCindyBuiltInAgentSkills,
@@ -473,6 +479,52 @@ describe('built-in Skills', () => {
     );
   });
 
+  it.each(['directory', 'outside-link', 'wrong-bundle', 'modified-content', 'missing-manifest', 'linked-bundle'])(
+    'withholds official identity from %s even after successful preparation',
+    async (damage) => {
+      const input = fixture();
+      const prepared = await prepareBuiltInSkills(input);
+      const root = path.join(input.appDataDir, 'Cindy', 'shared-system-skills');
+      const active = path.join(root, '.active');
+      const target = fs.realpathSync(active);
+      const skillPath = path.join(active, 'cindy-skill-creator');
+      expect(prepared.projectionSafe).toBe(true);
+      expect(builtInSkillDescriptors(input.userDataDir, input.appDataDir)).toHaveLength(2);
+      if (damage === 'modified-content') {
+        fs.appendFileSync(path.join(skillPath, 'SKILL.md'), '\nChanged');
+      } else if (damage === 'missing-manifest') {
+        fs.unlinkSync(path.join(root, '.cindy-system-skills.json'));
+      } else if (damage === 'linked-bundle') {
+        const outside = path.join(input.homeDir, 'substituted-bundle');
+        fs.renameSync(target, outside);
+        fs.symlinkSync(outside, target, process.platform === 'win32' ? 'junction' : 'dir');
+      } else {
+        fs.unlinkSync(active);
+        const replacement = damage === 'directory' ? active
+          : damage === 'outside-link' ? path.join(input.homeDir, 'outside-bundle')
+            : path.join(root, '.versions', 'v10-0123456789abcdef-11111111-1111-1111-1111-111111111111');
+        fs.cpSync(target, replacement, { recursive: true });
+        if (damage !== 'directory') {
+          fs.symlinkSync(replacement, active, process.platform === 'win32' ? 'junction' : 'dir');
+        }
+      }
+      const descriptors = builtInSkillDescriptors(input.userDataDir, input.appDataDir);
+      expect(descriptors).toEqual([]);
+      const [command] = markCindyBuiltInAgentSkills([{
+        kind: 'agent-skill', name: 'cindy-skill-creator', source: 'skill',
+        path: path.join(skillPath, 'SKILL.md'), scope: 'user', enabled: true, builtIn: true,
+      }], descriptors);
+      expect(command?.builtIn).toBeUndefined();
+      const maker = { listCustomizations: async () => ({ errors: [], items: [{
+        engine: 'codex', kind: 'skill', scope: 'user', name: 'cindy-skill-creator',
+        absolutePath: skillPath, mdPath: path.join(skillPath, 'SKILL.md'), files: [],
+      }] }) } as unknown as Maker;
+      const scanned = await scanAllSkills({}, maker, [], descriptors);
+      expect(scanned.skills).toHaveLength(1);
+      expect(scanned.skills[0]?.builtIn).not.toBe(true);
+    },
+  );
+
   it('does not overwrite a non-link active pointer placeholder', async () => {
     const input = fixture();
     await prepareBuiltInSkills(input);
@@ -489,6 +541,7 @@ describe('built-in Skills', () => {
 
     expect(failed.changed).toBe(false);
     expect(failed.projectionSafe).toBe(false);
+    expect(failed.descriptors).toEqual([]);
     expect(failed.warnings.join('\n')).toContain('active pointer is not a link');
     expect(fs.lstatSync(activePath).isDirectory()).toBe(true);
     expect(fs.readFileSync(path.join(activePath, 'cindy-skill-creator', 'SKILL.md'), 'utf8')).toBe(
@@ -703,7 +756,8 @@ describe('built-in Skills', () => {
 
     expect(result.changed).toBe(false);
     expect(result.warnings.join('\n')).toContain('another Skill mutation is in progress');
-    expect(fs.existsSync(result.descriptors[0]!.absolutePath)).toBe(false);
+    expect(result.descriptors).toEqual([]);
+    expect(fs.existsSync(path.join(input.appDataDir, 'Cindy', 'shared-system-skills', '.active'))).toBe(false);
     expect(fs.existsSync(path.join(input.homeDir, '.agents', 'skills', 'cindy-skill-creator'))).toBe(false);
   });
 
@@ -756,12 +810,12 @@ describe('built-in Skills', () => {
 
   it('keeps a user-owned Skill in the isolated Claude config directory', async () => {
     const input = fixture();
-    const descriptor = builtInSkillDescriptors(input.userDataDir, input.appDataDir)[0]!;
-    fs.mkdirSync(descriptor.nativeClaudePath, { recursive: true });
-    fs.writeFileSync(path.join(descriptor.nativeClaudePath, 'SKILL.md'), '# Claude user copy\n');
+    const nativeClaudePath = path.join(input.userDataDir, 'claude-home', 'skills', 'cindy-skill-creator');
+    fs.mkdirSync(nativeClaudePath, { recursive: true });
+    fs.writeFileSync(path.join(nativeClaudePath, 'SKILL.md'), '# Claude user copy\n');
 
     const result = await prepareAndProjectBuiltInSkills(input);
-    expect(fs.readFileSync(path.join(descriptor.nativeClaudePath, 'SKILL.md'), 'utf8')).toBe(
+    expect(fs.readFileSync(path.join(nativeClaudePath, 'SKILL.md'), 'utf8')).toBe(
       '# Claude user copy\n',
     );
     expect(result.warnings.join('\n')).toContain('already owned by the user');

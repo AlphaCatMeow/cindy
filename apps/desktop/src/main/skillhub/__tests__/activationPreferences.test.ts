@@ -1,11 +1,24 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-skill-preferences-'));
 vi.mock('electron', () => ({ app: { getPath: () => root } }));
 vi.mock('../../logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn() }) }));
+beforeAll(async () => {
+  const bundledRoot = path.join(root, 'bundled');
+  for (const name of ['cindy-skill-creator', 'learn']) {
+    fs.mkdirSync(path.join(bundledRoot, name), { recursive: true });
+    fs.writeFileSync(path.join(bundledRoot, name, 'SKILL.md'), `# ${name}\n`);
+  }
+  const { prepareBuiltInSkills } = await import('../../maker-host/built-in-skills');
+  const result = await prepareBuiltInSkills({
+    userDataDir: root, appDataDir: root, homeDir: path.join(root, 'fixture-home'), bundledRoot,
+    withSharedMutation: async (_names, operation) => operation(),
+  });
+  expect(result.projectionSafe).toBe(true);
+});
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe('Skill activation preferences', () => {
@@ -98,8 +111,8 @@ describe('Skill activation preferences', () => {
     const prefs = await import('../activationPreferences');
     const descriptor = (await import('../../maker-host/built-in-skills')).builtInSkillDescriptors(root, root)[0]!;
     fs.mkdirSync(descriptor.absolutePath, { recursive: true });
-    fs.writeFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), '# Built in\n');
     fs.mkdirSync(path.dirname(descriptor.nativeClaudePath), { recursive: true });
+    fs.rmSync(descriptor.nativeClaudePath, { force: true });
     fs.symlinkSync(
       descriptor.absolutePath,
       descriptor.nativeClaudePath,
@@ -118,7 +131,6 @@ describe('Skill activation preferences', () => {
     const userSkill = path.join(root, 'user-owned-cindy-skill-creator');
     fs.mkdirSync(descriptor.absolutePath, { recursive: true });
     fs.mkdirSync(userSkill, { recursive: true });
-    fs.writeFileSync(path.join(descriptor.absolutePath, 'SKILL.md'), '# Built in\n');
     fs.writeFileSync(path.join(userSkill, 'SKILL.md'), '# User owned\n');
     fs.rmSync(descriptor.nativeClaudePath, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(descriptor.nativeClaudePath), { recursive: true });

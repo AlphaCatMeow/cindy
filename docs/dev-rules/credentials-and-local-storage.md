@@ -95,6 +95,11 @@
 | 跨 profile 的 worktree 回收日志位置 | `app.getPath('appData')/Cindy/shared-worktree-recycle-journals`，按日志目录哈希登记原 profile 日志位置，启动日志监听和写入回收记录前原子发布；借用方只读目标资源的原始日志，不复制恢复状态、不代替 owner 执行恢复。索引跨重启保留，原日志不存在时不产生回收意图 |
 | 用户明确导出的文件 | 用户选择或任务明确指定的目标路径 |
 
+- 内置 Skill 的官方身份只授予当前 manifest 已提交且指纹匹配的 bundle：`.active` 必须是
+  指向该版本的合法链接，版本目录与 Skill 内容不能经替换的符号链接越界。物化失败或目录
+  存在本身不构成官方身份；扫描、命令标记与 Learn 发现共用经验证的描述符。异常占位内容
+  不覆盖、不认领。实现与回归见 `maker-host/built-in-skills.ts` 及其同名单测。
+
 - 禁止把 `process.cwd()`、仓库根或源码目录作为 userData、凭证目录或临时目录的默认回退。
   特别不要写 `process.env.TEMP ?? process.cwd()` 一类跨平台会落入仓库的逻辑。
 - 使用 `path.join`、`path.resolve` 和现有路径策略，不硬编码平台分隔符，不手拼 `~`、
