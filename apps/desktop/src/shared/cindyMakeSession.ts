@@ -49,8 +49,13 @@ export interface CindyMakeCompletionMeta {
 
 export interface CindyMakeTestState {
   status: 'starting' | 'ready' | 'failed' | 'stopped';
+  /** Optional startup detail; older completions retain the broad status. */
+  step?: CindyMakeTestStep;
   error?: 'unavailable' | 'changed' | 'environment' | 'launchFailed' | 'timeout' | 'interrupted';
 }
+
+export type CindyMakeTestStep =
+  'waiting' | 'environment' | 'workspace' | 'stopping' | 'dependencies' | 'assets' | 'launching';
 
 export interface CindyMakePersonalBuildState {
   status: 'waiting' | 'checking' | 'merging' | 'packaging' | 'publishing' | 'ready' | 'failed';

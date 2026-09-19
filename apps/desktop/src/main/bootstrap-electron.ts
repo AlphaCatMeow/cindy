@@ -364,7 +364,8 @@ import {
   isCindyMakeManagedWorktreePath,
 } from './cindy-make/sourcePaths.js';
 import { prepareCindyMakeWorkspace } from './cindy-make/taskWorkspace.js';
-import { restoreCindyMakeTaskState, startCindyMakeTask } from './cindy-make/taskRuntime.js';
+import { restoreCindyMakeTaskState, startCindyMakeTask, configureCindyMakeEditingGuard } from './cindy-make/taskRuntime.js';
+import { registerMakeRemoteResources } from './cindy-make/remoteRuntime.js';
 import {
   configureCindyMakeTaskManagement,
   manageCindyMakeTask,
@@ -7639,6 +7640,8 @@ const registerIpcHandlers = () => {
   configureCindyMakeTestRuntime(
     (id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false,
   );
+  configureCindyMakeEditingGuard((id) => cindyMakeTestController.isUsingSession(id));
+  registerMakeRemoteResources((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
   configureMakeHistory((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
   ipcMain.handle('app:cindy-make-history', async (event, selected?: unknown) => {
     assertTrustedAppRendererEvent(event);

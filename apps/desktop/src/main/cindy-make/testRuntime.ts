@@ -33,6 +33,7 @@ import { untilAborted } from './doctor.js';
 import { currentVersionProfile, rememberOriginalVersion } from './versionStartup.js';
 import { captureMakeHistoryStore } from './historyOwner.js';
 import { captureMakeHistoryCompletion } from './historyCapture.js';
+import { broadcastMakeRemoteChanged } from './remoteBroadcast.js';
 
 let isRunning: (sessionId: string) => boolean = () => true;
 export function configureCindyMakeTestRuntime(probe: typeof isRunning): void {
@@ -158,6 +159,7 @@ async function save(
       next,
     );
     await broadcastMessageAgentMetaUpdate(context.sessionId, context.completionId, fresh.scope);
+    broadcastMakeRemoteChanged(context.sessionId, fresh.scope);
     return next;
   });
 }
@@ -165,6 +167,21 @@ async function save(
 export const cindyMakeTestController = createMakeTestController({
   load,
   save,
+  claimBuild: () => cindyMakeManager.claimPersonalBuild(),
+  onBuildState: (context, state) => {
+    if (!context.isCurrent()) throw makeTestError('unavailable');
+    const store = captureMakeHistoryStore();
+    store.saveBuild(state);
+    if (state.status === 'ready' && state.commit) {
+      for (const feature of state.includedFeatures ?? [])
+        store.version(feature.runId, {
+          operationId: feature.operationId,
+          commit: state.commit,
+          versionId: state.versionId,
+          at: state.generatedAt ?? Date.now(),
+        });
+    }
+  },
   withUse: (context, run) => cindyMakeManager.withProjectUse(makeSourceRoot(context.userData), run),
   build: (context, signal, publish) => {
     let entered = false;
@@ -207,7 +224,7 @@ export const cindyMakeTestController = createMakeTestController({
           {
             mode: 'personal',
             userData: context.userData,
-            completionId: context.completionId,
+            completionId: context.meta.personal?.buildId ?? context.completionId,
             title: context.title,
             profile: currentVersionProfile(),
           },
@@ -239,7 +256,7 @@ export const cindyMakeTestController = createMakeTestController({
     try {
       const artifact = await personalArtifactPath(
         context.userData,
-        context.completionId,
+        context.meta.personal?.buildId ?? context.completionId,
         context.meta.personal as PersonalArtifact,
       );
       if (!context.isCurrent()) throw makeTestError('unavailable');
@@ -250,10 +267,11 @@ export const cindyMakeTestController = createMakeTestController({
       throw makeTestError('unavailable');
     }
   },
-  launch: (context, signal) =>
+  launch: (context, signal, publish) =>
     cindyMakeManager.withProject(
       makeSourceRoot(context.userData),
       async () => {
+        publish('environment');
         signal.throwIfAborted();
         const fresh = await load(context.sessionId, context.completionId);
         if (
@@ -272,18 +290,22 @@ export const cindyMakeTestController = createMakeTestController({
         ).catch(() => {
           throw makeTestError('environment');
         });
+        publish('workspace');
         await verifyMakeTestWorkspace(context, env, signal);
         const node = await environment.probe('node', ['--version'], signal);
         if (node.status !== 'ok' || !node.path || !path.isAbsolute(node.path))
           throw makeTestError('environment');
         signal.throwIfAborted();
         if (!context.isCurrent()) throw makeTestError('unavailable');
+        publish('stopping');
         return launchMakeTest(
           context,
           node.path,
           env,
           CURRENT_CINDY_REGION === 'cn' ? 'cn' : 'global',
           signal,
+          undefined,
+          publish,
         );
       },
       signal,
@@ -311,6 +333,7 @@ export async function actCindyMakeTest(
       const { getCindyMakeHistory, actCindyMakeHistory } = await import('./historyRuntime.js');
       const history = await getCindyMakeHistory(context.runId);
       if (!context.isCurrent()) throw makeTestError('unavailable');
+      if (history.busy) throw makeTestError('unavailable');
       if (
         !['integrated', 'unchanged'].includes(
           history.items.find((item) => item.runId === context.runId)?.integration ?? '',

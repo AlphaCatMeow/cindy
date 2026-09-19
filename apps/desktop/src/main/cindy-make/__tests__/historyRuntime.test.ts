@@ -18,6 +18,10 @@ const h = vi.hoisted(() => ({
   artifactPath: vi.fn(),
   showItem: vi.fn(),
   build: vi.fn(),
+  testBuild: undefined as
+    | { buildId: string; status: string; stopping?: boolean }
+    | undefined,
+  cancelTestBuild: vi.fn(),
 }));
 const store = {
   readBuild: vi.fn(),
@@ -73,7 +77,12 @@ vi.mock('../upstreamMergeRuntime.js', () => ({
 vi.mock('../taskManagement.js', () => ({ manageCindyMakeTask: h.end }));
 vi.mock('../testRuntime.js', () => ({
   actCindyMakeTest: vi.fn(),
-  cindyMakeTestController: { hasActiveJobs: () => false, isBuilding: () => false },
+  cindyMakeTestController: {
+    hasActiveJobs: () => !!h.testBuild,
+    isBuilding: () => !!h.testBuild,
+    activeBuild: () => h.testBuild,
+    cancelBuild: h.cancelTestBuild,
+  },
 }));
 vi.mock('../testRunner.js', () => ({ verifyMakeTestWorkspace: h.verify }));
 vi.mock('../personalBuild.js', () => ({
@@ -95,14 +104,8 @@ vi.mock('../sourceGit.js', () => ({
   runSourceGit: async (_env: unknown, args: string[]) =>
     args[0] === 'branch' ? 'cindy-personal' : '',
 }));
-vi.mock('../manager.js', () => ({
-  cindyMakeManager: {
-    getState: () => h.state,
-    hasActiveWork: () => h.busy,
-    isTaskPreparing: () => false,
-    withProjectUse: async (_root: string, operation: () => unknown) => operation(),
-  },
-}));
+import { cindyMakeManager } from '../manager';
+const realHasActiveWork = cindyMakeManager.hasActiveWork.bind(cindyMakeManager);
 import { sessions } from '../../localDb/schema';
 import {
   configureMakeHistory,
@@ -148,10 +151,16 @@ beforeEach(() => {
   h.current = true;
   h.running = false;
   h.busy = false;
+  h.testBuild = undefined;
+  h.cancelTestBuild.mockReset();
+  vi.spyOn(cindyMakeManager, 'getState').mockImplementation(() => h.state);
   h.exists = true;
   h.records.clear();
   h.state = {};
   h.verify.mockResolvedValue(undefined);
+  vi.spyOn(cindyMakeManager, 'hasActiveWork').mockImplementation(
+    () => h.busy || realHasActiveWork(),
+  );
   configureMakeHistory(() => h.running);
   h.rows = [
     {
@@ -186,6 +195,65 @@ beforeEach(() => {
   ];
 });
 describe('history Main admission and owner boundary', () => {
+  it('releases history integration and builds after real manager preparation and failed cleanup settle', async () => {
+    const runId = 'prepared-history';
+    const report = {
+      runId,
+      platform: 'win32',
+      arch: 'x64',
+      checks: [],
+      status: 'running' as const,
+      task: { sessionId: 'prepared-session', phase: 'waiting' as const },
+    };
+    let release!: () => void;
+    await cindyMakeManager.startTask(
+      { runId, request: 'fix', title: 'fix' },
+      {
+        create: async () => report,
+        persist: async () => {},
+        start: async () => {},
+        prepare: () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+        isCurrent: () => true,
+        onError: () => {},
+      },
+    );
+    expect((await getCindyMakeHistory('aaaa')).busy).toBe(true);
+    release();
+    await cindyMakeManager.waitForTask(runId);
+    expect(cindyMakeManager.taskReport(runId)?.status).toBe('completed');
+    await expect(
+      cindyMakeManager.runTaskAction(
+        'failed-cleanup',
+        'delete',
+        () => true,
+        async () => {
+          throw new Error('locked');
+        },
+      ),
+    ).rejects.toThrow('locked');
+    const state = await getCindyMakeHistory('aaaa');
+    expect(state).toMatchObject({ busy: false, canBuild: true });
+    expect(state.items[0].actions).toContain('integrate');
+    cindyMakeManager.forgetTask(runId);
+  });
+  it('shows and stops a completion-card build by the same identity without marking it interrupted', async () => {
+    h.testBuild = { buildId: 'card-build', status: 'packaging' };
+    store.readBuild.mockImplementation(() => h.testBuild);
+    expect(await getCindyMakeHistory()).toMatchObject({ busy: true, build: h.testBuild });
+    expect(store.saveBuild).not.toHaveBeenCalled();
+    await cancelHistoryPersonalVersion('old-build');
+    expect(h.cancelTestBuild).not.toHaveBeenCalled();
+    h.cancelTestBuild.mockImplementation(async () => {
+      h.testBuild!.stopping = true;
+    });
+    expect(await cancelHistoryPersonalVersion('card-build')).toMatchObject({
+      build: { stopping: true },
+    });
+    expect(h.cancelTestBuild).toHaveBeenCalledWith('card-build');
+  });
   it('settles a failed background build with its known cause and releases controls for retry', async () => {
     let buildState: any;
     store.readBuild.mockImplementation(() => buildState);

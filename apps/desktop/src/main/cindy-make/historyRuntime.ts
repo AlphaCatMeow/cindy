@@ -81,6 +81,10 @@ export async function cancelHistoryPersonalVersion(
   const h = context();
   const job = buildJob;
   const build = h.store.readBuild();
+  if (!job && build?.buildId === buildId) {
+    await cindyMakeTestController.cancelBuild(buildId);
+    h.check();
+  }
   let stoppingState: CindyMakePersonalBuildState | undefined;
   if (
     job &&
@@ -492,11 +496,7 @@ export async function getCindyMakeHistory(selectedRunId?: string): Promise<Cindy
           : undefined,
     });
   }
-  let build = h.store.readBuild();
-  if (build && !buildJob && !['ready', 'failed'].includes(build.status)) {
-    build = { status: 'failed', error: 'interrupted' };
-    h.store.saveBuild(build);
-  }
+  const build = readCindyMakeBuildState();
   h.check();
   return {
     items,
@@ -504,6 +504,20 @@ export async function getCindyMakeHistory(selectedRunId?: string): Promise<Cindy
     canBuild: buildSourceAvailable && !busy && !pendingMerge,
     build,
   };
+}
+
+/** The same restart reconciliation for local history and portable task cards. */
+export function readCindyMakeBuildState(): CindyMakePersonalBuildState | undefined {
+  const h = context();
+  let build = h.store.readBuild();
+  const activeBuild = cindyMakeTestController.activeBuild();
+  if (build && !buildJob && !(activeBuild?.buildId && activeBuild.buildId === build.buildId)
+    && !['ready', 'failed'].includes(build.status)) {
+    build = { ...build, status: 'failed', stopping: undefined, error: 'interrupted' };
+    h.store.saveBuild(build);
+  }
+  h.check();
+  return build;
 }
 
 export async function actCindyMakeHistory(
@@ -610,7 +624,14 @@ export async function generateHistoryPersonalVersion(): Promise<CindyMakeHistory
   const h = context();
   const state = await getCindyMakeHistory();
   h.check();
-  if (!state.canBuild || buildJob) throwIpcError('PRECONDITION_FAILED', 'busy');
+  if (
+    !state.canBuild ||
+    buildJob ||
+    cindyMakeTestController.hasActiveJobs() ||
+    cindyMakeManager.hasActiveWork()
+  )
+    throwIpcError('PRECONDITION_FAILED', 'busy');
+  const releaseBuild = cindyMakeManager.claimPersonalBuild();
   const abort = new AbortController();
   const buildId = randomUUID();
   const startedAt = Date.now();
@@ -626,6 +647,7 @@ export async function generateHistoryPersonalVersion(): Promise<CindyMakeHistory
     await publish({ status: 'waiting' });
   } catch (error) {
     if (buildJob === job) buildJob = undefined;
+    releaseBuild();
     throw error;
   }
   job.done = cindyMakeManager
@@ -687,6 +709,7 @@ export async function generateHistoryPersonalVersion(): Promise<CindyMakeHistory
     })
     .finally(() => {
       if (buildJob === job) buildJob = undefined;
+      releaseBuild();
     });
   return getCindyMakeHistory();
 }
