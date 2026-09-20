@@ -217,12 +217,8 @@ export interface GhostAgentNeeds {
    *   其中的角色是「被这条任务调用的目标」,靠已有的 tool 槽 + ghost_call 被叫到。
    * - 因此它**会消耗用户的模型额度** —— 插件详情必须说清楚。
    *
-   * 为什么挂在 agent 详单而不是新开一个 slot:
-   * 语义上它就是「让 agent 定期替我干活」,属 agent 槽;而判据的可证明性与新 slot
-   * 等同 —— agent 详单是**严格字段白名单**(见 parse 处 unknownAgentField 分支),
-   * 未登记的子字段一律拒装,所以任何已经装在用户机器上的老包都不可能带
-   * `agent.schedule`。不存在"老包恰好写过同名字段而白拿这份能力"的模糊地带
-   * (与 badge / timer 那套判例同一理由,但少改一处基座白名单)。
+   * 它属于 agent 能力。未知扩展字段可保留为数据,不因字段存在就获得能力;
+   * Host 只按明确支持的字段语义和运行时守门处理请求。
    */
   schedule?: boolean;
 }
@@ -274,8 +270,8 @@ export interface GhostNodeSecretBinding {
 /**
  * 随插件安装的本地 Node 工作进程声明。
  *
- * 只允许指定包内入口和固定协议，不接受 command / args / shell / env，避免把
- * ghost.json 变成任意命令启动器。Node 进程拥有当前系统用户级本机权限，主机
+ * Host 只按已支持的包内入口和固定协议启动进程；未知的 command / args / shell /
+ * env 等扩展仅保留为数据，不传入进程启动参数。Node 进程拥有当前系统用户级本机权限，主机
  * 只保证它不能绕过 main.js 调 Cindy API，并不能把它变成系统级沙箱。
  */
 export interface GhostNodeNeeds {

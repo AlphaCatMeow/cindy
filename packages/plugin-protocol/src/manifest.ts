@@ -258,8 +258,8 @@ export interface GhostNodeSecretBinding {
 /**
  * 随插件安装的本地 Node 工作进程声明。
  *
- * 只允许指定包内入口和固定协议,不接受 command / args / shell / env,避免把
- * ghost.json 变成任意命令启动器。Node 进程拥有当前系统用户级本机权限,主机
+ * Host 只按已支持的包内入口和固定协议启动进程；未知的 command / args / shell /
+ * env 等扩展仅保留为数据,不传入进程启动参数。Node 进程拥有当前系统用户级本机权限,主机
  * 只保证它不能绕过 main.js 调 Cindy API,并不能把它变成系统级沙箱。
  */
 export interface GhostNodeNeeds {
