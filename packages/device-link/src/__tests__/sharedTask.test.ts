@@ -18,6 +18,15 @@ const guest = { accountId: 'guest-a', deviceId: 'phone-a' };
 const owner = { accountId: 'owner', deviceId: 'owner-phone' };
 
 describe('sharedTask authorization', () => {
+  it('preserves extended device IDs and still requires the matching account', () => {
+    const value = snapshot();
+    value.hostDeviceId = '房主~desktop';
+    value.guests[0].deviceIds = [' 手机~1 '];
+    const parsed = parse(value);
+    expect(parsed.hostDeviceId).toBe(value.hostDeviceId);
+    expect(authorize(parsed, { accountId: 'guest-a', deviceId: ' 手机~1 ' }, 'session-1', 'history.read').allowed).toBe(true);
+    expect(authorize(parsed, { accountId: 'guest-b', deviceId: ' 手机~1 ' }, 'session-1', 'history.read').allowed).toBe(false);
+  });
   it('keeps task subscriptions but removes the full-device list from shared peers', () => {
     expect(sharedTaskTopics('shared-task~shared~host', ['sessions', 'session:task'])).toEqual(['session:task']);
     expect(sharedTaskTopics('my-desktop', ['sessions', 'session:task'])).toEqual(['sessions', 'session:task']);

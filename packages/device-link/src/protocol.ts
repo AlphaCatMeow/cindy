@@ -25,7 +25,7 @@ import {
   type RelayErrorPayload,
 } from '@cindy/device-link-protocol';
 
-export { SHARED_TASK_RELAY_CAPABILITY, SHARED_TASK_PEER_PREFIX, sharedTaskHostPeer, sharedTaskGuestPeer, isSharedTaskPeer, parseSharedTaskPeer } from '@cindy/device-link-protocol';
+export { SHARED_TASK_RELAY_CAPABILITY, SHARED_TASK_PEER_PREFIX, sharedTaskHostPeer, sharedTaskGuestPeer, sharedTaskDeviceId, isSharedTaskPeer, parseSharedTaskPeer } from '@cindy/device-link-protocol';
 export type { SharedTaskPeer } from '@cindy/device-link-protocol';
 
 export {

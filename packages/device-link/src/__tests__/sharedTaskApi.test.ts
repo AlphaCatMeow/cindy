@@ -16,6 +16,12 @@ function setup() {
   } });
   return { api, request, changeAccountOrRegion: () => { generation++; } };
 }
+
+it('reads extended host device IDs in the shared task list', async () => {
+  const { api, request } = setup();
+  request.mockResolvedValue({ sharedTasks: [{ ...snapshot(), hostDeviceId: ' 主机~1 ' }] });
+  await expect(api.list()).resolves.toEqual([expect.objectContaining({ hostDeviceId: ' 主机~1 ' })]);
+});
 describe('sharedTask management client', () => {
   it('observes a late create ID for host cleanup but never returns stale UI success', async () => {
     const { api, request, changeAccountOrRegion } = setup();

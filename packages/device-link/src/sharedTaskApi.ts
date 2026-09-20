@@ -1,4 +1,5 @@
 import { parseSharedTaskSnapshot, SHARED_TASK_MAX_SNAPSHOT_GUESTS, type SharedTaskIdentity, type SharedTaskSnapshot } from './sharedTask.js';
+import { sharedTaskDeviceId } from './protocol.js';
 
 export const SHARED_TASK_HOST_CHANNEL = 'maker:shared-task';
 export const SHARED_TASK_ACCOUNT_CHANNEL = 'shared-task:account';
@@ -93,7 +94,7 @@ export function createSharedTaskApi(options: SharedTaskApiOptions) {
         if (seen.has(sharedTaskId)) throw new Error('Duplicate sharedTask');
         seen.add(sharedTaskId);
         return { sharedTaskId, sessionId: id(value.sessionId), ownerAccountId: id(value.ownerAccountId),
-          hostDeviceId: id(value.hostDeviceId), title: label(value.title), revision: integer(value.revision) };
+          hostDeviceId: sharedTaskDeviceId(value.hostDeviceId), title: label(value.title), revision: integer(value.revision) };
       });
     },
     async get(sharedTaskId: string): Promise<SharedTaskDetail> {

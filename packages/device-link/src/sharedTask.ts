@@ -3,7 +3,7 @@
  * routing: the relay and host must authenticate the source before consuming it.
  * Same-account device control continues to use its existing authorization path.
  */
-import { isSharedTaskPeer } from './protocol.js';
+import { isSharedTaskPeer, sharedTaskDeviceId } from './protocol.js';
 import { parseAttachmentOssRef } from './attachmentOssRef.js';
 
 /** Only objects issued for this shared task may be materialized on its host. */
@@ -149,7 +149,7 @@ function version(value: unknown): number {
 export function parseSharedTaskSnapshot(value: unknown): SharedTaskSnapshot {
   const row = record(value);
   const ownerAccountId = identifier(row.ownerAccountId);
-  const hostDeviceId = identifier(row.hostDeviceId);
+  const hostDeviceId = sharedTaskDeviceId(row.hostDeviceId);
   if (row.status !== 'active' && row.status !== 'closed') throw new Error('Invalid sharedTask status');
   if (!Array.isArray(row.guests) || row.guests.length > SHARED_TASK_MAX_SNAPSHOT_GUESTS) {
     throw new Error('Invalid sharedTask guests');
@@ -168,7 +168,7 @@ export function parseSharedTaskSnapshot(value: unknown): SharedTaskSnapshot {
     const devices = new Set<string>();
     if (!Array.isArray(guest.deviceIds) || guest.deviceIds.length > 64) throw new Error('Invalid member devices');
     const deviceIds = guest.deviceIds.map((value): string => {
-      const deviceId = identifier(value);
+      const deviceId = sharedTaskDeviceId(value);
       if (devices.has(deviceId)) throw new Error('Duplicate sharedTask device');
       devices.add(deviceId);
       return deviceId;
