@@ -23600,7 +23600,7 @@ describe('CodexAgent resume preparation', () => {
     }));
     const host = installFakeHost(agent);
     try {
-      await expect(agent.forkSdkSession({ sourceSdkSessionId: resumeSessionId, workingDir: root })).rejects.toThrow();
+      await expect(agent.forkSdkSession({ sourceSdkSessionId: resumeSessionId, workingDir: root, upToMessageId: undefined })).rejects.toThrow();
       expect(host.getHost).not.toHaveBeenCalled();
       expect(host.request).not.toHaveBeenCalled();
     } finally {
