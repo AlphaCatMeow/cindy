@@ -30,6 +30,7 @@ import {
   createEncryptedContentRecoveryRule,
   createImageGenerationIdRecoveryRule,
   createResponsesItemIdPrefixRecoveryRule,
+  createResponsesItemIdLengthRecoveryRule,
   createInstructionsInjectionTransform,
   createInstructionsRegistry,
   createXaiModelInputRecoveryRule,
@@ -40,6 +41,7 @@ import {
   stripEncryptedContentFromBody,
   stripImageGenerationItemsWithoutIdFromBody,
   stripNonCanonicalResponsesItemIdsFromBody,
+  shortenOversizedResponsesItemIdsFromBody,
   stripNonAnthropicFields,
   type ForwardLifecycleFailure,
   type ForwardLifecycleObserver,
@@ -112,6 +114,7 @@ import {
   encryptedStripController,
   imageGenerationStripController,
   responsesItemIdStripController,
+  responsesItemIdLengthStripController,
   xaiModelInputStripController,
 } from './thread-strip-controllers.js';
 import { createMakerLogger } from './logger-adapter.js';
@@ -206,6 +209,9 @@ const imageGenerationIdRecoveryRule = createImageGenerationIdRecoveryRule({
 const responsesItemIdPrefixRecoveryRule = createResponsesItemIdPrefixRecoveryRule({
   onRetry: (threadId, model) => responsesItemIdStripController.markActive(threadId, model),
 });
+const responsesItemIdLengthRecoveryRule = createResponsesItemIdLengthRecoveryRule({
+  onRetry: (threadId, model) => responsesItemIdLengthStripController.markActive(threadId, model),
+});
 const xaiModelInputRecoveryRule = createXaiModelInputRecoveryRule({
   onRetry: (threadId, model) => xaiModelInputStripController.markActive(threadId, model),
 });
@@ -214,6 +220,7 @@ const CODEX_BODY_RECOVERY_RULES = [
   encryptedContentRecoveryRule,
   imageGenerationIdRecoveryRule,
   responsesItemIdPrefixRecoveryRule,
+  responsesItemIdLengthRecoveryRule,
   xaiModelInputRecoveryRule,
   vllmResponsesCompatibilityRule,
 ] as const;
@@ -2920,6 +2927,12 @@ function createTransformRequestChain(
       controller: responsesItemIdStripController,
       enabled: () => true,
       strip: stripNonCanonicalResponsesItemIdsFromBody,
+    }),
+    // issue #4227: 同理, 上游拒绝过一次超长 item id 后, 该 thread 后续发送前预改写。
+    createActiveStripTransform({
+      controller: responsesItemIdLengthStripController,
+      enabled: () => true,
+      strip: shortenOversizedResponsesItemIdsFromBody,
     }),
     // Providers that explicitly lack Responses custom tools still accept ordinary
     // functions. Adapt before provider sanitizers, then restore custom_tool_call
