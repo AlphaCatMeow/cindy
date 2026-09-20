@@ -706,6 +706,8 @@ export interface AgentDeps {
    * 缺省 / 返回 undefined → 回退到全局 process.env.XDT_CC_DEBUG_FILE。
    */
   resolveCcDebugFile?: (sessionId?: string) => string | undefined;
+  /** Register one local debug writer; the returned disposer runs on process exit/error. */
+  trackCcDebugFile?: (filePath: string, sessionId?: string) => () => void;
 
   /**
    * MCP server 提供者列表（host 注入）。agent 在 startSession 时按上下文挑选

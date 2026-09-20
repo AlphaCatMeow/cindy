@@ -24,6 +24,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as subagentRuns from '../pi-subagent-runs.js';
 import type { AutoReviewRequest } from '../../shared/auto-review-decision.js';
 
 const captured = vi.hoisted(() => ({
@@ -740,6 +741,89 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       else process.env.ELECTRON_RUN_AS_NODE = previousNode;
       if (previousLegacy === undefined) delete process.env.CINDY_PI_SUBAGENT_NODE;
       else process.env.CINDY_PI_SUBAGENT_NODE = previousLegacy;
+    }
+  });
+
+  it.each([false, true])('backs off an empty root and wakes a launch (scan in flight: %s)', async (inFlight) => {
+    const realInterval = globalThis.setInterval;
+    let tick: (() => void) | undefined;
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, ms: number, ...args: unknown[]) => {
+      if (ms === 500) {
+        tick = callback;
+        return realInterval(() => {}, 2_000_000_000);
+      }
+      return realInterval(callback, ms, ...args);
+    }) as typeof setInterval);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const realScan = subagentRuns.scanPiSubagentRuns;
+    let scansFinished = 0;
+    let releaseScan: (() => void) | undefined;
+    let holdScan = false;
+    const scan = vi.spyOn(subagentRuns, 'scanPiSubagentRuns').mockImplementation(async function* (root, options) {
+      try {
+        yield* realScan(root, options);
+        if (holdScan && root.startsWith(agentHome + path.sep)) {
+          await new Promise<void>((resolve) => { releaseScan = resolve; });
+        }
+      } finally { if (root.startsWith(agentHome + path.sep)) scansFinished++; }
+    });
+    const pollCount = () => scan.mock.calls.filter(([root]) => root.startsWith(agentHome + path.sep)).length;
+    let handle: PiTestSessionHandle | undefined;
+    try {
+      handle = await start();
+      // Wait for the initial filesystem iterator to finish before sampling cadence.
+      await vi.waitFor(() => expect(scansFinished).toBe(1));
+      await flush();
+      const initial = pollCount();
+      expect(initial).toBeGreaterThan(0);
+      now += 500; tick!();
+      await flush();
+      expect(pollCount()).toBe(initial);
+      now += 2_000; tick!();
+      await vi.waitFor(() => expect(pollCount()).toBeGreaterThan(initial));
+      await vi.waitFor(() => expect(scansFinished).toBe(2));
+      await flush();
+      if (inFlight) {
+        holdScan = true;
+        now += 2_000; tick!();
+        await vi.waitFor(() => expect(releaseScan).toBeTypeOf('function'));
+      }
+      const afterIdle = pollCount();
+      const runId = '123e4567-e89b-42d3-a456-4266141740ad';
+      const runDir = path.join(captured.env.CINDY_PI_SUBAGENT_RUN_ROOT!, runId);
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(path.join(runDir, 'runner.cjs'), '');
+      writeFileSync(path.join(runDir, 'config.json'), '{}');
+      writeFileSync(path.join(runDir, 'status.json'), JSON.stringify({
+        version: 1, runId, taskId: 'poll-wake', parentSessionId: 's1',
+        runtimeOwnerId: captured.env.CINDY_PI_SUBAGENT_OWNER_ID,
+        runnerInstanceId: `launch-pending-${runId}`, state: 'queued',
+        startedAt: now, updatedAt: now, tasks: [],
+      }));
+      fireSubagentRunnerRequest('poll-launch', 'launch', runId);
+      await waitForResponse('poll-launch');
+      if (inFlight) {
+        expect(pollCount()).toBe(afterIdle);
+        holdScan = false; releaseScan!();
+        await vi.waitFor(() => expect(scansFinished).toBe(3));
+        await flush();
+        now += 500; tick!();
+        await vi.waitFor(() => expect(scansFinished).toBe(4));
+        await flush();
+      }
+      expect(pollCount()).toBeGreaterThan(afterIdle);
+      await vi.waitFor(() => expect(scansFinished).toBe(inFlight ? 4 : 3));
+      await flush();
+      expect(handle.listBackgroundTasks?.()).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 'poll-wake' })]));
+      const active = pollCount();
+      now += 500; tick!();
+      await vi.waitFor(() => expect(pollCount()).toBeGreaterThan(active));
+    } finally {
+      holdScan = false; releaseScan?.();
+      clock.mockRestore();
+      await handle?.close();
+      interval.mockRestore(); scan.mockRestore();
     }
   });
 
