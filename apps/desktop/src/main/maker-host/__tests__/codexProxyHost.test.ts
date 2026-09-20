@@ -3251,6 +3251,59 @@ describe('codex proxy host', () => {
     );
   });
 
+  it('arms recovery for a thread whose scoped socket codex already closed', async () => {
+    // #4773: Codex closes the thread WS itself on the upstream 400, so by the time
+    // maker-core arms recovery there is nothing left to disconnect. The proven
+    // thread handshake says the next upgrade will carry the same thread header,
+    // which is all the 426 decline needs.
+    const host = await freshCodexProxyHost();
+    const disconnectWebSocketsForThread = vi.fn(() => 0);
+    const hasProvenWebSocketForThread = vi.fn((threadId: string) => threadId === 'thread-closed');
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:43210',
+      disconnectWebSocketsForThread,
+      hasProvenWebSocketForThread,
+      dispose: vi.fn(async () => undefined),
+    });
+    await host.ensureCodexProxyReady();
+    host.setCodexProxyAuthInjection('oauth-bearer');
+
+    const proxyOpts = mockState.createAnthropicCompatProxy.mock.calls[0][0] as {
+      resolveWebSocketUpstream: (ctx: {
+        url: string;
+        headers: Readonly<Record<string, string>>;
+      }) => string | null;
+    };
+    const upgrade = (threadId: string) => proxyOpts.resolveWebSocketUpstream({
+      url: '/v1/responses',
+      headers: { 'thread-id': threadId },
+    });
+
+    expect(host.armCodexHttpRecovery({
+      sessionId: 'session-closed',
+      threadId: 'thread-closed',
+      message: 'invalid_encrypted_content',
+    })).toBe('encrypted_content');
+    expect(disconnectWebSocketsForThread).toHaveBeenCalledWith('thread-closed');
+    expect(hasProvenWebSocketForThread).toHaveBeenCalledWith('thread-closed');
+    // Next upgrade for that thread is declined; the transport falls back to HTTP.
+    expect(upgrade('thread-closed')).toBeNull();
+    // Other threads keep their native websocket.
+    expect(upgrade('thread-elsewhere')).toBe('https://chatgpt.com/backend-api/codex');
+
+    // A thread that never proved a scoped handshake still keeps native behaviour.
+    expect(host.armCodexHttpRecovery({
+      sessionId: 'session-anon',
+      threadId: 'thread-anon',
+      message: 'invalid_encrypted_content',
+    })).toBeNull();
+    expect(upgrade('thread-anon')).toBe('https://chatgpt.com/backend-api/codex');
+
+    // Closing the session drops the pending recovery with the thread registration.
+    host.unregister('session-closed');
+    expect(upgrade('thread-closed')).toBe('https://chatgpt.com/backend-api/codex');
+  });
+
   it('arming recovery for a child thread preserves its parent and sibling routes', async () => {
     const host = await freshCodexProxyHost();
     const disconnectWebSocketsForThread = vi.fn(() => 2);
