@@ -6,8 +6,13 @@ const directory = readFileSync(
   new URL('../resources/installer-directory.nsh', import.meta.url),
   'utf8',
 );
+const forge = readFileSync(new URL('../forge.config.ts', import.meta.url), 'utf8');
 
 describe('Windows NSIS include paths', () => {
+  it('configures electron-builder to resolve project resources from the desktop resources directory', () => {
+    expect(forge).toContain("buildResources: path.join(__dirname, 'resources')");
+  });
+
   it('resolves project-owned includes from BUILD_RESOURCES_DIR', () => {
     expect(installer).toContain('!include "${BUILD_RESOURCES_DIR}\\winget-shortcuts.nsh"');
     expect(installer).toContain('!include "${BUILD_RESOURCES_DIR}\\installer-directory.nsh"');
