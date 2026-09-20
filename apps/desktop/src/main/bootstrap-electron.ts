@@ -7674,8 +7674,15 @@ const registerIpcHandlers = () => {
       assertTrustedAppRendererEvent(event);
       try {
         return await actCindyMakeHistory(runId, action);
-      } catch {
-        throwIpcError('PRECONDITION_FAILED', 'unavailable');
+      } catch (error) {
+        const message = (error as { message?: unknown }).message;
+        const reason =
+          typeof message === 'string'
+            ? /^\[PRECONDITION_FAILED\]\s*(busy|dirty|conflict|cleanupFailed|directoryBusy|unavailable)$/.exec(
+                message,
+              )?.[1]
+            : undefined;
+        throwIpcError('PRECONDITION_FAILED', reason ?? 'unavailable');
       }
     },
   );
