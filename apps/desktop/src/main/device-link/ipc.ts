@@ -950,16 +950,21 @@ function finalMirrorCacheReadOwnerToken(
  * 缓存 id 的长度上界。renderer 被 XSS 时可以塞进任意长的 deviceId / sessionId,而 store 随后
  * 会对**完整字符串**做 trim + 正则改写 + sha256(messageFileName / clearDevice),这些都是同步
  * 的 —— 一次调用就能拖住 main(数组与单条字节预算管不到标量字段)(review: codex P1)。
- * 真实 id 是 cuid / uuid 量级(≤ 64),给到 256 已经宽松得离谱。
+ * 普通 id 保持 256 上限;共享连接标识包含 JSON 转义后的物理设备 id,由其 parser 单独限长。
  */
 const MIRROR_CACHE_MAX_ID_LENGTH = 256;
 
 /** opaque owner token 是 32-byte digest 的 base64url(43 字符);宽松上限防异常 renderer。 */
 const MIRROR_CACHE_MAX_OWNER_TOKEN_LENGTH = 128;
 
-function requireCacheId(value: unknown, name: string): string {
+function isCacheIdWithinLimit(id: string, name: 'deviceId' | 'sessionId'): boolean {
+  return id.length <= MIRROR_CACHE_MAX_ID_LENGTH
+    || (name === 'deviceId' && parseSharedTaskPeer(id) !== null);
+}
+
+function requireCacheId(value: unknown, name: 'deviceId' | 'sessionId'): string {
   const id = requireString(value, name);
-  if (id.length > MIRROR_CACHE_MAX_ID_LENGTH) {
+  if (!isCacheIdWithinLimit(id, name)) {
     throwIpcError('INVALID_PARAMS', `${name} is too long`);
   }
   return id;
@@ -1140,7 +1145,7 @@ export async function handleMirrorCachePutSessionList(
     }
     return {
       deviceId: typeof source.deviceId === 'string'
-        && source.deviceId.length <= MIRROR_CACHE_MAX_ID_LENGTH
+        && isCacheIdWithinLimit(source.deviceId, 'deviceId')
         ? source.deviceId
         : undefined,
       deviceName: typeof source.deviceName === 'string'
