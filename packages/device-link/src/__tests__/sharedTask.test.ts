@@ -24,8 +24,16 @@ describe('sharedTask authorization', () => {
   });
   it('only permits attachment references in this sharing namespace', () => {
     const ref = (ossKey: string) => buildAttachmentOssRef({ ossKey, originalName: 'image.png', mimeType: 'image/png', size: 1, sha256: 'a'.repeat(64) });
-    expect(isSharedTaskAttachment(ref('cindy/shared-task/shared/u/file.png'), 'shared')).toBe(true);
-    for (const key of ['cindy/shared-task/other/u/file.png', 'cindy/device-link/u/file.png', 'cindy/shared-task/shared/u/../file.png']) {
+    expect(isSharedTaskAttachment(ref('cindy/device-link/shared-task/shared/u/file.png'), 'shared')).toBe(true);
+    for (const key of [
+      'cindy/device-link/shared-task/other/u/file.png',
+      'cindy/device-link/u/file.png',
+      'cindy/device-link/shared-task/file.png',
+      'cindy/device-link/shared-task/shared/u/../file.png',
+      'cindy/device-link/shared-task/shared/u/%2e%2e',
+      'cindy/device-link/shared-task/shared/u',
+      'cindy/shared-task/shared/u/file.png',
+    ]) {
       expect(isSharedTaskAttachment(ref(key), 'shared')).toBe(false);
     }
     expect(isSharedTaskAttachment('file:///private/file.png', 'shared')).toBe(false);

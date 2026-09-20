@@ -23,7 +23,7 @@ const readFileChunk = vi.fn(async (_uri: string, _position: number, length: numb
 
 describe('mobileAttachmentUpload', () => {
   it('presigns against the captured shared task rather than the private account namespace', async () => {
-    const apiFetch = vi.fn(async () => ({ putUrl: 'https://oss.example/upload', key: 'cindy/shared-task/task/u/file.png', expiresAt: '2026-09-16T12:00:00Z' }));
+    const apiFetch = vi.fn(async () => ({ putUrl: 'https://oss.example/upload', key: 'cindy/device-link/shared-task/task/u/file.png', expiresAt: '2026-09-16T12:00:00Z' }));
     await presignMobileAttachmentUpload({ name: 'file.png', size: 10, mimeType: 'image/png' }, {
       token: 'token', sharedTaskId: 'task', deps: { apiFetch: apiFetch as unknown as typeof apiFetchRaw },
     });

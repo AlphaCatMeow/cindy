@@ -10,8 +10,9 @@ import { parseAttachmentOssRef } from './attachmentOssRef.js';
 export function isSharedTaskAttachment(value: string, sharedTaskId: string): boolean {
   const ref = parseAttachmentOssRef(value);
   const parts = ref?.ossKey.split('/');
-  return !!parts && parts.length === 5 && parts[0] === 'cindy' && parts[1] === 'shared-task' &&
-    parts[2] === sharedTaskId && parts.slice(2).every((part) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(part));
+  return !!parts && parts.length === 6 && parts[0] === 'cindy' && parts[1] === 'device-link' &&
+    parts[2] === 'shared-task' && parts[3] === sharedTaskId &&
+    parts.slice(3).every((part) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(part));
 }
 
 export const SHARED_TASK_CAPABILITY = 'shared-task-v1';
