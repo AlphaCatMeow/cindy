@@ -12683,6 +12683,7 @@
     }
   },
   "cindyMake": {
+    "beta": "Beta",
     "description": "ローカルのツールを確認・準備して個人版 Cindy を作成します。使い方: /cindy-make [変更内容]",
     "localOnly": "/cindy-make は現在、ローカルのデスクトップセッションでのみ使用できます。このデバイスに切り替えてください。",
     "usage": "/cindy-make または /cindy-make 要望 を使用してください。環境チェックは添付ファイル、参照、コメントにまだ対応していません。入力内容は保持されます。",
@@ -12823,18 +12824,11 @@
       },
       "missing": "ソースはまだ準備されていません",
       "details": {
-        "branch": "個人版ブランチ",
-        "baseRef": "{{ref}} を基準",
-        "baseCommit": "基準バージョン",
-        "mainCommit": "main のバージョン",
-        "currentBranch": "プロジェクトの現在のブランチ",
-        "detached": "ブランチなし（固定コミット）",
         "unknown": "ソースを更新して確認",
         "latest": {
-          "dev": "最新の main",
+          "dev": "オンラインの main",
           "beta": "最新の beta",
           "release": "最新の正式版",
-          "unavailable": "確認できませんでした。設定を開き直して再試行してください",
           "same": "（同期済み）",
           "behind_one": "（{{count}} コミット遅れ）",
           "behind_other": "（{{count}} コミット遅れ）",
@@ -12890,6 +12884,22 @@
       "changedFiles_other": "{{count}} 個のファイルを変更",
       "commit": "{{commit}} を基準",
       "branch": "{{branch}} にコミット済み"
+    },
+    "overview": {
+      "description": "個人版のソースの確認、使用するバージョンの切り替え、制作履歴の管理ができます。",
+      "title": "バージョン概要",
+      "switchVersion": "バージョンを切り替え",
+      "personalCode": "個人版のソース",
+      "localMain": "ローカル main",
+      "lookupUnavailable": "確認できませんでした。最新ソースを同期すると再確認します。",
+      "comparisonUnavailable": "（コミットを比較できません）",
+      "comparison": {
+        "same": "個人版とローカル main のコミットは一致しています",
+        "personalAhead": "ローカル main を含み、個人版に {{ahead}} 件の追加コミットがあります",
+        "mainAhead": "ローカル main が {{behind}} コミット先行しています",
+        "diverged": "ローカル main が {{behind}} コミット先行し、個人版に {{ahead}} 件の追加コミットがあります",
+        "unknown": "コミットを比較できません。最新ソースを同期して再試行してください。"
+      }
     },
     "versions": {
       "title": "マイバージョン",
@@ -13094,7 +13104,7 @@
       "files_other": "{{count}} ファイルを変更"
     },
     "merge": {
-      "getLatest": "最新ソースを取得",
+      "getLatest": "最新ソースを同期",
       "updateHint": "公式ソースを更新し、個人の変更を保持します。",
       "confirmTitle": "最新ソースに更新しますか？",
       "confirmDescription": "個人の変更は保持されます。競合が発生した場合は、専用タスクで解決を支援します。",

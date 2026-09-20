@@ -12683,6 +12683,7 @@
     }
   },
   "cindyMake": {
+    "beta": "Beta",
     "description": "檢查並準備本機工具，開始製作個人版 Cindy。用法：/cindy-make [修改需求]",
     "localOnly": "/cindy-make 暫僅支援本機桌面任務。請切回本機後使用。",
     "usage": "請使用 /cindy-make 或 /cindy-make 需求。環境檢查暫不支援附件、引用或註解，輸入已保留。",
@@ -12823,18 +12824,11 @@
       },
       "missing": "尚未準備原始碼",
       "details": {
-        "branch": "個人版分支",
-        "baseRef": "基於 {{ref}}",
-        "baseCommit": "來源版本",
-        "mainCommit": "main 版本",
-        "currentBranch": "目前專案分支",
-        "detached": "不在分支上（固定提交）",
         "unknown": "更新原始碼後查看",
         "latest": {
-          "dev": "最新 main",
+          "dev": "線上 main",
           "beta": "最新 beta",
           "release": "最新正式版",
-          "unavailable": "無法查詢，請重新開啟設定重試",
           "same": "（已同步）",
           "behind_one": "（落後 {{count}} 個提交）",
           "behind_other": "（落後 {{count}} 個提交）",
@@ -12890,6 +12884,22 @@
       "changedFiles_other": "{{count}} 個檔案有改動",
       "commit": "基於 {{commit}}",
       "branch": "已提交到 {{branch}}"
+    },
+    "overview": {
+      "description": "查看個人版程式碼、切換使用版本及管理製作歷史。",
+      "title": "版本概覽",
+      "switchVersion": "切換版本",
+      "personalCode": "個人版程式碼",
+      "localMain": "本機 main",
+      "lookupUnavailable": "暫時無法查詢，同步最新原始碼時會重新檢查。",
+      "comparisonUnavailable": "（暫時無法比較提交）",
+      "comparison": {
+        "same": "個人版與本機 main 提交一致",
+        "personalAhead": "已包含本機 main，另有 {{ahead}} 個個人提交",
+        "mainAhead": "本機 main 領先 {{behind}} 個提交",
+        "diverged": "本機 main 領先 {{behind}} 個提交，個人版另有 {{ahead}} 個提交",
+        "unknown": "暫時無法比較提交，請同步最新原始碼後重試。"
+      }
     },
     "versions": {
       "title": "我的版本",
@@ -13094,7 +13104,7 @@
       "files_other": "改動 {{count}} 個檔案"
     },
     "merge": {
-      "getLatest": "取得最新原始碼",
+      "getLatest": "同步最新原始碼",
       "updateHint": "更新官方原始碼，並保留個人改動。",
       "confirmTitle": "更新到最新原始碼？",
       "confirmDescription": "會保留你的個人改動。如有衝突，將透過獨立任務協助處理。",
