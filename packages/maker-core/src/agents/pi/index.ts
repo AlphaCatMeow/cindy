@@ -5334,8 +5334,13 @@ export class PiAgent extends BaseAgent {
                 }
                 const notification: AgentEvent = {
                   type: 'text',
-                  data: { text, isFinal: false },
+                  data: { text, isFinal: true },
                   source: 'pi',
+                  standaloneText: true,
+                  turnScope: 'background',
+                  // Freeze the notice's origin before the async queue: a later
+                  // /clear must discard it even when delivery happens afterward.
+                  backgroundTurnStartedAt: Date.now(),
                 };
                 queue.push(notification);
                 return notification;

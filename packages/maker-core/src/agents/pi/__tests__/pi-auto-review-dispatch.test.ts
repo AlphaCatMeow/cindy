@@ -1423,8 +1423,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
     }
   });
 
-  it('presents Pi extension notifications in the Cindy transcript', async () => {
+  it('stamps Pi notifications before delayed delivery so clear can reject old notices', async () => {
     const handle = await start();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
     const events: Array<Record<string, unknown>> = [];
     void (async () => {
       for await (const event of handle.events()) {
@@ -1439,17 +1440,22 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
         message: '## context-mode stats (Pi)\n\n- Events captured: 0',
         notifyType: 'info',
       });
+      clock.mockReturnValue(2000); // Simulate a clear/delivery boundary after emission.
       await flush();
       expect(events).toContainEqual({
         type: 'text',
         data: {
           text: '## context-mode stats (Pi)\n\n- Events captured: 0',
-          isFinal: false,
+          isFinal: true,
         },
         source: 'pi',
+        standaloneText: true,
+        turnScope: 'background',
+        backgroundTurnStartedAt: 1000,
       });
       expect(captured.sent.find((message) => message.id === 'context-mode-stats')).toBeUndefined();
     } finally {
+      clock.mockRestore();
       await handle.close();
     }
   });
@@ -1624,7 +1630,7 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
         expect(resolver).not.toHaveBeenCalled();
         expect(captured.sent).toHaveLength(sentBefore);
         expect(events.filter((event) => event.type === 'text')).toEqual([
-          { type: 'text', data: { text: 'Extension command result', isFinal: false }, source: 'pi' },
+          { type: 'text', data: { text: 'Extension command result', isFinal: true }, source: 'pi', standaloneText: true, turnScope: 'background', backgroundTurnStartedAt: expect.any(Number) },
         ]);
       } finally {
         await handle.close();
