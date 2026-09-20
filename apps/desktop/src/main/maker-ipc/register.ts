@@ -394,6 +394,15 @@ import {
   readClaudeApiKey,
 } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
+import {
+  activeCindyBuiltInAgentSkills,
+  builtInSkillDescriptors,
+} from '../maker-host/built-in-skills.js';
+import { isCindySkillEnabled } from '../skillhub/activationPreferences.js';
+import {
+  parseDirectLearnInvocation,
+  type CindyLearnInvocationGrant,
+} from '../learn-host/invocationGrant.js';
 import { ensurePiManagerInstalled } from '../maker-host/pi-manager-client.js';
 import {
   setRemoteCodexLiveTurnChecker,
@@ -5884,8 +5893,16 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // Desktop / agent-builtin / agent-skill 各一条 list 接口 + desktop 自家的
   // execute 接口。renderer 通过 mergeCommands 把三路 list 合并展示, dispatch
   // 时按 kind 分流: desktop → executeDesktopCommand IPC; agent-* → 当 prompt 前缀 send。
-  ipcMain.handle(MAKER_INVOKE.LIST_DESKTOP_COMMANDS, () => {
-    return { success: true, commands: getDesktopCommandRegistry().list() };
+  ipcMain.handle(MAKER_INVOKE.LIST_DESKTOP_COMMANDS, (_event, ctx?: unknown) => {
+    const deviceId = ctx && typeof ctx === 'object' && !Array.isArray(ctx)
+      && typeof (ctx as { deviceId?: unknown }).deviceId === 'string'
+      && (ctx as { deviceId: string }).deviceId.length > 0
+      ? (ctx as { deviceId: string }).deviceId
+      : undefined;
+    return {
+      success: true,
+      commands: getDesktopCommandRegistry().list(deviceId ? { deviceId } : undefined),
+    };
   });
 
   ipcMain.handle(MAKER_INVOKE.EXECUTE_DESKTOP_COMMAND, async (e, name: unknown, ctx: unknown) => {
@@ -6013,7 +6030,15 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           await desktopClaudeAuthAdapter.ensureSharedGlobalSkills();
         }
         const result = await maker.listAgentSkills(kind, skillParams);
-        return { success: true, ...result };
+        return {
+          success: true,
+          ...result,
+          skills: activeCindyBuiltInAgentSkills(
+            result.skills,
+            builtInSkillDescriptors(app.getPath('userData'), app.getPath('appData')),
+            isCindySkillEnabled,
+          ),
+        };
       } catch (err) {
         return toAgentSkillListFailure(err, {
           reportError: (error) => {
@@ -12241,6 +12266,64 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     prepareSendUserMessage: (sessionId, message) =>
       prepareUserMessageForAgent(sessionId, message, 'send'),
     materializeDirectSendOssAttachments,
+    captureCindyLearnInvocation: async (session, persistedContent, dispatchedText) => {
+      const invocationText = visibleMessageTextForConversationSearch(
+        'user',
+        typeof persistedContent === 'string' ? persistedContent : JSON.stringify(persistedContent),
+      );
+      const persistedInvocation = parseDirectLearnInvocation(invocationText);
+      const dispatchedInvocation = parseDirectLearnInvocation(dispatchedText);
+      if (
+        !persistedInvocation
+        || !dispatchedInvocation
+        || JSON.stringify(persistedInvocation) !== JSON.stringify(dispatchedInvocation)
+      ) return null;
+      if (
+        session.remoteHostId
+        || maker.getSession(session.id) !== session
+        || (session.getStatus && session.getStatus() !== 'active')
+      ) return null;
+
+      const descriptors = builtInSkillDescriptors(
+        app.getPath('userData'),
+        app.getPath('appData'),
+      );
+      const learnDescriptor = descriptors.find((descriptor) => descriptor.name === 'learn');
+      if (!learnDescriptor || !isCindySkillEnabled(learnDescriptor.absolutePath)) return null;
+
+      const result = session.agentKind === 'claude-code'
+        ? await maker.listAgentRuntimeSkills(session.agentKind, {
+          workingDir: session.workDir,
+          sessionId: session.id,
+          runtimeConfigDir: process.env.CLAUDE_CONFIG_DIR?.trim() || (
+            process.env.XDT_USER_DATA_DIR && !app.isPackaged
+              ? path.join(app.getPath('userData'), 'claude-home')
+              : path.join(os.homedir(), '.claude')
+          ),
+        })
+        : await maker.listAgentSkills(session.agentKind, {
+          workingDir: session.workDir,
+          sessionId: session.id,
+        });
+      if (result.errors?.length || maker.getSession(session.id) !== session) return null;
+      const learnCandidates = activeCindyBuiltInAgentSkills(
+        result.skills,
+        descriptors,
+        isCindySkillEnabled,
+      ).filter((skill) => skill.name.toLowerCase() === 'learn');
+      if (
+        learnCandidates.length !== 1
+        || learnCandidates.some((skill) => skill.builtIn !== true || !skill.path)
+      ) return null;
+
+      const resolvedSkillPath = await fsp.realpath(learnCandidates[0]!.path!);
+      if (maker.getSession(session.id) !== session) return null;
+      return {
+        version: 1,
+        sessionInstanceId: session.instanceId,
+        resolvedSkillPath,
+      } satisfies CindyLearnInvocationGrant;
+    },
     createDbMessage: createUserMessageDurably,
     rewindPersistedUserMessageAfterClear: (sessionId, clientId) =>
       enqueueDurableWrite(`user-rewind:${sessionId}:${clientId}`, () =>
@@ -12410,111 +12493,17 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         .limit(1);
       return row ?? null;
     },
-    tryStripOversizedCodexHistory: async ({
-      sessionId,
-      threadId,
-      model,
-      providerId,
-      workingDir,
-    }) => {
+    classifyCodexHistory: async (threadId) => {
       const ownerScope = captureDataOwnerBroadcastScope();
       const dbSnapshot = getCurrentDbClientSnapshot();
-      let committed = false;
-      try {
-        const classified = await classifyCodexHistoryOversized(threadId);
-        if (
-          !isDataOwnerBroadcastScopeCurrent(ownerScope) ||
-          !dbSnapshot ||
-          getCurrentDbClientSnapshot()?.clientEpoch !== dbSnapshot.clientEpoch
-        ) {
-          return 'stale';
-        }
-        if (classified === 'healthy') return 'not-needed';
-        if (classified !== 'oversized') return 'failed';
-        const live = getMaker().getSession(sessionId);
-        // busy ≠ failed：外层已守卫 turn-running；这里若仍撞上，中止而不是升级成 rebuild。
-        if (live?.isTurnRunning()) return 'busy';
-        if (live) await getMaker().closeSession(sessionId, 'runtime-refresh');
-        const forked = await getMaker().forkSdkSession('codex', {
-          sourceSdkSessionId: threadId,
-          model: model ?? undefined,
-          providerId,
-          upToMessageId: undefined,
-          workingDir: workingDir ?? undefined,
-          stripEncryptedReasoning: true,
-          remoteHostId: null,
-        });
-        if (!isDataOwnerBroadcastScopeCurrent(ownerScope)) return 'stale';
-        const currentDb = getCurrentDbClientSnapshot();
-        if (!dbSnapshot || !currentDb || currentDb.clientEpoch !== dbSnapshot.clientEpoch) {
-          return 'stale';
-        }
-        const now = Date.now();
-        const write = await dbSnapshot.client.drizzle
-          .update(sessions)
-          .set({ sdkSessionId: forked.newSdkSessionId, updatedAt: now })
-          .where(and(eq(sessions.id, sessionId), eq(sessions.sdkSessionId, threadId)))
-          .run();
-        if (write.changes === 0) return 'failed';
-        committed = true;
-        try {
-          broadcastSessionPatched(
-            sessionId,
-            {
-              sdkSessionId: forked.newSdkSessionId,
-              updatedAt: new Date(now).toISOString(),
-            },
-            ownerScope,
-          );
-          const cardOwnerCurrent =
-            isDataOwnerBroadcastScopeCurrent(ownerScope) &&
-            getCurrentDbClientSnapshot()?.clientEpoch === dbSnapshot.clientEpoch;
-          if (!cardOwnerCurrent) {
-            log.warn('codex oversized history card skipped: owner changed after relink', {
-              sessionId,
-              threadId,
-              toThreadId: forked.newSdkSessionId,
-            });
-          } else {
-            await createDbMessage(
-              sessionId,
-              {
-                clientId: `context-rebuild-card:${createId()}`,
-                role: 'assistant',
-                content: '',
-                agentKind: 'codex',
-                agentMeta: { contextRebuild: { reason: 'codex-history-strip' } } as AgentMeta,
-              },
-              {
-                broadcastOwnerScope: ownerScope,
-                shouldBroadcast: () =>
-                  isDataOwnerBroadcastScopeCurrent(ownerScope) &&
-                  getCurrentDbClientSnapshot()?.clientEpoch === dbSnapshot.clientEpoch,
-              },
-            );
-          }
-        } catch (postError) {
-          log.warn('codex oversized history relink post-commit failed', {
-            sessionId,
-            threadId,
-            toThreadId: forked.newSdkSessionId,
-            error: postError instanceof Error ? postError.message : String(postError),
-          });
-        }
-        log.info('codex oversized history relinked in place', {
-          sessionId,
-          fromThreadId: threadId,
-          toThreadId: forked.newSdkSessionId,
-        });
-        return 'recovered';
-      } catch (error) {
-        log.warn('codex oversized history relink failed', {
-          sessionId,
-          threadId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return committed ? 'recovered' : 'failed';
+      const result = await classifyCodexHistoryOversized(threadId);
+      if (
+        !dbSnapshot || !isDataOwnerBroadcastScopeCurrent(ownerScope) ||
+        getCurrentDbClientSnapshot()?.clientEpoch !== dbSnapshot.clientEpoch
+      ) {
+        throw new Error('Codex history owner changed during inspection');
       }
+      return result;
     },
     getAutoCompactThresholdPct: () => readCompactionPct(),
     resolveVerifiedWindow: (agentKind, modelId, providerId) => {
@@ -12653,7 +12642,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         planMode: !!row.planModeEnabled,
         title: row.title ?? undefined,
         remoteHostId: row.remoteHostId ?? undefined,
-        ...(recovery?.resumeRetainedHistory ? { resumeSessionId: row.sdkSessionId ?? undefined } : {}),
       });
       if (createOpts.extraDirs === undefined) {
         try {
@@ -12670,13 +12658,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const writableDirs = await readSessionWritableDirsFromDb(sessionId).catch(() => []);
         if (writableDirs.length > 0) createOpts.writableDirs = writableDirs;
       }
-      const recoveryIntent = recovery?.resumeRetainedHistory
+      const recoveryIntent = recovery?.continueFromHistory
         ? restoreAutoReviewUserIntent(await readAutoReviewHistory(sessionId), {
             clientId: recovery.sourceUserClientId,
             content: recovery.sourceUserContent,
           })
         : undefined;
-      if (recovery?.resumeRetainedHistory &&
+      if (recovery?.continueFromHistory &&
         (row.source !== 'desktop' || isHeadlessGhostSetupTurn(sessionId) || bindingStore.findByTarget(sessionId))) {
         return { accepted: false };
       }
@@ -12684,7 +12672,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         sessionId,
         persistedUserContentToWireMessage(agentFacingWireContent ?? content),
         createOpts,
-        recovery?.resumeRetainedHistory
+        recovery?.continueFromHistory
           ? {
               signal: recovery.signal,
               [INHERITED_CAPABILITY_SELECTION]: recovery.sourceCapabilitySelectionText,

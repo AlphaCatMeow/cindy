@@ -84,6 +84,8 @@ Small interactive chips (button backgrounds, tag pills, avatar fills, selected-n
 
 Toast loading is neutral: use the shared 16×16 Spinner in `--text-secondary`, with polite status semantics. Keep it visible until the operation settles and explicitly dismiss it; only failures use the error variant.
 
+Desktop task errors do not display reminder dots in task rows, pinned cards, or project/device aggregates. Keep running, awaiting-input, and successful-unread indicators; stale failure urgency must not hide pending input. Automation run-history cards retain their unread failure dots, and the shared dot primitive remains tone-driven. Errors and interrupted runs remain available inside the task; automatic-run failure notices link to the corresponding automation with “View Details”. This does not change native Agent Island, mobile, or OS notification behavior.
+
 The grayscale rule is near-absolute. The following are the **only** sanctioned non-gray colors in the system — each tightly scoped to a specific surface. New semantic colors must not be introduced without being recorded here first.
 
 - **Focus Blue** (`#417CDD` at 50%; tokens `--focus-ring` / `--focus-ring-soft`): the keyboard-accessibility focus ring, finalized 2026-07-17 (replaces Tailwind's default `#3b82f6`). Never visible in normal interaction flow.

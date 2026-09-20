@@ -30,6 +30,7 @@ import { structuredPatch } from 'diff';
 import {
   BaseAgent,
   INHERITED_CAPABILITY_SELECTION,
+  PINNED_SKILL_INVOCATION,
   CodexResumePreparationBlockedError,
   OneShotError,
   AgentNotAuthenticatedError,
@@ -40,6 +41,7 @@ import {
   type CodexExtraSpawnConfig,
   type StartSessionOptions,
   type OneShotOptions,
+  type PinnedSkillInvocation,
   type RefreshLocalModelsOptions,
   type SendOptions,
   type TurnPermissionPolicy,
@@ -181,9 +183,6 @@ import {
   buildCompactionStormTerminalError,
 } from './compaction-storm.js';
 import {
-  CODEX_HISTORY_OVERSIZED_REASON,
-  isOversizedLiveTailStats,
-  measureRolloutLiveTailStats,
   assertCodexRolloutRewriteSupported,
   readCodexRolloutModelProvider,
   sanitizeCodexForkRolloutFileInPlace,
@@ -1071,13 +1070,33 @@ function skillDescription(skill: SkillMetadata): string | undefined {
 }
 
 function isPaletteVisibleCodexSkill(skill: SkillMetadata): boolean {
-  if (!skill.enabled || skill.scope === 'system' || skill.scope === 'admin') return false;
+  if (!skill.enabled || skill.scope === 'admin') return false;
+
+  if (skill.scope === 'system') {
+    const normalizedPath = skill.path.replace(/\\/g, '/').replace(/\/$/, '');
+    return skill.name.toLowerCase() === 'skill-creator'
+      && /\/skills\/\.system\/skill-creator(?:\/skill\.md)?$/i.test(normalizedPath);
+  }
 
   // Codex plugins can contribute internal skills and currently report them as scope=user.
   // They remain available to Codex's own dispatch, but Cindy's slash palette should only
   // expose installed user/repo skills instead of every plugin implementation detail.
   const normalizedPath = skill.path.replace(/\\/g, '/');
   return !/\/plugins\/cache\/[^/]+\/[^/]+\/[^/]+\/skills\//i.test(normalizedPath);
+}
+
+function paletteVisibleCodexSkills(skills: readonly SkillMetadata[]): SkillMetadata[] {
+  const visible = skills.filter(isPaletteVisibleCodexSkill);
+  const installedNames = new Set(visible
+    .filter((skill) => skill.scope !== 'system')
+    .map((skill) => skill.name.toLowerCase()));
+  return visible.filter((skill) => skill.scope !== 'system' || !installedNames.has(skill.name.toLowerCase()));
+}
+
+function selectInvocableCodexSkill(skills: readonly SkillMetadata[], name: string): SkillMetadata | undefined {
+  const matching = skills.filter((skill) => skill.enabled && skill.name.toLowerCase() === name.toLowerCase());
+  return matching.find((skill) => skill.scope !== 'system' && skill.scope !== 'admin')
+    ?? matching[0];
 }
 
 function parseLeadingSlashToken(text: string): { name: string; rest: string } | null {
@@ -1965,8 +1984,7 @@ export class CodexAgent extends BaseAgent {
         opts.remoteHostId,
       );
       const out: ListAgentSkillsResult = {
-        skills: skills
-          .filter(isPaletteVisibleCodexSkill)
+        skills: paletteVisibleCodexSkills(skills)
           .map((skill) => ({
             kind: 'agent-skill' as const,
             name: skill.name,
@@ -3366,7 +3384,6 @@ export class CodexAgent extends BaseAgent {
       reviewMode,
       mcpProvidersCount: this.deps.mcpProviders?.length ?? 0,
     });
-    const stallAgent = this;
 
     // ── Maker Memory: 启动时预拉 MEMORY.md 索引 + 写入规范段 ────────────────
     // thread/start 仍把 developerInstructions 写入新 thread; thread/resume 在普通非 proxy
@@ -6136,23 +6153,51 @@ export class CodexAgent extends BaseAgent {
       return undefined;
     }
 
-    const toTurnInput = async (content: UserMessage['content']): Promise<UserInput[]> => {
+    const toTurnInput = async (
+      content: UserMessage['content'],
+      pinnedSkill?: PinnedSkillInvocation,
+    ): Promise<UserInput[]> => {
       if (reviewMode) {
+        if (pinnedSkill) {
+          throw new Error('A pinned Skill invocation is not allowed in review mode');
+        }
         await assertReviewMessageContentPaths(content, opts.workingDir, reviewReadGrants);
         // Review never resolves leading slash text as a user/project Skill. Its
         // prompt and evidence must stay independent from task customizations.
         return toAppServerInput(content, opts.workingDir);
       }
-      if (typeof content !== 'string') return toAppServerInput(content, opts.workingDir);
+      if (typeof content !== 'string') {
+        if (pinnedSkill) {
+          throw new Error('A pinned Skill invocation requires a text command');
+        }
+        return toAppServerInput(content, opts.workingDir);
+      }
 
       const slash = parseLeadingSlashToken(content.trim());
+      if (pinnedSkill) {
+        const normalizedSlashName = slash?.name.toLowerCase();
+        const normalizedSkillName = pinnedSkill.name.toLowerCase();
+        if (
+          !slash
+          || (normalizedSlashName !== normalizedSkillName
+            && normalizedSlashName !== `skill:${normalizedSkillName}`)
+        ) {
+          throw new Error('The pinned Skill does not match the dispatched command');
+        }
+        const inputs: UserInput[] = [{
+          type: 'skill',
+          name: pinnedSkill.name,
+          path: pinnedSkill.path,
+        }];
+        const prompt = slash.rest.trim();
+        if (prompt) inputs.push({ type: 'text', text: prompt });
+        return inputs;
+      }
       if (!slash) return toAppServerInput(content, opts.workingDir);
 
       try {
         const { skills } = await this.listSkillsForCwd(opts.workingDir, false);
-        const skill = skills.find(
-          (item) => item.enabled && item.name.toLowerCase() === slash.name.toLowerCase(),
-        );
+        const skill = selectInvocableCodexSkill(skills, slash.name);
         if (!skill) return toAppServerInput(content, opts.workingDir);
 
         const inputs: UserInput[] = [{ type: 'skill', name: skill.name, path: skill.path }];
@@ -7695,9 +7740,8 @@ export class CodexAgent extends BaseAgent {
     let reconnectStallTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectStallTurnId: string | null = null;
     let reconnectStallTurnGeneration = 0;
-    // `codex_reconnect_stalled` is surfaced before the bounded interrupt
-    // handshake so Desktop can show the reconnect state immediately. Keep the
-    // provider turn busy until that handshake settles; otherwise the Desktop
+    // Keep the reconnect status visible and the provider turn busy until the
+    // bounded interrupt handshake settles; otherwise the Desktop
     // auto-resume backoff can admit a new turn while the old server turn is
     // still running (PR #1410).
     let reconnectStallCleanupTurnId: string | null = null;
@@ -7961,38 +8005,8 @@ export class CodexAgent extends BaseAgent {
             message,
           });
         };
-        if (!stalledThreadId || opts.remoteHostId ||
-          (!sessionRolloutPath && !sessionCodexHome && !stallAgent.hasLocalCodexHome())) {
-          emitStalled('codex_reconnect_stalled', stalledMessage);
-          return;
-        }
-        void (async () => {
-          let reason = 'codex_reconnect_stalled';
-          let message = stalledMessage;
-          try {
-            const rolloutPath = await stallAgent.findRolloutPath(stalledThreadId, sessionRolloutPath, sessionCodexHome ?? undefined);
-            const stats = await measureRolloutLiveTailStats(rolloutPath);
-            if (isOversizedLiveTailStats(stats)) {
-              reason = CODEX_HISTORY_OVERSIZED_REASON;
-              message =
-                'Codex remote compaction cannot finish because this thread\'s live history is oversized. ' +
-                'Fork and strip oversized inline images to continue.';
-              log.warn('codex reconnect stall classified as oversized live history', {
-                threadId: stalledThreadId,
-                tailBytes: stats.tailBytes,
-                projectedTailBytes: stats.projectedTailBytes,
-                strippedBytes: stats.strippedBytes,
-                thresholdBytes: stats.tailBytes,
-              });
-            }
-          } catch (error) {
-            log.debug('codex live-tail measure skipped', {
-              threadId: stalledThreadId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-          emitStalled(reason, message);
-        })();
+        // History size does not establish why the connection stalled.
+        emitStalled('codex_reconnect_stalled', stalledMessage);
       }, slice);
       (reconnectStallTimer as unknown as { unref?: () => void }).unref?.();
     }
@@ -8002,7 +8016,8 @@ export class CodexAgent extends BaseAgent {
         closed ||
         reconnectStallCleanupTurnId !== null ||
         (!isTurnInFlight && !isTurnStartPending) ||
-        !turnId
+        !turnId ||
+        compactingTurnIds.has(turnId)
       ) return;
       // 同一 turn 的后续 `2/5`、`3/5` 只更新 UI，不重置整个重连序列的 deadline。
       if (reconnectStallTimer || reconnectStallRemainingMs > 0) return;
@@ -8022,7 +8037,8 @@ export class CodexAgent extends BaseAgent {
         reconnectStallCleanupTurnId !== null ||
         !isTurnInFlight ||
         currentTurnId !== turnId ||
-        turnStartGeneration !== turnGeneration
+        turnStartGeneration !== turnGeneration ||
+        compactingTurnIds.has(turnId)
       ) return;
       reconnectStallTurnId = turnId;
       reconnectStallTurnGeneration = turnGeneration;
@@ -8106,7 +8122,6 @@ export class CodexAgent extends BaseAgent {
       const timeoutReason = opts?.reason ?? 'upstream_response_idle_timeout';
       const deferTurnCleanupUntilInterrupt =
         timeoutReason === 'codex_reconnect_stalled' ||
-        timeoutReason === CODEX_HISTORY_OVERSIZED_REASON ||
         timeoutReason === 'upstream_response_idle_timeout';
       if (deferTurnCleanupUntilInterrupt && !pendingTurnId && turnId) {
         // Keep Session.isTurnRunning() true until the interrupt ACK (or the
@@ -8142,17 +8157,18 @@ export class CodexAgent extends BaseAgent {
         },
         source: 'codex',
       };
-      // Main can only relink an idle native thread. Publishing this error before
-      // interrupt ACK made its one-shot recovery see busy and abandon the task.
-      const deferOversizedError =
-        opts?.reason === CODEX_HISTORY_OVERSIZED_REASON && !pendingTurnId && !!turnId;
+      // Publish a reconnect timeout only after interrupt settles: a late successful
+      // completion must win, and recovery must not race the still-running turn.
+      const deferTimeoutError =
+        timeoutReason === 'codex_reconnect_stalled' &&
+        !pendingTurnId && !!turnId;
       const interruptedSend = overloadRetry;
       let timeoutEmitted = false;
       const emitTimeout = (settled = false): void => {
         if (timeoutEmitted || closed) return;
         timeoutEmitted = true;
-        if (!deferOversizedError || !interruptedSend?.isCancelled()) eventQueue.push(timeoutEvent);
-        if (deferOversizedError && settled) {
+        if (!deferTimeoutError || !interruptedSend?.isCancelled()) eventQueue.push(timeoutEvent);
+        if (deferTimeoutError && settled) {
           // Session drains terminal errors with an idle tail. Do not leave its
           // drain watchdog armed when Main cannot recover this thread.
           eventQueue.push({
@@ -8162,10 +8178,13 @@ export class CodexAgent extends BaseAgent {
           });
         }
       };
-      if (deferOversizedError) {
+      if (deferTimeoutError) {
         eventQueue.push({
           type: 'status',
-          data: { status: 'Compacting...', ...usageTracker.snapshot(), isRunning: true },
+          data: {
+            status: 'Reconnecting...',
+            ...usageTracker.snapshot(), isRunning: true,
+          },
           source: 'codex',
         });
       } else emitTimeout();
@@ -8239,11 +8258,11 @@ export class CodexAgent extends BaseAgent {
       void (async () => {
         // All ACK/release outcomes use the same authoritative-success decision.
         const settleInterruptedTurn = (fallback?: TurnCompletedParams): boolean => {
-          const completedNormally = deferOversizedError &&
+          const completedNormally = deferTimeoutError &&
             reconnectStallDeferredTurnCompletion?.turn.status === 'completed';
           if (completedNormally) terminalErroredTurnIds.delete(turnId);
           const settled = settleReconnectStallCleanup(turnId, fallback);
-          if (settled && deferOversizedError && !completedNormally) emitTimeout(true);
+          if (settled && deferTimeoutError && !completedNormally) emitTimeout(true);
           return settled;
         };
         const interrupted = await interruptTurnForPermissionTighten(turnId, {
@@ -8294,7 +8313,7 @@ export class CodexAgent extends BaseAgent {
           { threadId, turnId },
         );
         let completedDuringRelease = false;
-        if (deferOversizedError) {
+        if (deferTimeoutError) {
           // Keep the terminal stream open through unsubscribe, including a failed
           // release. This caller closes the handle after publishing its one result.
           await releaseCurrentThreadSubscription('reconnect-stall subscription release', {
@@ -11803,6 +11822,12 @@ export class CodexAgent extends BaseAgent {
         }
         if (params.item.type === 'contextCompaction' && !compactingTurnIds.has(params.turnId)) {
           compactingTurnIds.add(params.turnId);
+          // Native compaction owns this wait; retain the bounded upstream-idle
+          // watchdog instead of interrupting it on an earlier reconnect deadline.
+          if (params.turnId === currentTurnId) {
+            clearReconnectStall();
+            turnRetryTracker.reset();
+          }
         }
         if (interceptProposedPlanItem(params.turnId, params.item)) {
           discardPendingSpawnLineageIds(reservedChildThreadIds);
@@ -12307,7 +12332,12 @@ export class CodexAgent extends BaseAgent {
           const rawMessage = params.error?.message ?? '';
           const retrySignals = extractNonSecretErrorSignals(rawMessage);
           const isRateLimitBackoff = retrySignals.errorStatus === 429 || retrySignals.usageLimit;
-          if (!isAuthRelatedErrorMessage(rawMessage) && !isRateLimitBackoff) {
+          const isCompactionReconnect =
+            compactingTurnIds.has(params.turnId || currentTurnId || '') &&
+            parseReconnectAttemptMessage(rawMessage) !== null;
+          // The upstream-idle watchdog bounds native compaction. A later
+          // reconnect notice must not reintroduce the short retry deadline.
+          if (!isAuthRelatedErrorMessage(rawMessage) && !isRateLimitBackoff && !isCompactionReconnect) {
             const decision = turnRetryTracker.track(
               params.turnId || currentTurnId || '(pending)',
               Date.now(),
@@ -12688,7 +12718,10 @@ export class CodexAgent extends BaseAgent {
         }
         let turnInput: TurnStartParams['input'];
         try {
-          turnInput = await toTurnInput(withLibraryNativeReadContext(message.content, mutableLibraryRoot, mutableExtraDirs));
+          turnInput = await toTurnInput(
+            withLibraryNativeReadContext(message.content, mutableLibraryRoot, mutableExtraDirs),
+            sendOpts?.[PINNED_SKILL_INVOCATION],
+          );
         } catch (e) {
           isTurnStartPending = false;
           flushDeferredTerminalTurnCompletionsIfIdle();

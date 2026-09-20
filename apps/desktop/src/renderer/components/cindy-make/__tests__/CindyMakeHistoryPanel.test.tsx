@@ -262,6 +262,19 @@ describe('Make history controls', () => {
     expect(screen.getAllByText(/cindyMake.history.versionPending/)).toHaveLength(2);
     expect(screen.getByText('cindyMake.history.needsBuild')).toBeTruthy();
   });
+  it('hands off the selected completion only after Main accepts Continue Editing', async () => {
+    const f = harness([item({ completionId: 'done-a' })]);
+    render(<CindyMakeHistoryPanel />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'cindyMake.history.actions.continue' }),
+    );
+    await waitFor(() =>
+      expect(h.navigate).toHaveBeenCalledWith('/cc-agent/task-a', {
+        state: { cindyMakeEditing: { sessionId: 'task-a', completionId: 'done-a' } },
+      }),
+    );
+    expect(f.execute).toHaveBeenCalledWith('aaaa', 'continue');
+  });
   it('opens an active task and keeps it available in the sidebar', async () => {
     const f = harness([item({ actions: ['open'] })]);
     render(<CindyMakeHistoryPanel />);

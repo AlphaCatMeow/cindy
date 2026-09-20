@@ -47,7 +47,6 @@ import {
 } from './sidebarRightStatus';
 import {
   resolveCollapsedAttention,
-  resolveCollapsedGroupHeaderSessionId,
   resolveCollapsedGroupRightStatus,
 } from './projectCollapsedAttention';
 import { AutomationTimerIcon } from './AutomationTimerIcon';
@@ -441,14 +440,10 @@ export const AutomationSessionGroupItem = withSidebarNavigation<AutomationSessio
       [countdownText, runCountText, stoppedText],
     );
 
-    // 点击空白行区域 = 点击标题。展开态打开最新一条;收起且整组是红时打开
-    // 贡献红点的那条。行内控件各自 stopPropagation,不会误触发。
+    // 点击空白行区域或标题都打开最新运行；旧错误通过独立子行打开。
+    // 行内控件各自 stopPropagation，不会误触发。
     const openLatestSession = () => {
-      const targetId = resolveCollapsedGroupHeaderSessionId({
-        collapsed,
-        latestSessionId,
-        attention: collapsedAttention,
-      });
+      const targetId = latestSessionId;
       if (!targetId) return;
       // 仅在展开 + 前 5 条态下冻结当前布局;收起态无子项可冻结。
       if (!collapsed && !showAll) freezeCurrentLayout(targetId);

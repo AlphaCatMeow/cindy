@@ -44,6 +44,7 @@ import {
 } from './activityRowChrome';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { CindyMakeDoctorCard } from './CindyMakeDoctorCard';
+import { builtInSkillDescriptionKey } from '@/features/skillhub/lib/builtInSkillPresentation';
 import { CindyMakeCompleteCard } from '@/components/cindy-make/CindyMakeCompleteCard';
 
 interface SystemCardProps {
@@ -105,22 +106,38 @@ const codeClass = cn(
 );
 
 function HelpCard({ data }: { data?: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const commands =
-    (data?.commands as Array<{ name: string; description?: string; source: string }>) ?? [];
+    (data?.commands as Array<{
+      name: string;
+      description?: string;
+      source: string;
+      builtIn?: boolean;
+    }>) ?? [];
   const desktopCmds = commands.filter((c) => c.source === 'desktop');
   const agentBuiltinCmds = commands.filter((c) => c.source === 'agent-builtin');
   const projectCmds = commands.filter((c) => c.source === 'user' || c.source === 'skill');
 
   const renderCommandRows = (
-    items: Array<{ name: string; description?: string; source: string }>,
+    items: Array<{
+      name: string;
+      description?: string;
+      source: string;
+      builtIn?: boolean;
+    }>,
   ) => (
     <div className="flex flex-col gap-[2px]">
-      {items.map((c) => (
-        <div key={c.name} className={rowClass}>
-          <span className={codeClass}>/{c.name}</span>
-          <span className={descClass}>{c.description ?? ''}</span>
-        </div>
-      ))}
+      {items.map((c) => {
+        const descriptionKey = builtInSkillDescriptionKey(c);
+        return (
+          <div key={c.name} className={rowClass}>
+            <span className={codeClass}>/{c.name}</span>
+            <span className={descClass}>
+              {descriptionKey ? t(descriptionKey) : c.description ?? ''}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 

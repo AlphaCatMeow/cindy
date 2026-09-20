@@ -247,7 +247,15 @@ export function CindyMakeHistoryPanel({
         const next = await window.electronAPI.actCindyMakeHistory(selected.runId, action);
         if (!isDataOwnerGenerationCurrent(owner)) return;
         update(next);
-        if (action === 'continue') navigate('/cc-agent/' + selected.sessionId);
+        if (action === 'continue')
+          navigate('/cc-agent/' + selected.sessionId, {
+            state: {
+              cindyMakeEditing: {
+                sessionId: selected.sessionId,
+                completionId: selected.completionId,
+              },
+            },
+          });
         if (action === 'resolve') {
           const session = next.items.find(
             (item) => item.runId === selected.runId,

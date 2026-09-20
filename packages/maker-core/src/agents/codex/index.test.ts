@@ -12,6 +12,7 @@ import {
   AUTO_REVIEW_SOURCE_CONTENT,
   INHERITED_CAPABILITY_SELECTION,
   MAIN_OWNED_SEND_CONTEXT,
+  PINNED_SKILL_INVOCATION,
   CodexResumePreparationBlockedError,
   AgentNotAuthenticatedError,
   type AgentDeps,
@@ -6555,7 +6556,10 @@ describe('CodexAgent MCP thread context hooks', () => {
     const agent = new CodexAgent(createDeps());
 
     await expect(agent.listAgentSkills({})).resolves.toMatchObject({
-      skills: [expect.objectContaining({ name: 'pr-watch', scope: 'user' })],
+      skills: [
+        expect.objectContaining({ name: 'pr-watch', scope: 'user' }),
+        expect.objectContaining({ name: 'skill-creator', scope: 'system' }),
+      ],
     });
 
     const request = createdTransports[0].lines
@@ -6565,6 +6569,193 @@ describe('CodexAgent MCP thread context hooks', () => {
 
     await agent.dispose();
   });
+
+  it('keeps an installed skill-creator ahead of the native system fallback', async () => {
+    const home = os.homedir();
+    const installedPath = path.join(home, '.agents', 'skills', 'skill-creator', 'SKILL.md');
+    MockCodexTransport.onCreate = (transport) => {
+      transport.setMockResponse(Method.SkillsList, {
+        result: {
+          data: [{
+            cwd: home,
+            skills: [
+              {
+                name: 'skill-creator',
+                description: 'User copy',
+                path: installedPath,
+                scope: 'user',
+                enabled: true,
+              },
+              {
+                name: 'skill-creator',
+                description: 'System fallback',
+                path: path.join(home, '.codex', 'skills', '.system', 'skill-creator', 'SKILL.md'),
+                scope: 'system',
+                enabled: true,
+              },
+            ],
+            errors: [],
+          }],
+        },
+      });
+    };
+    const agent = new CodexAgent(createDeps());
+
+    const result = await agent.listAgentSkills({});
+    expect(result.skills).toEqual([
+      expect.objectContaining({ name: 'skill-creator', path: installedPath, scope: 'user' }),
+    ]);
+
+    await agent.dispose();
+  });
+
+  it('resolves /skill-creator to the native system Skill when no installed copy exists', async () => {
+    const skillPath = path.join(
+      os.homedir(),
+      '.codex',
+      'skills',
+      '.system',
+      'skill-creator',
+      'SKILL.md',
+    );
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method, params) => {
+      if (method === Method.SkillsList) {
+        const { cwds = ['/repo'] } = params as { cwds?: string[] };
+        return {
+          data: cwds.map((cwd) => ({
+            cwd,
+            skills: [{
+              name: 'skill-creator',
+              description: 'Create a Skill',
+              path: skillPath,
+              scope: 'system',
+              enabled: true,
+            }],
+            errors: [],
+          })),
+        };
+      }
+      if (method === Method.TurnStart) return { turn: { id: 'turn-skill-creator' } };
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-system-skill-creator',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+
+    await handle.send({
+      type: 'user',
+      content: '/skill-creator Create a release-note checker',
+    });
+
+    const turnStart = host.request.mock.calls.find(
+      ([method]) => method === Method.TurnStart,
+    )?.[1] as { input?: unknown[] };
+    expect(turnStart.input).toEqual([
+      { type: 'skill', name: 'skill-creator', path: skillPath },
+      { type: 'text', text: 'Create a release-note checker' },
+    ]);
+
+    await handle.close();
+  });
+
+  it.each(['/learn release flow', '/skill:learn release flow'])(
+    'dispatches the exact Host-attested Skill path for %s without rescanning a new winner',
+    async (command) => {
+      const pinnedPath = '/cindy/system-skills/v10/learn/SKILL.md';
+      let skillsListCalls = 0;
+      const agent = new CodexAgent(createDeps());
+      const host = installFakeHost(agent, (method, params) => {
+        if (method === Method.SkillsList) {
+          skillsListCalls += 1;
+          const { cwds = ['/repo'] } = params as { cwds?: string[] };
+          return {
+            data: cwds.map((cwd) => ({
+              cwd,
+              skills: [{
+                name: 'learn',
+                description: 'Untrusted replacement',
+                path: '/repo/.agents/skills/learn/SKILL.md',
+                scope: 'repo',
+                enabled: true,
+              }],
+              errors: [],
+            })),
+          };
+        }
+        if (method === Method.TurnStart) return { turn: { id: 'turn-pinned-learn' } };
+        return undefined;
+      });
+      const handle = await agent.startSession({
+        sessionId: 'session-pinned-learn',
+        model: 'gpt-5.4',
+        workingDir: '/repo',
+      });
+
+      await handle.send(
+        { type: 'user', content: command },
+        { [PINNED_SKILL_INVOCATION]: { name: 'learn', path: pinnedPath } },
+      );
+
+      const turnStart = host.request.mock.calls.find(
+        ([method]) => method === Method.TurnStart,
+      )?.[1] as { input?: unknown[] };
+      expect(turnStart.input).toEqual([
+        { type: 'skill', name: 'learn', path: pinnedPath },
+        { type: 'text', text: 'release flow' },
+      ]);
+      expect(skillsListCalls).toBe(0);
+
+      await handle.close();
+    },
+  );
+
+  it.each(['system', 'admin'] as const)(
+    'keeps a palette-hidden %s Skill directly invocable',
+    async (scope) => {
+      const skillPath = path.join(os.homedir(), '.codex', 'skills', `.${scope}`, 'slides', 'SKILL.md');
+      const agent = new CodexAgent(createDeps());
+      const host = installFakeHost(agent, (method, params) => {
+        if (method === Method.SkillsList) {
+          const { cwds = ['/repo'] } = params as { cwds?: string[] };
+          return {
+            data: cwds.map((cwd) => ({
+              cwd,
+              skills: [{
+                name: 'slides',
+                description: 'Create slides',
+                path: skillPath,
+                scope,
+                enabled: true,
+              }],
+              errors: [],
+            })),
+          };
+        }
+        if (method === Method.TurnStart) return { turn: { id: `turn-${scope}-slides` } };
+        return undefined;
+      });
+      const handle = await agent.startSession({
+        sessionId: `session-${scope}-slides`,
+        model: 'gpt-5.4',
+        workingDir: '/repo',
+      });
+
+      await handle.send({ type: 'user', content: '/slides Build a quarterly update' });
+
+      const turnStart = host.request.mock.calls.find(
+        ([method]) => method === Method.TurnStart,
+      )?.[1] as { input?: unknown[] };
+      expect(turnStart.input).toEqual([
+        { type: 'skill', name: 'slides', path: skillPath },
+        { type: 'text', text: 'Build a quarterly update' },
+      ]);
+
+      await handle.close();
+    },
+  );
 
   it('lists remote skills through the target remote app-server host', async () => {
     const remoteWorkingDir = '/srv/project';
@@ -30211,6 +30402,57 @@ describe('CodexAgent reconnect-stall watchdog', () => {
     } as never);
   }
 
+  it.each([true, false])('lets native compaction finish before applying reconnect timeout (reconnect first: %s)', async (reconnectFirst) => {
+    vi.useFakeTimers();
+    vi.stubEnv('XDT_CODEX_IDLE_TIMEOUT_MS', '600000');
+    try {
+      const { host, handle, handlers, seen } = await startReconnectTurn(new CodexAgent(createDeps()), 'compacting');
+      if (reconnectFirst) emitReconnect(handlers, 1);
+      handlers.itemStarted?.({
+        threadId: 'start-thread-id', turnId: 'turn-1',
+        item: { id: 'compact-1', type: 'contextCompaction' },
+      } as never);
+      emitReconnect(handlers, reconnectFirst ? 2 : 1);
+      await vi.advanceTimersByTimeAsync(RECONNECT_STALL_MS + 1);
+      expect(host.request.mock.calls.some(([method]) => method === Method.TurnInterrupt)).toBe(false);
+      emitReconnect(handlers, 3);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(handle.isTurnRunning?.()).toBe(true);
+      expect(host.request.mock.calls.some(([method]) => method === Method.TurnInterrupt)).toBe(false);
+      handlers.itemCompleted?.({
+        threadId: 'start-thread-id', turnId: 'turn-1',
+        item: { id: 'compact-1', type: 'contextCompaction' },
+      } as never);
+      emitReconnect(handlers, 1);
+      await vi.advanceTimersByTimeAsync(RECONNECT_STALL_MS + 1);
+      expect(seen).toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'codex_reconnect_stalled' }),
+      }));
+      await handle.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps a bounded upstream-idle timeout during native compaction', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('XDT_CODEX_IDLE_TIMEOUT_MS', '180000');
+    try {
+      const { handle, handlers, seen } = await startReconnectTurn(new CodexAgent(createDeps()), 'compaction-idle');
+      emitReconnect(handlers, 1);
+      handlers.itemStarted?.({
+        threadId: 'start-thread-id', turnId: 'turn-1',
+        item: { id: 'compact-1', type: 'contextCompaction' },
+      } as never);
+      await vi.advanceTimersByTimeAsync(180001);
+      expect(seen).toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'upstream_response_idle_timeout' }),
+      }));
+      expect(seen).not.toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'codex_history_oversized' }),
+      }));
+      await handle.close();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('首次重连提示后 120s 无进展 → 收口为 codex_reconnect_stalled', async () => {
     vi.useFakeTimers();
     try {
@@ -30251,7 +30493,7 @@ describe('CodexAgent reconnect-stall watchdog', () => {
   ].flatMap((scenario) => [
     { ...scenario, releaseFailure: undefined as boolean | undefined },
     ...(scenario.rejectAck ? [false, true].map((releaseFailure) => ({ ...scenario, releaseFailure })) : []),
-  ]))('settles oversized recovery without a global account home: %j', async ({ cancelled, completion, rejectAck, releaseFailure }) => {
+  ]))('settles reconnect cleanup without reclassifying image-heavy history: %j', async ({ cancelled, completion, rejectAck, releaseFailure }) => {
     vi.useFakeTimers();
     const agent = new CodexAgent(createDeps());
     const proto = Object.getPrototypeOf(agent) as {
@@ -30290,17 +30532,18 @@ describe('CodexAgent reconnect-stall watchdog', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(handle.isTurnRunning?.()).toBe(true);
+      expect(measure).not.toHaveBeenCalled();
       expect(seen).toContainEqual(expect.objectContaining({
-        type: 'status', data: expect.objectContaining({ status: 'Compacting...', isRunning: true }),
+        type: 'status', data: expect.objectContaining({ status: 'Reconnecting...', isRunning: true }),
       }));
       expect(seen.some((event) => event.type === 'error' &&
-        (event.data as { reason?: string }).reason === 'codex_history_oversized')).toBe(false);
+        (event.data as { reason?: string }).reason === 'codex_reconnect_stalled')).toBe(false);
       if (releaseFailure !== undefined) {
         reject(new Error('interrupt unavailable'));
         await vi.advanceTimersByTimeAsync(1);
         expect(release).toHaveBeenCalledOnce();
         expect(seen.some((event) => event.type === 'error' &&
-          (event.data as { reason?: string }).reason === 'codex_history_oversized')).toBe(false);
+          (event.data as { reason?: string }).reason === 'codex_reconnect_stalled')).toBe(false);
       }
       if (cancelled) cancellation.abort();
       if (completion) {
@@ -30316,15 +30559,11 @@ describe('CodexAgent reconnect-stall watchdog', () => {
       else acknowledge({});
       await vi.advanceTimersByTimeAsync(1);
       if (completion || !rejectAck) expect(handle.isTurnRunning?.()).toBe(false);
-      const oversizedIndex = seen.findIndex((event) => event.type === 'error' &&
-        (event.data as { reason?: string }).reason === 'codex_history_oversized');
-      if (cancelled || completion === 'completed') expect(oversizedIndex).toBe(-1);
-      else {
-        expect(oversizedIndex).toBeGreaterThanOrEqual(0);
-        if (completion || !rejectAck) expect(seen[oversizedIndex + 1]).toMatchObject({
-          type: 'status', data: { isRunning: false },
-        });
-      }
+      expect(seen.some((event) => event.type === 'error' &&
+        (event.data as { reason?: string }).reason === 'codex_history_oversized')).toBe(false);
+      const timeoutErrors = seen.filter((event) => event.type === 'error' &&
+        (event.data as { reason?: string }).reason === 'codex_reconnect_stalled');
+      expect(timeoutErrors).toHaveLength(cancelled || completion === 'completed' ? 0 : 1);
       if (completion === 'completed') {
         const done = seen.filter((event) => event.type === 'done');
         expect(done).toHaveLength(1);
@@ -30382,6 +30621,34 @@ describe('CodexAgent reconnect-stall watchdog', () => {
       measure.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('does not restore the short reconnect deadline when compaction starts during a rejected Stop', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('XDT_CODEX_IDLE_TIMEOUT_MS', '600000');
+    try {
+      const ack = deferred<unknown>();
+      const { host, handle, handlers, seen } = await startReconnectTurn(
+        new CodexAgent(createDeps()), 'stop-compacting', ack.promise,
+      );
+      emitReconnect(handlers, 1);
+      await vi.advanceTimersByTimeAsync(100000);
+      const stopping = expect(handle.requestGracefulStop?.()).rejects.toThrow('interrupt rejected');
+      await vi.advanceTimersByTimeAsync(0);
+      handlers.itemStarted?.({
+        threadId: 'start-thread-id', turnId: 'turn-1',
+        item: { id: 'compact-1', type: 'contextCompaction' },
+      } as never);
+      ack.reject(new Error('interrupt rejected'));
+      await stopping;
+      await vi.advanceTimersByTimeAsync(RECONNECT_STALL_MS + 1);
+      expect(host.request.mock.calls.filter(([method]) => method === Method.TurnInterrupt)).toHaveLength(1);
+      expect(seen).not.toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'codex_reconnect_stalled' }),
+      }));
+      expect(handle.isTurnRunning?.()).toBe(true);
+      await handle.close();
+    } finally { vi.useRealTimers(); }
   });
 
   it('graceful stop interrupt 被拒绝后重新武装同一 turn 的 reconnect watchdog', async () => {
@@ -30749,12 +31016,8 @@ describe('CodexAgent reconnect-stall watchdog', () => {
 
       await vi.advanceTimersByTimeAsync(RECONNECT_STALL_MS + 1);
 
-      expect(seen).toContainEqual(expect.objectContaining({
-        type: 'error',
-        data: expect.objectContaining({
-          reason: 'codex_reconnect_stalled',
-          isTerminal: true,
-        }),
+      expect(seen).not.toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'codex_reconnect_stalled' }),
       }));
       expect(handle.isTurnRunning?.()).toBe(true);
 
@@ -30769,6 +31032,9 @@ describe('CodexAgent reconnect-stall watchdog', () => {
       interruptAck.resolve({});
       await vi.advanceTimersByTimeAsync(0);
       expect(handle.isTurnRunning?.()).toBe(false);
+      expect(seen).toContainEqual(expect.objectContaining({
+        type: 'error', data: expect.objectContaining({ reason: 'codex_reconnect_stalled', isTerminal: true }),
+      }));
       await handle.close();
     } finally {
       vi.useRealTimers();
