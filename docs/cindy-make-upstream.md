@@ -278,8 +278,10 @@ rebase 到新官方基线（禁止 update-refs 自动改动其他任务分支）
   创建任务前先持久化任务 ID；账号切换后不发送旧请求、不暴露另一账号的任务入口。
   已删除或归档的任务由下一次显式解决冲突操作创建新任务，继续使用保留的工作目录。
   未完成的合并禁止清理源码；缺失的合并目录不会被普通恢复流程重建为空目录。
-- 没有任务的自动合并成功后，仅在文件树与已采纳结果一致时移除临时 worktree。冲突任务
-  的目录继续保留，便于查看与继续交流。仅支持本机 Desktop，不增加远控调用权限。
+- 没有任务的自动合并成功后，仅在候选提交和文件树与已采纳结果一致、提交仍被个人版包含时
+  移除临时 worktree，再核对分支没有被其他 worktree 使用，以原提交值原子删除对应的
+  `cindy-merge/<ID>` 临时分支；`refs/cindy-make/backups/*` 等恢复引用继续保留。冲突任务的目录和
+  分支继续保留，便于查看与继续交流。仅支持本机 Desktop，不增加远控调用权限。
 
 实现见 [Git 合并](../apps/desktop/src/main/cindy-make/upstreamMerge.ts)、
 [生命周期](../apps/desktop/src/main/cindy-make/upstreamMergeController.ts)、
