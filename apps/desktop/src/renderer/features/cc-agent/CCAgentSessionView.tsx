@@ -1,6 +1,5 @@
 import { shouldShowOpenPathError } from '../../../shared/openPathResult';
 import { shouldShowFailedScheduleNotice } from '@cindy/maker-shared/schedule-model';
-import { scheduleFocusPath } from '@/features/scheduler/lib/scheduleSessionBinding';
 /**
  * CCAgentSessionView
  * ---------------------------------------------------------------------------
@@ -5018,9 +5017,6 @@ export function CCAgentSessionView({
                   dataOwnerId={dataOwnerId}
                   sessionId={sessionId}
                   latestFailedRun={scheduleSessionInfo.latestFailedRun}
-                  onViewDetails={canNavigateSession && !remoteDeviceId
-                    ? (scheduleId) => navigate(scheduleFocusPath(scheduleId))
-                    : undefined}
                   style={{ width: inputWidth }}
                   className="py-1"
                 />

@@ -8850,10 +8850,9 @@
     },
     "unreadFailedScheduleBanner": {
       "text": "自動実行に失敗した記録があります。",
-      "precheck": "実行前チェックに失敗したため、以前の自動実行は開始されませんでした。",
-      "rateLimited": "実行前チェックでリクエスト制限に達したため、以前の自動実行は開始されませんでした。",
-      "dismissTitle": "過去の失敗通知を閉じる",
-      "viewDetails": "詳細を見る"
+      "precheck": "自動チェックが一時的に停止しています。",
+      "rateLimited": "リクエスト制限により自動チェックが一時的に停止しています。",
+      "dismissTitle": "過去の失敗通知を閉じる"
     },
     "worktreeRestoreBanner": {
       "text": "このセッションのワークツリーは回収されました（ディレクトリが存在しません）。",

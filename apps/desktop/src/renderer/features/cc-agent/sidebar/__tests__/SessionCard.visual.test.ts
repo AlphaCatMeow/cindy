@@ -898,7 +898,7 @@ describe('SessionCard visual cases', () => {
     ['done', 'var(--card-status-done)'],
     ['awaiting', 'var(--card-status-awaiting)'],
     ['error', 'var(--card-status-error)'],
-  ] as const)('renders %s attention in list mode, with errors hidden', (kind, color) => {
+  ] as const)('moves the %s attention dot to the list bottom-right corner', (kind, color) => {
     const visualCase = sessionCardVisualCases.find((item) => item.id === 'attention-dot');
     if (!visualCase) throw new Error('Missing attention visual case');
     mocks.attentionKindBySession.set(visualCase.session.id, kind);
@@ -921,15 +921,11 @@ describe('SessionCard visual cases', () => {
     );
 
     const rightStatus = container.querySelector(`[data-sidebar-right-status="${kind}"]`);
-    if (kind === 'error') {
-      expect(rightStatus).toBeNull();
-    } else {
-      expect(rightStatus?.className).toContain('right-2.5');
-      expect(rightStatus?.className).toContain('bottom-2');
-      expect((rightStatus?.firstElementChild as HTMLElement | null)?.style.backgroundColor).toBe(
-        color,
-      );
-    }
+    expect(rightStatus?.className).toContain('right-2.5');
+    expect(rightStatus?.className).toContain('bottom-2');
+    expect((rightStatus?.firstElementChild as HTMLElement | null)?.style.backgroundColor).toBe(
+      color,
+    );
 
     const title = Array.from(container.querySelectorAll('span')).find(
       (node) =>

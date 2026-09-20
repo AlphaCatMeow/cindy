@@ -8850,10 +8850,9 @@
     },
     "unreadFailedScheduleBanner": {
       "text": "실패한 자동 실행이 있습니다.",
-      "precheck": "실행 전 확인에 실패하여 이전 자동 실행이 시작되지 않았습니다.",
-      "rateLimited": "실행 전 확인 중 요청 한도에 도달하여 이전 자동 실행이 시작되지 않았습니다.",
-      "dismissTitle": "이전 실패 알림 닫기",
-      "viewDetails": "상세 보기"
+      "precheck": "자동 확인이 일시적으로 차단되었습니다.",
+      "rateLimited": "요청 한도 초과로 자동 확인이 일시적으로 차단되었습니다.",
+      "dismissTitle": "이전 실패 알림 닫기"
     },
     "worktreeRestoreBanner": {
       "text": "이 세션의 워크트리가 정리되었습니다(디렉터리가 존재하지 않음).",
