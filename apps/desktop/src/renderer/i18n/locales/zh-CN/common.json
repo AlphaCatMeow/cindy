@@ -12484,37 +12484,37 @@
       "undo": "撤销降级"
     },
     "comparison": {
-      "select": "选择{{name}}",
-      "topup": "充值",
-      "topupUnlock": "充值后可解锁额外用量。",
-      "rollover": "{{amount}} 可结转至{{period}}",
-      "changeUnavailable": "无法进行此变更",
-      "upgrade": "升级",
-      "downgrade": "降级",
-      "free": "免费",
-      "freeUsage": "按量使用",
-      "topupExpiry": "充值余额用完为止",
+      "free": "FREE",
+      "freeUsage": "免费使用",
       "priceFromSuffix": "起",
-      "subscription": "订阅",
-      "includesFree": "包含免费版全部能力",
-      "creditMultiple": "包含金额是{{name}}的 {{multiple}} 倍",
-      "credits": {
-        "MONTH": "每月 {{amount}}",
-        "YEAR": "每年 {{amount}}",
-        "OTHER": "{{amount}}"
-      },
+      "topup": "按需充值",
+      "topupExpiry": "充值余额不过期",
+      "agent": "完整 Agent 功能",
+      "apiKey": "自带 API key",
+      "existingSubscription": "接入已有订阅",
+      "localModels": "支持本地模型",
+      "basicModels": "可用部分模型",
+      "subscription": "订阅套餐",
+      "rollover": "剩余余额可留到{{period}}，最多 {{amount}}",
       "nextPeriod": {
-        "MONTH": "下个月",
-        "YEAR": "明年",
-        "OTHER": "下一周期"
+        "MONTH": "下月",
+        "YEAR": "下一年",
+        "OTHER": "下期"
       },
-      "agent": "Agent 任务",
-      "apiKey": "使用自有 API Key",
-      "existingSubscription": "沿用已有订阅",
-      "localModels": "本地模型",
-      "basicModels": "基础模型",
-      "advancedModels": "进阶模型",
-      "managedService": "托管服务"
+      "includesFree": "包含 FREE 全部能力",
+      "advancedModels": "解锁更多模型",
+      "managedService": "官方服务，免配置",
+      "topupUnlock": "按需付费，<models>解锁更多模型</models>",
+      "select": "选择 {{name}}",
+      "upgrade": "升级至 {{name}}",
+      "downgrade": "降级至 {{name}}",
+      "changeUnavailable": "暂不可切换",
+      "creditMultiple": "每期包含金额为 {{name}} 的 {{multiple}} 倍",
+      "credits": {
+        "MONTH": "每月包含 {{amount}}",
+        "YEAR": "每年包含 {{amount}}",
+        "OTHER": "{{amount}}"
+      }
     }
   },
   "fileAccess": {
