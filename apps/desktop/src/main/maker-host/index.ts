@@ -1931,7 +1931,7 @@ export function getMaker(): Maker {
       prepareCodexResumeSession: async (threadId) => {
         if (!getActiveAppSession().dataOwnerId) return prepareExternalCodexSessionForResume(threadId);
         const locations = new CodexThreadLocations(path.join(codexAccountHome('thread-index'), 'locations'));
-        return await locations.read(threadId) ?? await prepareExternalCodexSessionForResume(threadId);
+        return locations.prepareResume(threadId, prepareExternalCodexSessionForResume);
       },
       resolveCodexThreadStorage: async (threadId) => {
         if (!getActiveAppSession().dataOwnerId) return;
