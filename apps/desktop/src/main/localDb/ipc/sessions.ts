@@ -1921,6 +1921,10 @@ export async function updateSessionInDb(
         moveGuard?.assertCurrent();
         await writeSessionPatch(db, sid, setObj, p.status);
         cleanupSessionRuntimeForTerminalStatus(sid, p.status);
+        if (p.status === 'archived' || p.status === 'deleted') {
+          const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
+          await closeSharedTaskForTask(sid, dbClient);
+        }
       },
       p.workingDir !== undefined,
     );
@@ -2088,6 +2092,10 @@ export async function patchSessionMetaInDb(
       row.summary = null;
     }
     cleanupSessionRuntimeForTerminalStatus(sessionId, patch.status);
+    if (patch.status === 'archived' || patch.status === 'deleted') {
+      const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
+      await closeSharedTaskForTask(sessionId, dbClient);
+    }
     return sessionToCamel(row);
   });
   notifyAgentIslandSessionPatch(updated.id, {
@@ -2286,6 +2294,10 @@ export async function setSessionsStatusInDb(
       });
       for (const item of rows) {
         cleanupSessionRuntimeForTerminalStatus(item.sessionId, item.status);
+        if (item.status === 'archived') {
+          const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
+          await closeSharedTaskForTask(item.sessionId, dbClient);
+        }
       }
       for (const resource of physicalResources) notifyWorktreeRecycleOpportunity(resource);
       return rows;

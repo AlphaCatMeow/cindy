@@ -1,0 +1,55 @@
+import { parseSharedTaskSnapshot, type SharedTaskIdentity, type SharedTaskSnapshot } from '@cindy/device-link';
+import type { DbClient } from './client/DbClient.js';
+
+export interface SharedTaskJournalEntry {
+  sharedTaskId: string;
+  sessionId: string;
+  terminal: boolean;
+  snapshot: SharedTaskSnapshot | null;
+}
+
+/** Bound to one profile's DbClient; never resolves a different account after an await. */
+export function createSharedTaskJournal(db: Pick<DbClient, 'exec' | 'query'>, now: () => number = Date.now) {
+  return {
+    async recordAuthority(value: SharedTaskSnapshot): Promise<boolean> {
+      const snapshot = parseSharedTaskSnapshot(value);
+      // A single atomic statement records both the recovery snapshot and its
+      // membership audit entry. A terminal record permanently fences late replies.
+      const result = await db.exec(`
+        INSERT INTO shared_task_events (shared_task_id, session_id, revision, kind, terminal, snapshot, recorded_at)
+        SELECT ?, ?, ?, 'authority', ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM shared_task_events
+          WHERE shared_task_id = ? AND (terminal = 1 OR session_id <> ? OR revision >= ?)
+        )
+        ON CONFLICT (shared_task_id, kind, revision) DO NOTHING
+      `, [snapshot.sharedTaskId, snapshot.sessionId, snapshot.revision, snapshot.status === 'closed' ? 1 : 0,
+        JSON.stringify(snapshot), now(), snapshot.sharedTaskId, snapshot.sessionId, snapshot.revision]);
+      return result.changes > 0;
+    },
+    async close(identity: SharedTaskIdentity): Promise<void> {
+      // Revision zero is reserved for a local closure, not a server revision.
+      // Never manufacture a higher authority revision from the local clock.
+      const checked = parseSharedTaskSnapshot({ ...identity, revision: 1, status: 'closed', guests: [] });
+      await db.exec(`
+        INSERT INTO shared_task_events (shared_task_id, session_id, revision, kind, terminal, snapshot, recorded_at)
+        SELECT ?, ?, 0, 'local-close', 1, NULL, ?
+        WHERE NOT EXISTS (SELECT 1 FROM shared_task_events WHERE shared_task_id = ? AND session_id <> ?)
+        ON CONFLICT (shared_task_id, kind, revision) DO NOTHING
+      `, [checked.sharedTaskId, checked.sessionId, now(), checked.sharedTaskId, checked.sessionId]);
+    },
+    async latest(): Promise<SharedTaskJournalEntry[]> {
+      const rows = await db.query<{ shared_task_id: string; session_id: string; terminal: number; snapshot: string | null }>(`
+        SELECT shared_task_id, session_id, terminal, snapshot FROM shared_task_events
+        WHERE id IN (SELECT MAX(id) FROM shared_task_events GROUP BY shared_task_id)
+      `);
+      return rows.map((row) => {
+        const snapshot = row.snapshot === null ? null : parseSharedTaskSnapshot(JSON.parse(row.snapshot));
+        if (snapshot && (snapshot.sharedTaskId !== row.shared_task_id || snapshot.sessionId !== row.session_id)) throw new Error('SharedTask journal scope mismatch');
+        return { sharedTaskId: row.shared_task_id, sessionId: row.session_id, terminal: row.terminal === 1, snapshot };
+      });
+    },
+  };
+}
+
+export type SharedTaskJournal = ReturnType<typeof createSharedTaskJournal>;

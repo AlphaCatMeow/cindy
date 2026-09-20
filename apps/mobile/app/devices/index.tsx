@@ -31,7 +31,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Text } from '@/components/AppText';
-import { DeviceLinkError, type DeviceView, type PresenceSnapshot } from '@cindy/device-link';
+import { DeviceLinkError, isSharedTaskPeer, type DeviceView, type PresenceSnapshot } from '@cindy/device-link';
+import { useSharedTasks } from '@/device-link/useSharedTasks';
 import {
   Archive,
   Check,
@@ -125,7 +126,7 @@ import {
 import { withTransientRemoteRetry } from '@/device-link/remoteRetry';
 import { ConnectionRecoveryProgress } from '@/components/ConnectionBanner';
 import { ConnectionNoticeOverlay, useDelayedConnectionNotice } from '@/components/ConnectionNoticeOverlay';
-import { resolveConnectionBannerVisibility, resolveConnectionBannerSyncActionVisibility, resolveHomeConnectionFeedback, type HomeConnectionError, type HomeDeviceFailure } from '@/components/connectionBannerVisibility';
+import { resolveConnectionBannerVisibility, resolveConnectionBannerSyncActionVisibility, resolveHomeConnectionFeedback, resolveHomeDeviceDisconnected, type HomeConnectionError, type HomeDeviceFailure } from '@/components/connectionBannerVisibility';
 import { QuietSyncIndicator } from '@/components/QuietSyncIndicator';
 import { runIndependentSnapshotReads } from '@/device-link/sessionSnapshotSingleFlight';
 import { revokedDevicesStore, useRevokedDevices } from '@/device-link/revokedDevicesStore';
@@ -356,6 +357,7 @@ class HomeSyncScopeSupersededError extends Error {
 }
 
 export default function HomeScreen() {
+  useSharedTasks();
   const screenFocused = useIsFocused();
   return (
     <RemoteSessionStoreSubscriptionGate enabled={screenFocused}>
@@ -1001,7 +1003,7 @@ function HomeScreenContent() {
       const ghostDeviceIds = new Set<string>();
       for (const session of remoteSessionStore.getSessions()) {
         const shardId = session.deviceLinkDeviceId;
-        if (shardId && !knownDeviceIds.has(shardId)) ghostDeviceIds.add(shardId);
+        if (shardId && !isSharedTaskPeer(shardId) && !knownDeviceIds.has(shardId)) ghostDeviceIds.add(shardId);
       }
       for (const deviceId of ghostDeviceIds) {
         invalidateScheduleIndexForDevice(deviceId);
@@ -1847,10 +1849,7 @@ function HomeScreenContent() {
   }, [home.deviceFilters, home.selectedDeviceId, initialHomeSettled, selectedDeviceId]);
   // 连接层失败原因比请求级 error 更根因:unstable 在 online 时也需保持可见。
   const activeConnectionIssue = status !== 'online' || connectionIssue?.kind === 'unstable' ? connectionIssue : null;
-  const selectedDeviceDisconnected = status !== 'connecting' && home.deviceFilters.some((item) => item.deviceId !== null
-    && (!selectedDeviceId || item.deviceId === selectedDeviceId) && item.sessionCount > 0)
-    && !home.deviceFilters.some((item) => item.deviceId !== null
-      && (!selectedDeviceId || item.deviceId === selectedDeviceId) && item.available);
+  const selectedDeviceDisconnected = resolveHomeDeviceDisconnected(home.deviceFilters, selectedDeviceId, status === 'connecting');
   const showConnectionRow = selectedDeviceDisconnected || resolveConnectionBannerVisibility({
     offline: status !== 'online',
     connecting: status === 'connecting',
@@ -2864,6 +2863,12 @@ function HomeScreenContent() {
         onOpenSettings={() => {
           pendingMenuActionRef.current = null;
           guardedPush('/settings');
+          setChromeMenuCloseInstant(true);
+          setChromeMenuOpen(false);
+        }}
+        onOpenSharedSession={() => {
+          pendingMenuActionRef.current = null;
+          guardedPush('/shared-session');
           setChromeMenuCloseInstant(true);
           setChromeMenuOpen(false);
         }}

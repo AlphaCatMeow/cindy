@@ -1040,9 +1040,19 @@ import {
 } from '../device-link/dispatch.js';
 import {
   deviceLinkInvokeControllerSupports,
+  getDeviceLinkInvokeContext,
   isDeviceLinkInvoke,
   isMobileControllerInvoke,
 } from '../device-link/invoke-context.js';
+import { stampSharedTaskInput } from './sharedTaskInput.js';
+import { createSharedTaskContextUsageGuard } from './sharedTaskContextUsage.js';
+import { createSharedTaskSettingGuard } from './sharedTaskSetting.js';
+import { setSharedTaskQueueReader } from '../device-link/sharedTaskDispatch.js';
+
+function captureSharedTaskSettingGuard(sessionId: string) {
+  const context = getDeviceLinkInvokeContext();
+  return createSharedTaskSettingGuard(context?.sharedTask, sessionId, context?.sharedTaskSetting ?? { admitted: false });
+}
 import {
   attachMainOwnedInputBoundary,
   buildMobileClientPromptNote,
@@ -6560,11 +6570,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     return verdict.kind === 'reroute' ? verdict.providerId : undefined;
   }
 
-  async function bootstrapSession(o: CreateOpts): Promise<{
+  async function bootstrapSession(o: CreateOpts, assertAccess?: () => void): Promise<{
     session: Awaited<ReturnType<typeof maker.createSession>>;
     didInjectOrcaInstructions: boolean;
     didInjectProjectContext: boolean;
   }> {
+    assertAccess?.();
     if (o.id && o.workingDir && !o.remoteHostId) {
       o.workingDir = workingDirectoryRecovery.resolve(o.id, o.workingDir);
       await workingDirectoryRecovery.observe(o.id, o.workingDir).catch((error) => {
@@ -6587,6 +6598,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       o.effort = runtimeOverride.effort ?? undefined;
       o.fastMode = runtimeOverride.fastMode;
     }
+    assertAccess?.();
     await applyPersistedReviewMode(o);
     await applyPersistedCindyMakeMarker(o, readSessionSource);
     const didInjectOrcaInstructions = o.reviewMode === true ? false : applyOrcaInstructions(o);
@@ -6595,6 +6607,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
     const usingFallback = !!o.id && !!o.workingDir && !o.remoteHostId &&
       workingDirectoryRecovery.isFallback(o.id, o.workingDir);
+    assertAccess?.();
     await prepareDirectoryGrantsForBootstrap(o, {
       statDirectory: usingFallback ? statWorkingDirectory : undefined,
       realpathDirectory: usingFallback ? realpathWorkingDirectory : undefined,
@@ -6606,11 +6619,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           .from(sessions)
           .where(eq(sessions.id, sessionId))
           .limit(1);
+        assertAccess?.();
         if (existing) await persistSessionFields(sessionId, patch);
       },
     });
 
     await hydrateProviderIdBeforeSessionStart(o);
+    assertAccess?.();
     await ensureManagedOllamaReadyForSession({
       providerId: o.providerId,
       remoteHostId: o.remoteHostId ?? null,
@@ -6650,6 +6665,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         if (pin) o.providerId = pin;
       }
     }
+    assertAccess?.();
     const session = await maker.createSession(o);
     await markProjectContextIfNeeded(session.id, didInjectProjectContext);
     wireSessionToIpc(session);
@@ -12952,12 +12968,23 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (typeof sessionId !== 'string' || sessionId.length === 0) {
         throwIpcError('INVALID_PARAMS', 'sessionId required');
       }
+      const sharedTaskAccess = createSharedTaskContextUsageGuard(
+        getDeviceLinkInvokeContext()?.sharedTask, sessionId,
+      );
+      sharedTaskAccess.assertCurrent();
       let sess = maker.getSession(sessionId);
       if (!sess) {
-        if (!createOpts) {
+        const trustedCreateOpts = await sharedTaskAccess.resolveCreateOpts(
+          createOpts, async () => ({
+            ...await readSharedTaskTaskCreateOpts(sessionId),
+            extraDirs: extraDirsForRuntime(await readSessionExtraDirsFromDb(sessionId)),
+            writableDirs: await readSessionWritableDirsFromDb(sessionId),
+          }),
+        );
+        if (!trustedCreateOpts) {
           throwIpcError('NOT_FOUND', `Session ${sessionId} is not running`);
         }
-        const co = buildCreateOptsWithStderr({ ...(createOpts as CreateOpts), id: sessionId });
+        const co = buildCreateOptsWithStderr({ ...(trustedCreateOpts as CreateOpts), id: sessionId });
         // session-agent-switch:先按 DB 行校正再判 claude-only——否则切到 codex 后
         // 残留的 claude createOpts 会在这里 spawn 出旧引擎的 live session 并被后续
         // send 复用(会话被劫持回旧引擎,2026-07-20 审计实锤)。
@@ -12994,12 +13021,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           if (row.length > 0) co.writableDirs = row;
         }
         try {
+          sharedTaskAccess.assertCurrent();
           await ensureRemoteReadyForSessionStart({ createOpts: co });
           const {
             session: lazySess,
             didInjectOrcaInstructions,
             didInjectProjectContext,
-          } = await bootstrapSession(co);
+          } = await bootstrapSession(co, sharedTaskAccess.assertCurrent);
           await markOrcaRoleIfNeeded(lazySess.id, co.orcaRole);
           log.info('context-usage: lazy create-session', {
             sessionId,
@@ -13990,6 +14018,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     getPersistedClientIds: getPersistedInputClientIds,
   });
   agentInputCoordinatorHolder = inputCoordinator;
+  setSharedTaskQueueReader((sessionId, clientId) => {
+    const item = inputCoordinator.getProjection(sessionId).pendingQueue.find((pending) => pending.clientId === clientId);
+    return item ? { sessionId, authorAccountId: item.sharedTaskAuthor?.accountId ?? '', state: 'pending', attachments: item.files } : undefined;
+  });
   getAgentIslandService()?.setCompletionDeferResolver((sessionId) =>
     inputCoordinator.hasPendingQueuedWork(sessionId),
   );
@@ -14412,6 +14444,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       throwIpcError('INVALID_PARAMS', 'queued.createOpts.agentKind invalid');
     }
     const normalized: AgentInputQueuedMessage = { ...msg };
+    delete normalized.sharedTaskAuthor;
     delete normalized.autoReviewUserText;
     // Only Main-created welcomes and restored host snapshots may carry this policy.
     delete normalized.toolsDisabled;
@@ -14442,6 +14475,24 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   };
 
   ipcMain.handle(DL_SESSION_REFERENCE_CAPABILITY_CHANNEL, () => ({ supported: true, version: 1 }));
+
+  async function readSharedTaskTaskCreateOpts(sid: string): Promise<AgentInputCreateOpts> {
+    const [row] = await getDbClient().drizzle.select().from(sessions).where(eq(sessions.id, sid)).limit(1);
+    if (!row || row.status !== 'active' || !row.workingDir) throwIpcError('NOT_FOUND', 'SharedTask task unavailable');
+    return {
+      agentKind: dbToMakerAgentKind(row.agentKind), workingDir: row.workingDir,
+      model: row.model, providerId: row.providerId, effort: row.effort,
+      permissionMode: row.permissionMode, fastMode: row.fastMode,
+      planMode: row.planModeEnabled, remoteHostId: row.remoteHostId ?? undefined,
+      resumeSessionId: row.sdkSessionId ?? undefined, orcaRole: row.orcaRole,
+    };
+  }
+
+  const prepareSharedTaskInput = async (sid: string, item: AgentInputQueuedMessage) => {
+    const sharedTask = getDeviceLinkInvokeContext()?.sharedTask;
+    if (!sharedTask) return item;
+    return stampSharedTaskInput(item, sharedTask, await readSharedTaskTaskCreateOpts(sid));
+  };
 
   /**
    * device-link 远控输入的自动起名(入队 / 插话共用)。
@@ -14738,7 +14789,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       await assertReviewExternalInputAllowed(sid);
       const deviceLinkInvoke = isDeviceLinkInvoke();
       if (!deviceLinkInvoke) assertTrustedAppRendererEvent(event);
-      const parsed = requireQueuedMessage(item);
+      const parsed = await prepareSharedTaskInput(sid, requireQueuedMessage(item));
       assertRemoteInputClearNotInFlight(sid, deviceLinkInvoke);
       const clearBoundaryPrecondition = readRemoteInputClearBoundaryPrecondition(opts);
       if (!deviceLinkInvoke) await observeLocalInputClearBoundary(sid);
@@ -14905,12 +14956,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               touchUserSend?: boolean;
             } & AgentInputClearBoundaryOpts)
           : undefined;
-      const parsed = requireQueuedMessage(item, {
+      const parsed = await prepareSharedTaskInput(sid, requireQueuedMessage(item, {
         // A device-link projection intentionally omits the trusted snapshot;
         // Only the explicit remove-from-queue steer path may reattach it from
         // the main-owned row; all other IPC paths remain fail-closed here.
         allowMissingTrustedContexts: deviceLinkInvoke && steerOpts?.removeFromQueue === true,
-      });
+      }));
       assertRemoteInputClearNotInFlight(sid, deviceLinkInvoke);
       const clearBoundaryPrecondition = readRemoteInputClearBoundaryPrecondition(opts);
       if (!deviceLinkInvoke) await observeLocalInputClearBoundary(sid);
@@ -15678,7 +15729,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     let atomicSelection = selection as
       { effort: SessionRuntimeProfile['effort']; fastMode: boolean } | undefined;
     const runtimeOwnerEpoch = captureSessionRuntimeControlOwnerEpoch();
+    const assertSharedTaskCurrent = captureSharedTaskSettingGuard(sessionId);
     const assertRuntimeOwnerCurrent = (): void => {
+      assertSharedTaskCurrent();
       internalOptions.assertSelectionCurrent?.();
       if (!sessionRuntimeControlOwnerEpochMatches(runtimeOwnerEpoch)) {
         throwIpcError(
@@ -15688,6 +15741,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
     };
     const supersededByOwnerBoundary = (): boolean => {
+      assertSharedTaskCurrent();
       if (sessionRuntimeControlOwnerEpochMatches(runtimeOwnerEpoch)) return false;
       if (internalOptions.source === 'user') {
         assertRuntimeOwnerCurrent();
@@ -15894,6 +15948,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (internalOptions.source === 'user' && !internalOptions.applyingUserSelectionOnSend &&
           !runtimeStatus.remoteHostId && !runtimeStatus.orcaRole) {
         assertRuntimeOwnerCurrent();
+        assertSharedTaskCurrent.admit();
         clearPendingCredentialSwitchForSession(sessionId, { wake: false });
         const intent = {
           ...(internalOptions.runtimeSource ? { runtimeSource: internalOptions.runtimeSource } : {}),
@@ -15929,6 +15984,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         if (supersededByOwnerBoundary()) {
           return { deferred: false, superseded: true };
         }
+        assertSharedTaskCurrent.admit();
         const generation = routeExplicit
           ? acceptSessionRuntimeMutation({
               sessionId,
@@ -16058,6 +16114,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           );
         }
         if (!liveSessionBeforeRouteChange) {
+          assertRuntimeOwnerCurrent();
+          assertSharedTaskCurrent.admit();
           try {
             await rehydrateColdPiRuntimeForWindowVerification(sessionId);
           } catch {
@@ -16234,7 +16292,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               onConfirmationRequired: (contextTokens) => {
                 confirmationContextTokens = contextTokens;
               },
-              assertCanCommit: assertRuntimeOwnerCurrent,
+              assertCanCommit: () => { assertRuntimeOwnerCurrent(); assertSharedTaskCurrent.admit(); },
               beforeClose: () => {
                 clearPendingCredentialSwitchForSession(sessionId, { wake: false });
                 pendingClearedForWindowRebuild = true;
@@ -16411,6 +16469,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const result = routeExplicit
           ? await applyRuntimeSetModelChange({
               maker,
+              admit: () => { assertRuntimeOwnerCurrent(); assertSharedTaskCurrent.admit(); },
               sessionId,
               model,
               providerId: effectiveProviderId,
@@ -16562,6 +16621,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         }
         if (atomicSelection) {
           const selectionToCommit = atomicSelection;
+          assertRuntimeOwnerCurrent();
+          assertSharedTaskCurrent.admit();
           // model/provider/effort/fast 是一次选择快照，必须在同一把 session 锁内收敛。
           // applyRuntimeSetModelChange 可能 close + wake；若 effort/fast 留给 renderer
           // 后续独立调用，queue drain 会用新 model + 旧偏好重建，跨控制端时还会发生
@@ -16625,6 +16686,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           }
           const routeProjectionOwnerScope = captureDataOwnerBroadcastScope();
           try {
+            assertRuntimeOwnerCurrent();
+            assertSharedTaskCurrent.admit();
             await persistSessionFields(sessionId, patch);
           } catch (persistenceError) {
             // The live route and host stores are applied before SQLite so the
@@ -16891,7 +16954,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       throwIpcError('INVALID_PARAMS', 'sessionId + effort required');
     }
     const runtimeOwnerEpoch = captureSessionRuntimeControlOwnerEpoch();
+    const assertSharedTaskCurrent = captureSharedTaskSettingGuard(sessionId);
     const assertOwnerCurrent = () => {
+      assertSharedTaskCurrent();
       if (!sessionRuntimeControlOwnerEpochMatches(runtimeOwnerEpoch)) {
         throwIpcError(
           'PRECONDITION_FAILED',
@@ -16903,6 +16968,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     const remoteResponse = remoteInvoke ? {} : undefined;
     const persistEffort = async () => {
       if (!remoteResponse) return;
+      assertOwnerCurrent();
+      assertSharedTaskCurrent.admit();
       await persistSessionFields(sessionId, { effort });
       markRemoteSettingPersistedInsideHandler(remoteResponse);
     };
@@ -16925,6 +16992,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const userIntent = agentSwitchPending.get(sessionId);
       if (userIntent?.sameAgentSelection) {
         assertOwnerCurrent();
+        assertSharedTaskCurrent.admit();
         const result = await agentSwitchDeps.selectSameAgentModel!(sessionId,
           { ...userIntent, effort: effort }, false);
         if (remoteResponse) markRemoteSettingPersistedInsideHandler(remoteResponse);
@@ -16969,10 +17037,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           ? (await readSessionRuntimeProfiles(sessionId))?.effective
           : undefined;
         const result = await applyRuntimeEffortWithRecovery({
-          applyRuntime: () =>
-            sess.setEffort(
+          applyRuntime: () => {
+            assertOwnerCurrent();
+            assertSharedTaskCurrent.admit();
+            return sess.setEffort(
               effort as 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra',
-            ),
+            );
+          },
           terminateSession: () => maker.closeSession(sessionId),
         });
         if (result === 'session-terminated') {
@@ -17328,7 +17399,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         throwIpcError('INVALID_PARAMS', 'sessionId + enabled required');
       }
       const runtimeOwnerEpoch = captureSessionRuntimeControlOwnerEpoch();
+      const assertSharedTaskCurrent = captureSharedTaskSettingGuard(sessionId);
       const assertOwnerCurrent = () => {
+        assertSharedTaskCurrent();
         if (!sessionRuntimeControlOwnerEpochMatches(runtimeOwnerEpoch)) {
           throwIpcError(
             'PRECONDITION_FAILED',
@@ -17340,6 +17413,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const remoteResponse = remoteInvoke ? {} : undefined;
       const persistFastMode = async () => {
         if (!remoteResponse) return;
+        assertOwnerCurrent();
+        assertSharedTaskCurrent.admit();
         await persistSessionFields(sessionId, { fastMode: enabled });
         markRemoteSettingPersistedInsideHandler(remoteResponse);
       };
@@ -17362,6 +17437,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const userIntent = agentSwitchPending.get(sessionId);
         if (userIntent?.sameAgentSelection) {
           assertOwnerCurrent();
+          assertSharedTaskCurrent.admit();
           const result = await agentSwitchDeps.selectSameAgentModel!(sessionId,
             { ...userIntent, fastMode: enabled }, false);
           if (remoteResponse) markRemoteSettingPersistedInsideHandler(remoteResponse);
@@ -17422,6 +17498,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const previousProfile = remoteInvoke
           ? (await readSessionRuntimeProfiles(sessionId))?.effective
           : undefined;
+        assertOwnerCurrent();
+        assertSharedTaskCurrent.admit();
         await sess.setFastMode(enabled);
         await commitRuntimeAxisAfterPersistence({
           persist: persistFastMode,
@@ -17467,9 +17545,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (typeof sessionId !== 'string' || typeof enabled !== 'boolean') {
         throwIpcError('INVALID_PARAMS', 'sessionId + enabled required');
       }
+      const assertSharedTaskCurrent = captureSharedTaskSettingGuard(sessionId);
       await assertReviewSettingsUnlocked(sessionId);
+      assertSharedTaskCurrent();
       const sess = maker.getSession(sessionId);
       if (!sess) return;
+      assertSharedTaskCurrent.admit();
       await sess.setThinkingEnabled(enabled);
     },
   );

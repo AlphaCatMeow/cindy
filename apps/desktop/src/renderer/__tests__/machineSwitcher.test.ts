@@ -51,6 +51,15 @@ function mkSession(id: string, deviceLinkDeviceId?: string): Session {
   return { id, status: 'active', deviceLinkDeviceId } as unknown as Session;
 }
 
+it('never lists shared-task peers as devices, including disconnected and rejected peers', () => {
+  const peer = 'shared-task~share-1~host';
+  expect(buildSwitcherDevices({
+    fullList: [mkDevice('real-pc'), mkDevice(peer)],
+    syncedDevices: [{ deviceId: peer, deviceName: 'Shared task', sessionCount: 1, connected: false }],
+    revoked: new Set([peer]),
+  }).map(device => device.deviceId)).toEqual(['real-pc']);
+});
+
 describe('selectVisibleSessions', () => {
   afterEach(() => remoteProjectsStore.clear());
   const local = [mkSession('l1'), mkSession('l2')];

@@ -4,10 +4,11 @@ import { getActiveMobileSessionRealm } from '@/config/env';
 import { FailedScheduleNotice } from '@/session/FailedScheduleNotice';
 import { shouldShowFailedScheduleNotice, type FailedScheduleRunSnapshot } from '@cindy/maker-shared/schedule-model';
 import { useRemoteResourceSession } from '@/session/useRemoteResourceSession';
+import { SharedTaskEndedState } from '@/session/SharedTaskEndedState';
 import { useSessionResourceCards } from '@/session/useSessionResourceCards';
 import { SessionResourceCards } from '@/session/SessionResourceCards';
 import { mobileDebugLog } from '@/debug/mobileDebugLog';
-import { isInFlightDeviceLinkError } from '@cindy/device-link';
+import { isInFlightDeviceLinkError, isSharedTaskPeer } from '@cindy/device-link';
 import { takeRefinementContextTail, truncateRefinementReply } from '@cindy/voice-input-core';
 import {
   ArrowDown,
@@ -92,6 +93,8 @@ import { resolveEffectiveConnectionError } from '@/components/connectionBannerVi
 import { PaperPlaneIcon } from '@/components/PaperPlaneIcon';
 import { useDeviceLink } from '@/device-link/DeviceLinkContext';
 import { useRevokedDevices } from '@/device-link/revokedDevicesStore';
+import { useSharedTaskAccess } from '@/device-link/useSharedTaskAccess';
+import { useLeaveSharedTask } from '@/device-link/useLeaveSharedTask';
 import { useUnresponsiveDevices } from '@/device-link/unresponsiveDevicesStore';
 import {
   connectionRecoverySyncRetryDelayMs,
@@ -1322,6 +1325,7 @@ export default function SessionScreen() {
     getPendingUploadCount,
   } = useMobileLocalAttachments({
     attachmentScopeKey: sessionId,
+    deviceId,
     getAccessToken: () => auth.getAccessToken(),
     getAttachmentCount: () => attachmentsRef.current.length,
     onUploaded: (rawAttachment, candidate, localId) => {
@@ -2078,6 +2082,7 @@ export default function SessionScreen() {
     setCodexResetRetryKey(null);
   }
   const isDeviceAccessRevoked = !!deviceId && revokedDevices.has(deviceId);
+  const isSharedTaskAccessRevoked = isDeviceAccessRevoked && isSharedTaskPeer(deviceId);
   // 熔断 open:被控电脑「进程活着但不回包」的半死态;relay status 恒 online,必须单独入参。
   const isDeviceUnresponsive = !!deviceId && unresponsiveDevices.has(deviceId);
   // 熔断已关后残留的 DEVICE_UNRESPONSIVE 错误按陈旧丢弃,且必须一次性解析、
@@ -2236,6 +2241,12 @@ export default function SessionScreen() {
   // 回执。把 AppState 作为回执 effect 的重算信号:离开 active 立刻取消未到期的
   // 计时,回到 active 重新起满一轮 dwell。
   const [appStateActive, setAppStateActive] = useState(AppState.currentState === 'active');
+  useSharedTaskAccess(deviceId, sessionId, appStateActive);
+  const sharedTaskExit = useLeaveSharedTask({
+    deviceId, enabled: settingsOpen && !isSharedTaskAccessRevoked,
+    onLeft: () => { setSettingsOpen(false); router.replace('/devices'); },
+    onError: (message) => { setSettingsOpen(false); setError(message); },
+  });
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       setAppStateActive(nextState === 'active');
@@ -2371,12 +2382,12 @@ export default function SessionScreen() {
     () => buildSessionOperationLayout({
       hasCurrentSession,
       hasActivePendingInteraction,
-      pendingInteractionBlocksComposer,
+      pendingInteractionBlocksComposer: pendingInteractionBlocksComposer && !isSharedTaskPeer(deviceId),
       remoteUnavailableReason: composerRemoteUnavailableReason,
       // composer 用 composer-only reason:Lead → editable(可发消息),worker → read-only。
       readOnlyReason: composerReadOnlyReason,
     }),
-    [composerReadOnlyReason, composerRemoteUnavailableReason, hasActivePendingInteraction, hasCurrentSession, pendingInteractionBlocksComposer],
+    [composerReadOnlyReason, composerRemoteUnavailableReason, hasActivePendingInteraction, hasCurrentSession, pendingInteractionBlocksComposer, deviceId],
   );
   useEffect(() => {
     if (!pendingInteractionActiveRequestId) return;
@@ -6782,6 +6793,7 @@ export default function SessionScreen() {
   // 权限模式图标钮(2026-07-29 用户裁决,对齐 Codex,与新建页同位同款):
   // 只显示档位图标,不带文字;危险档(auto / bypass)只染图标色。
   const renderSessionPermissionButton = () => {
+    if (isSharedTaskPeer(deviceId)) return null;
     const presentation = permissionPresentation(displayPermissionMode, displayPermissionLabel);
     const accent = presentation.accent !== 'neutral'
       ? permissionAccentColor(presentation.accent, colors)
@@ -6819,7 +6831,7 @@ export default function SessionScreen() {
       <ComposerToolbarLeftGroup testID="session.composerToolbarLeft">
         {renderComposerAttachmentButton()}
         {renderSessionPermissionButton()}
-        {!sessionManagedByHost && planModeOn ? (
+        {!isSharedTaskPeer(deviceId) && !sessionManagedByHost && planModeOn ? (
           <PlanModeChip
             disabled={controlBusy || !canUseRemoteSessionControls}
             onExit={() => togglePlanMode(false)}
@@ -8948,6 +8960,7 @@ export default function SessionScreen() {
               currentSession={currentSession}
               diffCount={diffCount}
               isDeviceAccessRevoked={isDeviceAccessRevoked}
+              sharedTaskEnded={isSharedTaskAccessRevoked}
               shareSelectionLeadingInset={nativeShellLayout.wideViewport
                 ? Math.max(0, (windowDimensions.width - nativeShellLayout.contentMaxWidth) / 2)
                 : 0}
@@ -8996,7 +9009,7 @@ export default function SessionScreen() {
                   || (connectionError ? t('session.screen.sessionNotSynced') : (deviceName || t('session.screen.conversationFallback')))}
             />
 
-            {showConnectionBanner || showCachedHistoryNotice ? (
+            {!isSharedTaskAccessRevoked && (showConnectionBanner || showCachedHistoryNotice) ? (
               <ConnectionBanner
                 density="compact"
                 cachedOnly={showCachedHistoryNotice}
@@ -9016,9 +9029,16 @@ export default function SessionScreen() {
             ) : null}
           </View>
         </View>
+        {sharedTaskExit.dialog}
         {currentSession ? (
           <SessionMenuSheet
             tagDeviceId={deviceId}
+            onLeaveSharing={() => void sharedTaskExit.leave()}
+            leavingSharing={sharedTaskExit.busy}
+            onOpenSharing={() => {
+              setSettingsOpen(false);
+              router.push({ pathname: '/shared-session', params: { sessionId, deviceId } });
+            }}
             providerName={providerAccountLabel}
             messageOnly={sessionManagedByHost}
             onOpenSearch={() => {
@@ -9142,7 +9162,7 @@ export default function SessionScreen() {
                   testID="session.contextSheetFileRow"
                 />
               </ContextSheetGroup>
-{!sessionManagedByHost ? <ContextSheetGroup label={t('session.common.groupMode')}>
+              {!isSharedTaskPeer(deviceId) && !sessionManagedByHost ? <ContextSheetGroup label={t('session.common.groupMode')}>
                 {planModeSupported ? (
                   // 点击即切换计划模式并关面板(产品决策,不做开关);已开启时显示 ✓,再点退出。
                   <ContextSheetRow
@@ -9298,7 +9318,11 @@ export default function SessionScreen() {
         ) : null}
         {composerAnnotations.host}
         <View style={styles.sessionMainLayer} testID="session.mainLayer">
-          {sessionOperationLayout.composerSlot === 'missing-session' && remoteUnavailableReason ? (
+          {isSharedTaskAccessRevoked ? (
+            <ScrollView contentContainerStyle={{ paddingTop: topOverlayHeight + spacing.lg, paddingHorizontal: spacing.lg }}>
+              <SharedTaskEndedState onRejoin={() => router.replace('/shared-session')} />
+            </ScrollView>
+          ) : sessionOperationLayout.composerSlot === 'missing-session' && remoteUnavailableReason ? (
             // 会话行尚未到达时保留状态占位；自动恢复类错误不再提供手动同步入口。
             <SessionSyncPlaceholder
               loading={loading}
@@ -9356,14 +9380,14 @@ export default function SessionScreen() {
                     loadEarlierProgressKey={oldestLoadedMessageCursor}
                     onCopyMessageLink={copyMessageLink}
                     onAddMessageToComposer={canUseComposer ? addMessageToComposer : undefined}
-                    onDeleteMessage={collaborationReadOnlyReason ? undefined : deleteMessage}
-                    onForkMessage={collaborationReadOnlyReason ? undefined : forkAtMessage}
+                    onDeleteMessage={collaborationReadOnlyReason || isSharedTaskPeer(deviceId) ? undefined : deleteMessage}
+                    onForkMessage={collaborationReadOnlyReason || isSharedTaskPeer(deviceId) ? undefined : forkAtMessage}
                     onLoadEarlier={loadEarlierMessages}
                     onLoadToolInput={loadToolInput}
                     onOpenForkOrigin={forkOrigin ? openForkOrigin : undefined}
                     onBlockingOverlayChange={handleMessageBlockingOverlayChange}
                     onOpenSessionLink={openSessionLink}
-                    onPreviewRewind={collaborationReadOnlyReason ? undefined : previewRewindAtMessage}
+                    onPreviewRewind={collaborationReadOnlyReason || isSharedTaskPeer(deviceId) ? undefined : previewRewindAtMessage}
                     onEnterShareSelection={enterShareSelection}
                     onVisibleShareableMessageIdsReaderChange={handleVisibleShareableMessageIdsReaderChange}
                     shareSelectionActive={shareSelectionActive}
@@ -9431,14 +9455,14 @@ export default function SessionScreen() {
           )}
         </View>
 
-        {nativeComposerFrameAvailable && sessionOperationLayout.composerSlot === 'editable' && !shareSelectionActive ? (
+        {!isSharedTaskAccessRevoked && nativeComposerFrameAvailable && sessionOperationLayout.composerSlot === 'editable' && !shareSelectionActive ? (
           <SessionHeaderNativeBlur
             edge="bottom"
             height={bottomOverlayHeight + spacing.xxl}
             inset={nativeShellLayout.keyboardBottomInset}
           />
         ) : null}
-        <View
+        {!isSharedTaskAccessRevoked && <View
           ref={bottomOverlayRef}
           onLayout={handleBottomOverlayLayout}
           pointerEvents="box-none"
@@ -9703,6 +9727,7 @@ export default function SessionScreen() {
           ) : null}
           </View>
         </View>
+        }
       </ComposerKeyboardAvoidingView>
       {shareSelectionActive && selectedShareMessages.length > 0 ? (
         <ConversationShareSvg
@@ -9739,6 +9764,7 @@ function SessionHeaderBar({
   currentSession,
   diffCount,
   isDeviceAccessRevoked,
+  sharedTaskEnded = false,
   shareSelectionLeadingInset,
   shareSelectAllNode,
   syncing,
@@ -9764,6 +9790,7 @@ function SessionHeaderBar({
   currentSession: RemoteSession | null;
   diffCount: number;
   isDeviceAccessRevoked: boolean;
+  sharedTaskEnded?: boolean;
   /** 宽屏下与消息内容列共用的左侧 inset。 */
   shareSelectionLeadingInset: number;
   /** 分享选择模式下替换头部动作区。 */
@@ -9820,7 +9847,7 @@ function SessionHeaderBar({
     settings: onOpenSettings,
     usage: onOpenUsage,
   } satisfies Record<SessionActionStripActionId, () => void>;
-  const notice = compactSessionHeaderNotice({
+  const notice = sharedTaskEnded ? null : compactSessionHeaderNotice({
     isDeviceAccessRevoked,
     pendingCount,
     queuePaused,
@@ -9870,7 +9897,7 @@ function SessionHeaderBar({
       )}
 
       {nativeHeader ? <SessionHeaderNativeTitle
-        title={title}
+        title={sharedTaskEnded ? t('sharedTask.ended') : title}
           tags={isDeviceAccessRevoked ? undefined : currentSession?.tags}
           onTagsPress={onOpenSettings}
         pinned={!messageOnly && !!currentSession?.pinnedAt}
@@ -9888,7 +9915,7 @@ function SessionHeaderBar({
             />
           ) : null}
           <Text numberOfLines={1} style={styles.sessionHeaderTitle} testID="session.title">
-            {title}
+            {sharedTaskEnded ? t('sharedTask.ended') : title}
           </Text>
           <TaskTagDots
               tags={isDeviceAccessRevoked ? undefined : currentSession?.tags}
@@ -9905,7 +9932,7 @@ function SessionHeaderBar({
       </View>
       )}
 
-      {nativeHeader ? (
+      {sharedTaskEnded ? null : nativeHeader ? (
         <SessionHeaderNativeActions
           available={!!currentSession}
           desktopLabel={t('remoteDesktop.title')}

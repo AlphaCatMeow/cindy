@@ -441,7 +441,7 @@ export const SessionItem = withSidebarNavigation<SessionItemProps>(function Sess
       }}
     />
   );
-  const remoteWritesBlocked = isRemoteSessionWriteBlocked(session);
+  const remoteWritesBlocked = isSharedTaskPeer(session.deviceLinkDeviceId ?? '') || isRemoteSessionWriteBlocked(session);
   const isAutomationGenerated = isAutomationGeneratedSession(session);
   // heartbeat schedule 绑定标识(targetSessionId 指向本会话);schedule 删除/过期后
   // schedulesStore 'changed' 刷新 → 列表为空 → 徽章消失。
@@ -1434,3 +1434,4 @@ function SessionAction({
     </Tip>
   );
 }
+import { isSharedTaskPeer } from '@cindy/device-link';

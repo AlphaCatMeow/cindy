@@ -267,6 +267,7 @@ type MakerSendOptions = {
   /** Coordinator-transmitted provenance for device-link input.enqueue. */
   fromDeviceLinkClient?: boolean;
   persistUserMessage?: {
+    sharedTaskAuthor?: AgentInputQueuedMessage['sharedTaskAuthor'];
     clientId?: unknown;
     content?: unknown;
     agentFacingWireContent?: unknown;
@@ -519,6 +520,7 @@ type ResolveSessionResult =
   | { kind: 'failure'; result: DesktopMakerSendResult };
 
 function readPersistUserMessageOption(sendOpts: MakerSendOptions): {
+  sharedTaskAuthor?: AgentInputQueuedMessage['sharedTaskAuthor'];
   clientId: string;
   content: unknown;
   agentFacingWireContent?: IpcUserMessage;
@@ -538,6 +540,7 @@ function readPersistUserMessageOption(sendOpts: MakerSendOptions): {
   const persist = sendOpts.persistUserMessage;
   if (!persist || typeof persist.clientId !== 'string') return null;
   return {
+    ...(persist.sharedTaskAuthor ? { sharedTaskAuthor: persist.sharedTaskAuthor } : {}),
     clientId: persist.clientId,
     content: persist.content,
     ...(persist.agentFacingWireContent && typeof persist.agentFacingWireContent === 'object'
@@ -1520,6 +1523,7 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
                       role: 'user',
                       content: persistUserMessage.content,
                       agentMeta: {
+                        ...(persistUserMessage.sharedTaskAuthor ? { sharedTaskAuthor: persistUserMessage.sharedTaskAuthor } : {}),
                         uuid: so.messageUuid,
                         ...(so.origin?.kind === 'scheduler'
                           ? { autoReviewUserText: { kind: 'scheduled-continuation' } }

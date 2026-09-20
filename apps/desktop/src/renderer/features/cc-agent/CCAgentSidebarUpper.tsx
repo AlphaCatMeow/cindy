@@ -68,6 +68,8 @@ import { useOwnTopNavScrollableRows, useSidebarCollapsedState } from '../feature
 import { SidebarTopNav } from '@/components/sidebar/SidebarTopNav';
 import { SidebarFilterPopover } from './sidebar/SidebarFilterPopover';
 import { MainListScopeHeader } from './sidebar/MainListScopeHeader';
+import { SharedTasksSection } from '@/features/device-link/SharedTasksSection';
+import { isSharedTaskPeer } from '@cindy/device-link';
 import { stripTrailingPathSeparators } from '../../../shared/pathText';
 import {
   SessionAttentionUrgencyProvider,
@@ -570,7 +572,8 @@ export function CCAgentSidebarUpper() {
     }
   }, [filter.status, remoteDevices, selectedMachineId]);
   const sessionsWithRemote = useMemo(
-    () => selectVisibleSessions(sessionsHook.sessions, remoteProjectSessions, selectedMachineId),
+    () => selectVisibleSessions(sessionsHook.sessions, remoteProjectSessions, selectedMachineId)
+      .filter(session => !session.deviceLinkDeviceId || !isSharedTaskPeer(session.deviceLinkDeviceId)),
     [sessionsHook.sessions, remoteProjectSessions, selectedMachineId],
   );
   const statusFilteredSessionsWithRemote = useMemo(
@@ -1391,7 +1394,8 @@ function ExpandedView({
   );
   const scopedSidebarSessions = useMemo(
     () =>
-      selectVisibleSessions(sessions, remoteProjectSessions, selectedMachineId).filter(
+      selectVisibleSessions(sessions, remoteProjectSessions, selectedMachineId)
+        .filter(session => !session.deviceLinkDeviceId || !isSharedTaskPeer(session.deviceLinkDeviceId)).filter(
         passesOrcaAndStatus,
       ),
     [sessions, remoteProjectSessions, selectedMachineId, passesOrcaAndStatus],
@@ -3590,6 +3594,10 @@ function ExpandedView({
           ) : null}
           {/* 搜索时原列表只隐藏、不卸载:置顶段折叠等本地 state 才能保住。 */}
           <div hidden={searchActive} className="flex flex-col gap-2">
+            <SharedTasksSection activeSessionId={activeSessionId} localSessions={sessions} onSelect={(id) => {
+              clearNotification(id);
+              navigate('/cc-agent/' + encodeURIComponent(id));
+            }} />
             {remoteSessionBootstrapFailures.length > 0 && !hasVisibleSidebarContent ? (
               <>
                 <MainListScopeHeader
