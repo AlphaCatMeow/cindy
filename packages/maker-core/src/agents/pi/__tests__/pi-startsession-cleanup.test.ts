@@ -131,6 +131,8 @@ const noopLogger: Logger = {
   child: () => noopLogger,
 };
 
+// Durable approval assertions allow 3s for the 500ms poll and asynchronous delivery.
+// The default 1s wait races the second poll on loaded CI runners; permission assertions stay exact.
 // The same durable store feeds streaming foreground discovery and detached lease inspection.
 function mockRunDiscovery() {
   const list = vi.spyOn(piSubagentRuns, 'listPiSubagentRuns');
@@ -1274,7 +1276,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
         confirmed: true,
         runtimeOwnerId: ownerId(),
       }),
-    ));
+    ), { timeout: 3_000 });
     expect(noteOpaqueWrite).toHaveBeenCalledWith({
       sessionId: 's1',
       provider: 'pi',
@@ -1584,7 +1586,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
         confirmed,
         runtimeOwnerId: ownerId(),
       }),
-    ));
+    ), { timeout: 3_000 });
     expect(resolver).toHaveBeenCalledOnce();
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'permission',
@@ -1617,7 +1619,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
         run.taskId,
         'approval',
         expect.objectContaining({ value }),
-      ));
+      ), { timeout: 3_000 });
       await handle.close();
     },
   );
@@ -1667,7 +1669,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ value: 'auto-review-deny:This task is read-only.' }),
-    ));
+    ), { timeout: 3_000 });
     expect(review).toHaveBeenCalledOnce();
     expect(resolver).not.toHaveBeenCalled();
     await handle.close();
@@ -1688,7 +1690,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ value: 'system-deny' }),
-    ));
+    ), { timeout: 3_000 });
     await handle.close();
   });
 
@@ -1849,7 +1851,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ confirmed: true }),
-    ));
+    ), { timeout: 3_000 });
     expect(resolver).not.toHaveBeenCalled();
     await handle.close();
   });
@@ -1875,7 +1877,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ confirmed: true }),
-    ));
+    ), { timeout: 3_000 });
     expect(review).toHaveBeenCalledWith(expect.objectContaining({
       action: { kind: 'file-write', path: 'tmp/legacy-safe.txt',
         resolvedPath: path.join(cwd, 'tmp', 'legacy-safe.txt'), resolvedWritableRoots: null },
@@ -1910,7 +1912,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
         run.taskId,
         'approval',
         expect.objectContaining({ confirmed: false }),
-      ));
+      ), { timeout: 3_000 });
       expect(review).toHaveBeenCalledWith(expect.objectContaining({
         action: { kind: 'file-write', path: path.join(writableDir, 'linked', 'result.txt'),
           resolvedPath: path.join(outsideDir, 'result.txt'), resolvedWritableRoots: [cwd, writableDir] },
@@ -1954,7 +1956,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
         run.taskId,
         'approval',
         expect.objectContaining({ confirmed: true }),
-      ));
+      ), { timeout: 3_000 });
       expect(resolver).not.toHaveBeenCalled();
     } finally {
       await handle.close();
@@ -1983,7 +1985,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ confirmed: false }),
-    ));
+    ), { timeout: 3_000 });
     expect(review).toHaveBeenCalledOnce();
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({
       toolName: 'bash',
@@ -2005,7 +2007,7 @@ describe('PiAgent.startSession failure cleanup (mocked pi process)', () => {
       run.taskId,
       'approval',
       expect.objectContaining({ confirmed: false }),
-    ));
+    ), { timeout: 3_000 });
     await handle.close();
   });
 
