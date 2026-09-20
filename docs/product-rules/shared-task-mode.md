@@ -59,14 +59,14 @@
 2026-09-18 用户确认：功能仍在开发，不维护旧共享协议和存储命名兼容层。客户端和服务端各自维护本仓协议包并同步更新；独立 cindy-protocol 仓不再被当前 workspace 消费。
 
 - 类型与函数统一为 SharedTask / sharedTask，能力为 shared-task-v1，逻辑 peer 前缀为 shared-task~，REST 为 /api/device-link/shared-tasks，标识字段为 sharedTaskId，IPC 为 maker:shared-task / shared-task:account。普通同账号远控协议不变。
-- SQLite 使用 shared_task_events / shared_task_id；Prisma 使用 SharedTask、SharedTaskGuest、SharedTaskInvitation。旧标识仅用于历史 migration 与一次性搬迁输入，运行期无旧接口、双写或别名。
-- 不支持新旧共享版本混用。本地验证先停旧 relay，迁移数据库，再同时启动新版 relay 和房主、访客客户端。若目标环境已运行旧共享版本，合并前需建立可强制停旧并迁移的部署 gate，不能直接滚动发布改名版本。
-- 旧开发分支 migration 0108、0110 未进入 main，已与新主干编号冲突。基于 2026-09-20 的主干 0113 重新生成 0114_shared_task_events。旧分支沙箱保留原库备份，使用新的独立沙箱验收，禁止改写 schema_version 或强行打开不匹配库。正确迁移链内的历史共享记录、消息作者与队列作者由 companion 一次性搬迁，不删除历史消息。
+- SQLite 使用 shared_task_events / shared_task_id；Prisma 使用 SharedTask、SharedTaskGuest、SharedTaskInvitation。初版直接使用最终命名建表，不保留旧开发版搬迁脚本、旧接口、双写或别名。
+- 不支持新旧共享开发版本混用，也不自动转换旧开发数据库。旧开发沙箱保留原库，使用新的隔离数据库和沙箱验证新版，不修改现有验收数据。
+- 旧开发分支 migration 0108、0110 未进入 main，已与新主干编号冲突。基于 2026-09-20 的主干 0113 重新生成 0114_shared_task_events。旧分支沙箱保留原库备份，使用新的独立沙箱验收，禁止改写 schema_version 或强行打开不匹配库。0114 只新增最终命名的共享记录表，不读取或改写旧开发版记录、消息作者与队列作者。
 
-- 尚未部署共享功能的环境先执行服务端增量 migration，再升级全部 relay，最后发布客户端。已部署旧开发期共享版本的环境按上面的停旧窗口处理。服务端不改写既有同账号设备关系；不能把缺少共享能力的 relay 当作已支持。
+- 尚未部署共享功能的环境先执行服务端增量 migration，再升级全部 relay，最后发布客户端。运行旧开发版的隔离环境按上面的新库方案验收，不原地套用新迁移链。服务端不改写既有同账号设备关系；不能把缺少共享能力的 relay 当作已支持。
 - 新客户端连接旧 relay 时，普通同账号远控继续使用原协议；共享入口提示升级，Mobile 不轮询旧 relay 的共享 API。新 relay 连接旧房主时，房主缺少共享 channel 的错误也提示升级，不能降级为全设备访问。
 - 错误处理只把明确的能力缺失或版本不兼容映射为升级提示，断网或超时错误仍提示重试。Mobile 连接未建立时将能力视为未知，显示重试；重新连接后重新读取能力，升级后可恢复共享。
-- Desktop 的本地 SQLite migration 0110 为增量建表，但“可从旧版升级”不等于“可用旧版打开新库”。既有 migration manifest / schema 校验会拒绝旧程序打开已升级数据库；本功能不放宽该保护。
+- Desktop 的本地 SQLite migration 0114 为增量建表，但“可从旧版升级”不等于“可用旧版打开新库”。既有 migration manifest / schema 校验会拒绝旧程序打开已升级数据库；本功能不放宽该保护。
 - 发布前保留升级前数据库备份。需要回退时优先修复新版；如必须恢复旧程序，应使用升级前的对应备份，并明确接受备份之后的数据不会随之保留。不得通过降低 schema 版本、删表或改历史 migration 强行回退。服务端回退时保留增量表，不执行破坏性 down migration。
 - 新旧版本真实混合部署尚未端到端实测；能力协商与错误提示的自动化回归不能替代该发布验收。
 

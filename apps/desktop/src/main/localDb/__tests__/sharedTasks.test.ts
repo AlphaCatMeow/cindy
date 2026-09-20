@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSharedTaskJournal } from '../sharedTasks.js';
@@ -24,33 +23,6 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
-it('moves development-era records and author metadata without rewriting message content', async () => {
-  db.exec(`
-    CREATE TABLE session_meeting_events (id INTEGER PRIMARY KEY, meeting_id TEXT, session_id TEXT,
-      revision INTEGER, kind TEXT, terminal INTEGER, snapshot TEXT, recorded_at INTEGER);
-    CREATE TABLE messages (agent_meta TEXT, content TEXT);
-    CREATE TABLE agent_input_queue_snapshots (payload TEXT);
-  `);
-  const legacy = { ...snapshot(), meetingId: 'legacy-share', sharedTaskId: undefined };
-  db.prepare("INSERT INTO session_meeting_events VALUES (1, 'legacy-share', 'session', 1, 'authority', 0, ?, 123)")
-    .run(JSON.stringify(legacy));
-  const author = { meetingId: 'legacy-share', sessionId: 'session', memberId: 'member', accountId: 'guest', displayName: 'Guest' };
-  const content = 'User text: meetingId and meetingAuthor must stay verbatim';
-  db.prepare('INSERT INTO messages VALUES (?, ?)').run(JSON.stringify({ meetingAuthor: author, uuid: 'message' }), content);
-  db.prepare('INSERT INTO messages VALUES (?, ?)').run('invalid legacy JSON', content);
-  db.prepare('INSERT INTO agent_input_queue_snapshots VALUES (?)').run(JSON.stringify([{ meetingAuthor: author, text: content }]));
-  const { run } = createRequire(import.meta.url)(resolve(process.cwd(), 'drizzle/scripts/0114_shared_task_events.ts'));
-  run(db);
-  run(db);
-  expect(await journal.latest()).toMatchObject([{ sharedTaskId: 'legacy-share', snapshot: { sharedTaskId: 'legacy-share' } }]);
-  expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'session_meeting_events'").get()).toBeUndefined();
-  const message = db.prepare('SELECT * FROM messages LIMIT 1').get() as { agent_meta: string; content: string };
-  expect(message.content).toBe(content);
-  expect(JSON.parse(message.agent_meta)).toEqual({ uuid: 'message', sharedTaskAuthor: { ...author, meetingId: undefined, sharedTaskId: 'legacy-share' } });
-  const queue = db.prepare('SELECT payload FROM agent_input_queue_snapshots').get() as { payload: string };
-  expect(JSON.parse(queue.payload)[0]).toMatchObject({ text: content, sharedTaskAuthor: { sharedTaskId: 'legacy-share' } });
-  expect(db.prepare('SELECT agent_meta FROM messages WHERE rowid = 2').get()).toEqual({ agent_meta: 'invalid legacy JSON' });
-});
 describe('sharedTask authority journal', () => {
   it('retains membership changes and reads only the latest authority', async () => {
     expect(await journal.recordAuthority(snapshot())).toBe(true);
