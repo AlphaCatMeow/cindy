@@ -15,7 +15,7 @@ it('keeps ordinary remote exits unchanged and offers a new invitation after a sh
   render(<SharedTaskEndedNotice onJoin={onJoin} />);
   act(() => { expect(notifySharedTaskEnded('ordinary-device')).toBe(false); });
   expect(screen.queryByRole('dialog')).toBeNull();
-  act(() => { expect(notifySharedTaskEnded(sharedTaskHostPeer('share-1'))).toBe(true); });
+  act(() => { expect(notifySharedTaskEnded(sharedTaskHostPeer('share-1', 'desktop'))).toBe(true); });
   expect(screen.getByRole('dialog').textContent).toContain('sharedTask.accessEndedBody');
   fireEvent.click(screen.getByRole('button', { name: 'sharedTask.rejoin' }));
   expect(onJoin).toHaveBeenCalledOnce();
@@ -25,7 +25,7 @@ it('keeps ordinary remote exits unchanged and offers a new invitation after a sh
 it('does not keep an ending notice visible across an account boundary', () => {
   const onJoin = vi.fn();
   const view = render(<SharedTaskEndedNotice onJoin={onJoin} />);
-  act(() => { notifySharedTaskEnded(sharedTaskHostPeer('share-1')); });
+  act(() => { notifySharedTaskEnded(sharedTaskHostPeer('share-1', 'desktop')); });
   expect(screen.getByRole('dialog')).toBeTruthy();
   setDataOwnerGeneration('other');
   view.rerender(<SharedTaskEndedNotice onJoin={onJoin} />);

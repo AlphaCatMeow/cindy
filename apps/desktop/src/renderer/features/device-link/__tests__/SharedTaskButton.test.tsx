@@ -146,7 +146,7 @@ it('shows the host-offline ending for a guest whose share closed', async () => {
   state.account.mockImplementation((command: { action: string }) => command.action === 'get'
     ? Promise.resolve({ ...detail, status: 'closed' })
     : Promise.resolve([]));
-  const body = await openWindow({ id: 'session-1', deviceLinkDeviceId: sharedTaskHostPeer('st1') } as Session);
+  const body = await openWindow({ id: 'session-1', deviceLinkDeviceId: sharedTaskHostPeer('st1', 'desktop') } as Session);
   await waitFor(() => expect(body.textContent).toContain('sharedTask.hostOfflineTitle'));
   expect(body.textContent).toContain('sharedTask.hostOfflineBody');
   expect(body.textContent).not.toContain('sharedTask.leave');

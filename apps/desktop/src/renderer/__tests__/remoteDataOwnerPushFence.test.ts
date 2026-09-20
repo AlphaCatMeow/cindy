@@ -1,9 +1,10 @@
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { sharedTaskHostPeer } from '@cindy/device-link';
 import { setDataOwnerGeneration } from '../contexts/dataOwnerGeneration';
 import { bindSharedTaskPushOwner, isDeviceLinkRemotePushCurrent, isRemoteDataOwnerPushCurrent, resetRemoteDataOwnerPushFence } from '../lib/remoteDataOwnerPushFence';
 
-const peer = sharedTaskHostPeer('shared-task');
+const peer = sharedTaskHostPeer('shared-task', 'desktop');
 const hostStamp = { dataOwnerId: 'host-account', ownerGeneration: 4 };
 const localStamp = { dataOwnerId: 'guest-account', ownerGeneration: 2 };
 
@@ -30,7 +31,7 @@ describe('shared task push owner', () => {
   });
 
   it('never resets an unrelated peer or accepts an epoch from a stale account', () => {
-    const other = sharedTaskHostPeer('other-task');
+    const other = sharedTaskHostPeer('other-task', 'desktop');
     bindSharedTaskPushOwner(peer, 'host-account');
     bindSharedTaskPushOwner(other, 'host-account');
     const push = { deviceId: peer, ownerStamp: hostStamp, sourceEpoch: 1 };
@@ -60,7 +61,7 @@ describe('shared task push owner', () => {
     expect(isRemoteDataOwnerPushCurrent(peer, undefined)).toBe(false);
     expect(isRemoteDataOwnerPushCurrent(peer, null)).toBe(false);
     expect(isRemoteDataOwnerPushCurrent(peer, {})).toBe(false);
-    expect(isRemoteDataOwnerPushCurrent('shared-task~shared-task~guest~member~device', hostStamp)).toBe(false);
+    expect(isRemoteDataOwnerPushCurrent(sharedTaskGuestPeer('shared-task', 'member', 'device'), hostStamp)).toBe(false);
   });
 
   it('invalidates bindings when the local account or generation changes', () => {
@@ -86,7 +87,7 @@ describe('shared task push owner', () => {
   });
 
   it('rejects delayed frames after removal, without affecting another shared task', () => {
-    const other = sharedTaskHostPeer('other-task');
+    const other = sharedTaskHostPeer('other-task', 'desktop');
     bindSharedTaskPushOwner(peer, 'host-account');
     bindSharedTaskPushOwner(other, 'host-account');
     resetRemoteDataOwnerPushFence(peer);

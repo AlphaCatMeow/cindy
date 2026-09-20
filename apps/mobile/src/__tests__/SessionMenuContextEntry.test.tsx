@@ -142,7 +142,7 @@ it("reopening the primary menu after info does not initialize an engine, but ent
     expect(props.onOpenSearch).toHaveBeenCalledOnce();
     const sharing = host.querySelector('[data-testid="session.sharingButton"]');
     expect(sharing?.textContent).toBe('共享任务');
-    await act(async () => root.render(<SessionMenuSheet {...props} initialView="menu" session={{ ...props.session, deviceLinkDeviceId: sharedTaskHostPeer('shared') }} />));
+    await act(async () => root.render(<SessionMenuSheet {...props} initialView="menu" session={{ ...props.session, deviceLinkDeviceId: sharedTaskHostPeer('shared', 'desktop') }} />));
     expect(host.querySelector('[data-testid="session.sharingButton"]')).toBeNull();
     const leave = host.querySelector('[data-testid="session.leaveSharingButton"]');
     expect(leave?.textContent).toBe('退出共享任务');

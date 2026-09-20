@@ -15,7 +15,7 @@ export function isSharedTaskAttachment(value: string, sharedTaskId: string): boo
     parts.slice(3).every((part) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(part));
 }
 
-export const SHARED_TASK_CAPABILITY = 'shared-task-v1';
+export const SHARED_TASK_CAPABILITY = 'shared-task-v2';
 export const SHARED_TASK_MAX_ACTIVE_PER_OWNER = 2;
 export const SHARED_TASK_MAX_JOINED_PER_ACCOUNT = 2;
 export const SHARED_TASK_MAX_GUESTS = 2;

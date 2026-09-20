@@ -54,18 +54,20 @@ export default function SharedSessionScreen() {
   const epoch = useRef(0);
   const peer = deviceId ? parseSharedTaskPeer(deviceId) : null;
   const guestId = peer?.role === 'host' ? peer.sharedTaskId : joinedId;
+  const guestTarget = peer?.role === 'host' ? deviceId
+    : guestId && state?.detail ? sharedTaskHostPeer(guestId, state.detail.hostDeviceId) : undefined;
   const hostContext = !!sessionId && !!deviceId && !guestId;
   const host = useCallback((command: SharedTaskHostCommand) => link.invoke(deviceId!, SHARED_TASK_HOST_CHANNEL, [command]), [deviceId, link.invoke]);
   const endAccess = useCallback(() => {
     confirmationPending.current = null;
     setEnded(true); setState(null); setNotice('');
-    if (guestId) {
-      const target = sharedTaskHostPeer(guestId);
+    if (guestTarget) {
+      const target = guestTarget;
       markDeviceAccessRevoked(target);
       link.closeLink(target);
       remoteSessionStore.removeDevice(target);
     }
-  }, [guestId, link.closeLink]);
+  }, [guestTarget, link.closeLink]);
   const load = useCallback(async (visible: () => boolean = () => true) => {
     const captured = epoch.current;
     const owner = getMobileAuthOwner();
@@ -174,7 +176,7 @@ export default function SharedSessionScreen() {
     const detail = await api.get(id);
     if (!current()) return;
     if (detail.status !== 'active') { endAccess(); return; }
-    const target = sharedTaskHostPeer(id);
+    const target = sharedTaskHostPeer(id, detail.hostDeviceId);
     await link.openLink(target);
     if (!current()) return;
     const task = await link.invoke<RemoteSession>(target, 'local-db:sessions:get', [detail.sessionId]);
@@ -200,8 +202,8 @@ export default function SharedSessionScreen() {
   const leave = () => confirm(t('sharedTask.leaveTitle'), t('sharedTask.leaveBody'), t('sharedTask.leaveKeep'), t('sharedTask.leave'), async (current) => {
     await api.leave(guestId!);
     if (!current()) return;
-    const target = sharedTaskHostPeer(guestId!);
-    link.closeLink(target); remoteSessionStore.removeDevice(target); router.replace('/devices');
+    if (guestTarget) { link.closeLink(guestTarget); remoteSessionStore.removeDevice(guestTarget); }
+    router.replace('/devices');
   }, false);
   const taskCard = <View style={styles.taskRow}><FileText size={iconSize.md} color={colors.textTertiary} /><View style={styles.grow}><Text style={styles.taskTitle}>{title}</Text><Text style={styles.metadata}>{task?.deviceLinkDeviceName ?? t('sharedTask.runsOnHostDevice')}</Text></View></View>;
   return <SharedTaskScreen

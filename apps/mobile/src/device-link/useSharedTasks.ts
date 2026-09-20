@@ -24,7 +24,7 @@ export function useSharedTasks(): void {
       try {
         const tasks = (await api.list()).filter((task) => task.ownerAccountId !== owner.accountId);
         if (!current()) return;
-        const peers = new Set(tasks.map((task) => sharedTaskHostPeer(task.sharedTaskId)));
+        const peers = new Set(tasks.map((task) => sharedTaskHostPeer(task.sharedTaskId, task.hostDeviceId)));
         for (const task of remoteSessionStore.getSessions()) {
           const peer = task.deviceLinkDeviceId;
           if (peer && isSharedTaskPeer(peer) && !peers.has(peer)) {
@@ -34,7 +34,7 @@ export function useSharedTasks(): void {
         }
         for (const task of tasks) {
           if (!current()) return;
-          const peer = sharedTaskHostPeer(task.sharedTaskId);
+          const peer = sharedTaskHostPeer(task.sharedTaskId, task.hostDeviceId);
           try {
             await openLink(peer);
             if (!current()) return;

@@ -1,3 +1,5 @@
+import { sharedTaskHostPeer } from '@cindy/device-link';
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSharedTaskApi, parseSharedTaskSnapshot, type SharedTaskDetail } from '@cindy/device-link';
 import type { SharedTaskJournalEntry } from '../../localDb/sharedTasks.js';
@@ -62,7 +64,7 @@ describe('task host sharedTask lifecycle', () => {
 
   it('waits for archive durability and server closure before creating a fresh share', async () => {
     await host.open('session');
-    const oldCapture = host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')!;
+    const oldCapture = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
     let finishRefresh!: (value: SharedTaskDetail) => void;
     api.get.mockImplementationOnce(() => new Promise<SharedTaskDetail>((resolve) => { finishRefresh = resolve; }));
     const refresh = host.refresh('sharedTask');
@@ -96,7 +98,7 @@ describe('task host sharedTask lifecycle', () => {
     expect(oldCapture.isCurrent()).toBe(false);
     expect(records.get('sharedTask')?.terminal).toBe(true);
     expect(records.get('fresh-sharedTask')?.terminal).toBe(false);
-    expect(host.capturePeer('shared-task~fresh-sharedTask~guest~member-a~phone-a')?.isCurrent()).toBe(true);
+    expect(host.capturePeer(sharedTaskGuestPeer('fresh-sharedTask', 'member-a', 'phone-a'))?.isCurrent()).toBe(true);
   });
 
   it('keeps an old open fenced when the restored task is already sharing again', async () => {
@@ -153,7 +155,7 @@ describe('task host sharedTask lifecycle', () => {
     serverDetail = { ...detail(), sharedTaskId: 'fresh' };
     await expect(host.open('session')).resolves.toBe('fresh');
     expect(api.close).toHaveBeenCalledTimes(2);
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')).toBeNull();
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))).toBeNull();
   });
 
   it.each([undefined, 'session'])('drains creates from a retired same-profile host at boundary (%s)', async (sessionId) => {
@@ -176,7 +178,7 @@ describe('task host sharedTask lifecycle', () => {
     expect(await closing).toEqual(['late-sharedTask']);
     await rejected;
     expect(records.get('late-sharedTask')?.terminal).toBe(true);
-    expect(replacement.capturePeer('shared-task~late-shared-task~guest~member-a~phone-a')).toBeNull();
+    expect(replacement.capturePeer(sharedTaskGuestPeer('late-shared-task', 'member-a', 'phone-a'))).toBeNull();
   });
   it.each([undefined, 'session'])('drains a late committed create before releasing the outgoing profile (%s)', async (sessionId) => {
     let reply!: (value: unknown) => void;
@@ -233,7 +235,7 @@ describe('task host sharedTask lifecycle', () => {
     release();
     await expect(refreshing).rejects.toThrow('closed');
     expect(canRead()).toBe(false);
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')).toBeNull();
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))).toBeNull();
   });
   it('durably closes the outgoing profile after its network generation is fenced', async () => {
     await host.open('session');
@@ -246,7 +248,7 @@ describe('task host sharedTask lifecycle', () => {
     const restored = new SharedTaskHost(options);
     await restored.restore();
     expect(api.close).toHaveBeenCalledWith('sharedTask');
-    expect(restored.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')).toBeNull();
+    expect(restored.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))).toBeNull();
   });
 
   it('closes only the archived task and propagates a journal failure', async () => {
@@ -260,10 +262,10 @@ describe('task host sharedTask lifecycle', () => {
   });
   it('invalidates old captures without revoking existing devices when a member adds a device', async () => {
     await host.open('session');
-    expect(host.capturePeer('shared-task~sharedTask~host')).toBeNull();
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~phone-b')).toBeNull();
-    const a = host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')!;
-    const b = host.capturePeer('shared-task~sharedTask~guest~member-b~phone-b')!;
+    expect(host.capturePeer(sharedTaskHostPeer('sharedTask', 'desktop'))).toBeNull();
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-b'))).toBeNull();
+    const a = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
+    const b = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-b', 'phone-b'))!;
     expect(a.author.accountId).toBe('guest-a');
     expect(a.isCurrent()).toBe(true);
     serverDetail = { ...detail(2), guests: detail().guests.map((member) => member.memberId === 'member-a' ? { ...member, version: 2, deviceIds: [...member.deviceIds, 'second-phone'] } : member) };
@@ -271,8 +273,8 @@ describe('task host sharedTask lifecycle', () => {
     expect(a.isCurrent()).toBe(false);
     expect(b.isCurrent()).toBe(true);
     expect(options.revoke).not.toHaveBeenCalled();
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')?.isCurrent()).toBe(true);
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~second-phone')?.isCurrent()).toBe(true);
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))?.isCurrent()).toBe(true);
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'second-phone'))?.isCurrent()).toBe(true);
     await host.dispose();
     expect(b.isCurrent()).toBe(false);
   });
@@ -338,7 +340,7 @@ describe('task host sharedTask lifecycle', () => {
     await host.refresh('sharedTask');
     expect(canRead()).toBe(true);
     expect(options.revoke).not.toHaveBeenCalled();
-    expect(host.capturePeer('shared-task~sharedTask~guest~member-a~phone-a')?.isCurrent()).toBe(true);
+    expect(host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))?.isCurrent()).toBe(true);
   });
   it('closes locally before awaiting the server and retries durable closure after restart', async () => {
     await host.open('session');

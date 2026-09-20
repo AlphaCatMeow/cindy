@@ -1,3 +1,4 @@
+import { sharedTaskHostPeer } from '@cindy/device-link';
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -13,7 +14,7 @@ vi.mock('../remoteProjectsStore', () => ({
   useRemoteProjectSessions: () => state.sessions, isRemoteDeviceMarkedDisconnected: () => false,
   remoteProjectsStore: { pinSessionOrigin: state.pin },
 }));
-const guestTask = { id: 'joined-1', title: 'Joined task', deviceLinkDeviceId: 'shared-task~share-1~host' } as Session;
+const guestTask = { id: 'joined-1', title: 'Joined task', deviceLinkDeviceId: sharedTaskHostPeer('share-1', 'desktop') } as Session;
 beforeEach(() => {
   vi.clearAllMocks(); setDataOwnerGeneration('guest');
   state.sessions = [guestTask, { id: 'own-device-task', title: 'Own device task', deviceLinkDeviceId: 'my-computer' } as Session];

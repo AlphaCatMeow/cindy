@@ -59,7 +59,10 @@
 
 2026-09-18 用户确认：功能仍在开发，不维护旧共享协议和存储命名兼容层。客户端和服务端各自维护本仓协议包并同步更新；独立 cindy-protocol 仓不再被当前 workspace 消费。
 
-- 类型与函数统一为 SharedTask / sharedTask，能力为 shared-task-v1，逻辑 peer 前缀为 shared-task~，REST 为 /api/device-link/shared-tasks，标识字段为 sharedTaskId，IPC 为 maker:shared-task / shared-task:account。普通同账号远控协议不变。
+- 类型与函数统一为 SharedTask / sharedTask，能力为 shared-task-v2，REST 为 /api/device-link/shared-tasks，标识字段为 sharedTaskId，IPC 为 maker:shared-task / shared-task:account。共享是原任务的状态与授权关系，原 sessionId 不变。
+- relay 的 src/dst 始终为真实设备 ID；可选 sharedTask 字段独立携带共享 ID 与目标角色/成员，来源角色/成员由服务端按已验证账号与设备重写。不带范围的帧沿用同账号远控，包括 ID 恰好带 shared-task~ 前缀的真实设备；非法范围直接拒绝，不能降级。
+- 客户端仅在 relay 声明 v2 后发送共享帧，服务端还检查双方能力、任务状态、成员与真实目标设备绑定。先升级全部 relay 再发布客户端；不兼容未发布的共享 v1 开发版，已发布普通远控协议不变。
+- 客户端缓存/IPC 使用包含共享范围的本地连接索引，长度大于物理设备 ID 的 128 字符上限，避免同设备普通连接与多个共享连接碰撞；索引不会进入 wire 的设备地址字段。请求、结果、ACK、重连与错误都按各自连接范围隔离，不扩大到其他任务或设备。实现与回归见 packages/device-link/src/sharedTaskEnvelope.ts、sharedTaskPeer.ts 及其测试。
 - SQLite 使用 shared_task_events / shared_task_id；Prisma 使用 SharedTask、SharedTaskGuest、SharedTaskInvitation。初版直接使用最终命名建表，不保留旧开发版搬迁脚本、旧接口、双写或别名。
 - 不支持新旧共享开发版本混用，也不自动转换旧开发数据库。旧开发沙箱保留原库，使用新的隔离数据库和沙箱验证新版，不修改现有验收数据。
 - 旧开发分支 migration 0108、0110 未进入 main，已与新主干编号冲突。基于 2026-09-20 的主干 0113 重新生成 0114_shared_task_events。旧分支沙箱保留原库备份，使用新的独立沙箱验收，禁止改写 schema_version 或强行打开不匹配库。0114 只新增最终命名的共享记录表，不读取或改写旧开发版记录、消息作者与队列作者。

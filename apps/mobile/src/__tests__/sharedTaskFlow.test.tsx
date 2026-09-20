@@ -61,7 +61,7 @@ vi.mock('@/platform/chrome/SimpleStackHeader', () => ({ SimpleStackHeader: ({ ti
 vi.mock('@/theme', () => ({ useTheme: () => ({ colors: {} }), useThemedStyles: () => ({}) }));
 let element: HTMLDivElement;
 let root: Root;
-const detail = { sharedTaskId: 'shared', sessionId: 'task', status: 'active', title: 'Design review', memberLabels: [{ memberId: 'member', displayName: 'Guest' }] };
+const detail = { sharedTaskId: 'shared', sessionId: 'task', hostDeviceId: 'desktop', status: 'active', title: 'Design review', memberLabels: [{ memberId: 'member', displayName: 'Guest' }] };
 const owned = (id: string) => ({ sharedTaskId: id, sessionId: 'task', title: id, ownerAccountId: 'owner', hostDeviceId: 'host' });
 async function render() { await act(async () => root.render(createElement(SharedSessionScreen))); }
 async function click(label: string) {
@@ -97,12 +97,12 @@ it('uses a multiline invitation and stops at the joined screen before opening th
   expect(h.link.openLink).not.toHaveBeenCalled();
   h.link.invoke.mockResolvedValue({ id: 'task' });
   await click('sharedTask.enterTask');
-  expect(h.link.invoke).toHaveBeenCalledWith(sharedTaskHostPeer('shared'), 'local-db:sessions:get', ['task']);
+  expect(h.link.invoke).toHaveBeenCalledWith(sharedTaskHostPeer('shared', 'desktop'), 'local-db:sessions:get', ['task']);
   expect(h.router.replace).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/sessions/[sessionId]' }));
 });
 it.each(['ios', 'android'] as const)('%s preserves the page on cancel and rejects an old account confirmation', async (platform) => {
   Platform.OS = platform;
-  h.params = { sessionId: 'task', deviceId: sharedTaskHostPeer('shared') }; await render();
+  h.params = { sessionId: 'task', deviceId: sharedTaskHostPeer('shared', 'desktop') }; await render();
   const originalPage = element.innerHTML;
   await click('sharedTask.leave');
   expect(h.alert).toHaveBeenCalledTimes(1);
@@ -135,7 +135,7 @@ it('replaces stale guest state only for confirmed membership loss and can join a
   await act(async () => vi.advanceTimersByTimeAsync(5_000));
   expect(element.textContent).toContain('sharedTask.ended');
   expect(element.textContent).not.toContain('sharedTask.leave');
-  expect(h.revoked).toHaveBeenCalledWith(sharedTaskHostPeer('shared'));
+  expect(h.revoked).toHaveBeenCalledWith(sharedTaskHostPeer('shared', 'desktop'));
   await act(async () => oldConfirm.onPress());
   expect(h.api.leave).not.toHaveBeenCalled();
   await click('sharedTask.rejoin'); expect(element.querySelector('textarea')).not.toBeNull();

@@ -1,3 +1,4 @@
+import { sharedTaskHostPeer } from '../protocol.js';
 import { describe, expect, it } from 'vitest';
 import {
   authorizeSharedTaskOperation as authorize,
@@ -28,7 +29,7 @@ describe('sharedTask authorization', () => {
     expect(authorize(parsed, { accountId: 'guest-b', deviceId: ' 手机~1 ' }, 'session-1', 'history.read').allowed).toBe(false);
   });
   it('keeps task subscriptions but removes the full-device list from shared peers', () => {
-    expect(sharedTaskTopics('shared-task~shared~host', ['sessions', 'session:task'])).toEqual(['session:task']);
+    expect(sharedTaskTopics(sharedTaskHostPeer('shared', 'desktop'), ['sessions', 'session:task'])).toEqual(['session:task']);
     expect(sharedTaskTopics('my-desktop', ['sessions', 'session:task'])).toEqual(['sessions', 'session:task']);
   });
   it('only permits attachment references in this sharing namespace', () => {

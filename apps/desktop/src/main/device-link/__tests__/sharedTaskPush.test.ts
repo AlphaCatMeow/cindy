@@ -1,3 +1,4 @@
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DL_SUBSCRIBE_CHANNEL } from '@cindy/device-link';
 
@@ -15,8 +16,8 @@ import * as subscriptions from '../subscriptions';
 import { setSharedTaskDispatchHost } from '../sharedTaskDispatch';
 import type { SharedTaskHost } from '../sharedTaskHost';
 
-const guestA = 'shared-task~sharedTask-a~guest~member-a~device-a';
-const guestB = 'shared-task~sharedTask-b~guest~member-b~device-b';
+const guestA = sharedTaskGuestPeer('sharedTask-a', 'member-a', 'device-a');
+const guestB = sharedTaskGuestPeer('sharedTask-b', 'member-b', 'device-b');
 const grants = new Map<string, string>();
 const metadata = [
   ['local-db:sessions:created', { sessionId: 'task-a' }],

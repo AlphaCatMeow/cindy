@@ -86,7 +86,7 @@ export function JoinSharedTaskDialog({ open, onOpenChange }: { open: boolean; on
   const openTask = () => void run(async (current) => {
     const detail = await window.electronAPI.sharedTask.account({ action: 'get', sharedTaskId: request!.sharedTaskId }) as SharedTaskDetail;
     if (!current()) return;
-    const peer = sharedTaskHostPeer(detail.sharedTaskId);
+    const peer = sharedTaskHostPeer(detail.sharedTaskId, detail.hostDeviceId);
     bindSharedTaskPushOwner(peer, detail.ownerAccountId);
     await window.electronAPI.deviceLink.openLink(peer);
     if (!current()) return;

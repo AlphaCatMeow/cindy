@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { sharedTaskHostPeer } from '../protocol.js';
 import { probeSharedTaskHost } from '../sharedTaskProbe.js';
 
-const peer = sharedTaskHostPeer('sharedTask');
+const peer = sharedTaskHostPeer('sharedTask', 'desktop');
 function fixture() {
   return {
     isCurrent: vi.fn(() => true),

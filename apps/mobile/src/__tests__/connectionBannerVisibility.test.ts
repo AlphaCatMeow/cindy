@@ -17,7 +17,7 @@ const base = {
 };
 
 it('does not infer shared task disconnection from the account device list', () => {
-  const guest = { deviceId: sharedTaskHostPeer('shared'), sessionCount: 1, available: false };
+  const guest = { deviceId: sharedTaskHostPeer('shared', 'desktop'), sessionCount: 1, available: false };
   const host = { deviceId: 'my-computer', sessionCount: 2, available: false };
   expect(resolveHomeDeviceDisconnected([guest], null, false)).toBe(false);
   expect(resolveHomeDeviceDisconnected([guest, host], guest.deviceId, false)).toBe(false);

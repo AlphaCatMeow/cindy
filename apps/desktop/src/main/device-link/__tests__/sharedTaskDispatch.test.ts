@@ -1,3 +1,4 @@
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertSharedTaskInvoke, assertSharedTaskReferences, captureSharedTaskPush, setSharedTaskQueueReader, type SharedTaskPeerCapture } from '../sharedTaskDispatch.js';
 
@@ -80,7 +81,7 @@ describe('sharedTask dispatch scope', () => {
   });
   it('rejects expired captured authorization and unbound sharedTask pushes without changing same-account traffic', () => {
     expect(() => assertSharedTaskInvoke({ ...capture(), isCurrent: () => false }, { channel: 'local-db:messages:list', args: ['task'] })).toThrow();
-    expect(captureSharedTaskPush('shared-task~m~guest~g~d', 'maker:event', { sessionId: 'task' })).toBeNull();
+    expect(captureSharedTaskPush(sharedTaskGuestPeer('m', 'g', 'd'), 'maker:event', { sessionId: 'task' })).toBeNull();
     expect(captureSharedTaskPush('my-phone', 'maker:provider:changed', {})?.()).toBe(true);
   });
 });

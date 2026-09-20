@@ -23,7 +23,7 @@ export function useSharedTaskTasks(): void {
       try {
         const sharedTasks = await window.electronAPI.sharedTask.account({ action: 'list' }) as SharedTaskListItem[];
         if (!currentOwner()) return;
-        const current = new Set(sharedTasks.map((sharedTask) => sharedTaskHostPeer(sharedTask.sharedTaskId)));
+        const current = new Set(sharedTasks.map((sharedTask) => sharedTaskHostPeer(sharedTask.sharedTaskId, sharedTask.hostDeviceId)));
         for (const id of remoteProjectsStore.getAllDeviceIds()) {
           if (!parseSharedTaskPeer(id) || current.has(id)) continue;
           linked.delete(id);
@@ -33,7 +33,7 @@ export function useSharedTaskTasks(): void {
         }
         for (const sharedTask of sharedTasks) {
           if (!currentOwner()) return;
-          const peer = sharedTaskHostPeer(sharedTask.sharedTaskId);
+          const peer = sharedTaskHostPeer(sharedTask.sharedTaskId, sharedTask.hostDeviceId);
           bindSharedTaskPushOwner(peer, sharedTask.ownerAccountId);
           try {
             if (!linked.has(peer)) {

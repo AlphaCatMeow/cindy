@@ -24,7 +24,7 @@ vi.mock('@/device-link/revokedDevicesStore', () => ({ revokedDevicesStore: { has
 let root: Root;
 let host: HTMLDivElement;
 let resolveConfirm: (value: boolean) => void;
-const peer = sharedTaskHostPeer('shared');
+const peer = sharedTaskHostPeer('shared', 'desktop');
 function Harness({ enabled = true, deviceId = peer }) {
   const exit = useLeaveSharedTask({ deviceId, enabled, onLeft: h.left, onError: h.error });
   return <button disabled={exit.busy} onClick={() => void exit.leave()}>leave</button>;
@@ -71,7 +71,7 @@ it.each(['account', 'menu', 'device', 'revoked'])('ignores confirmation after %s
   await click();
   if (change === 'account') setMobileAuthOwner('other');
   if (change === 'menu') await act(async () => root.render(<Harness enabled={false} />));
-  if (change === 'device') await act(async () => root.render(<Harness deviceId={sharedTaskHostPeer('other')} />));
+  if (change === 'device') await act(async () => root.render(<Harness deviceId={sharedTaskHostPeer('other', 'desktop')} />));
   if (change === 'revoked') h.revoked.mockReturnValue(true);
   await act(async () => resolveConfirm(true));
   expect(h.api.leave).not.toHaveBeenCalled(); expect(h.left).not.toHaveBeenCalled();

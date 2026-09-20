@@ -1,3 +1,4 @@
+import { sharedTaskHostPeer } from '@cindy/device-link';
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { render, screen, fireEvent, waitFor, cleanup, within, act } from '@testing-library/react';
@@ -15,7 +16,7 @@ beforeEach(() => {
   vi.clearAllMocks(); setDataOwnerGeneration('guest');
   state.account.mockImplementation(async ({ action }) => action === 'owned' ? [] : action === 'join'
     ? { sharedTaskId: 'share-1', memberId: 'member-1', status: 'joined' }
-    : { sharedTaskId: 'share-1', sessionId: 'task-1', ownerAccountId: 'host', title: 'Test Task', status: 'active' });
+    : { sharedTaskId: 'share-1', sessionId: 'task-1', ownerAccountId: 'host', hostDeviceId: 'desktop', title: 'Test Task', status: 'active' });
   state.invoke.mockResolvedValue({ id: 'task-1' });
   Object.assign(window, { electronAPI: { sharedTask: { account: state.account }, deviceLink: { openLink: state.openLink, invoke: state.invoke } } });
 });
@@ -100,7 +101,7 @@ it('shows the joined task before entering through the existing remote link', asy
   expect(state.openLink).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'sharedTask.enterTask' }));
   await waitFor(() => expect(close).toHaveBeenCalledWith(false));
-  expect(state.invoke).toHaveBeenCalledWith('shared-task~share-1~host', 'local-db:sessions:get', ['task-1']);
+  expect(state.invoke).toHaveBeenCalledWith(sharedTaskHostPeer('share-1', 'desktop'), 'local-db:sessions:get', ['task-1']);
 });
 it('lets a newly joined visitor cancel leaving, then leave with confirmation', async () => {
   open(); fill(); await screen.findByText('sharedTask.joinedTitle:Test Task');

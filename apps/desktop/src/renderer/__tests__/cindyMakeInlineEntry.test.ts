@@ -1,3 +1,4 @@
+import { sharedTaskHostPeer } from '@cindy/device-link';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -43,11 +44,11 @@ describe('Cindy Make composer presentation', () => {
       'pendingIssueConfirm', 'pendingRenameSessionsConfirm', 'pendingGhostGrantConfirm'];
     const hidesComposer = new Function('isSharedTaskPeer', 'remoteDeviceId', ...prompts,
       `return Boolean(${condition!.getText(ast)});`);
-    for (const deviceId of [undefined, 'own-device', 'shared-task~m~host']) {
+    for (const deviceId of [undefined, 'own-device', sharedTaskHostPeer('m', 'desktop')]) {
       expect(hidesComposer(isSharedTaskPeer, deviceId, ...prompts.map(() => false))).toBe(false);
       for (const active of prompts) {
         expect(hidesComposer(isSharedTaskPeer, deviceId, ...prompts.map((name) => name === active)),
-          `${deviceId ?? 'local'}: ${active}`).toBe(deviceId !== 'shared-task~m~host');
+          `${deviceId ?? 'local'}: ${active}`).toBe(deviceId !== sharedTaskHostPeer('m', 'desktop'));
       }
     }
     expect(sessionView).toContain('if (cindyMakeInputLocked) return false;');

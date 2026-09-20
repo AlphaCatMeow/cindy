@@ -1,3 +1,4 @@
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, SHARED_TASK_CAPABILITY, type SharedTaskDetail } from '@cindy/device-link';
 
@@ -16,7 +17,7 @@ import { SharedTaskHost } from '../sharedTaskHost';
 import { setSharedTaskDispatchHost } from '../sharedTaskDispatch';
 import type { SharedTaskJournalEntry } from '../../localDb/sharedTasks';
 
-const peer = 'shared-task~sharedTask~guest~member~phone';
+const peer = sharedTaskGuestPeer('sharedTask', 'member', 'phone');
 const read = { channel: 'local-db:messages:list', args: ['task'] };
 const subscribe = { channel: 'device-link:subscribe', args: [{ topics: ['session:task'] }] };
 let detail: SharedTaskDetail;
@@ -127,7 +128,7 @@ describe('shared task temporary authority fences preserve membership', () => {
   });
 
   it('treats unrestored or replaced host authority as unavailable rather than revoked', async () => {
-    expect(host.peerStatus('shared-task~unknown~guest~member~phone')).toBe('unavailable');
+    expect(host.peerStatus(sharedTaskGuestPeer('unknown', 'member', 'phone'))).toBe('unavailable');
     setSharedTaskDispatchHost(null);
     expect(await runInvoke(peer, read)).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
   });

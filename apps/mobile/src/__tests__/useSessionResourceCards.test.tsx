@@ -141,7 +141,7 @@ function foreground(next: string) {
   });
 }
 it('does not discover host-wide cards or retry them for a shared-task guest', async () => {
-  const peer = sharedTaskHostPeer('shared-task');
+  const peer = sharedTaskHostPeer('shared-task', 'desktop');
   root = createRoot(document.createElement('div'));
   await act(async () => root!.render(createElement(Probe, { device: peer })));
   expect(h.manifest).not.toHaveBeenCalled();

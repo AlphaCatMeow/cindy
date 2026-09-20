@@ -1,3 +1,4 @@
+import { sharedTaskGuestPeer } from '@cindy/device-link';
 /**
  * dispatchWeakNetwork.test.ts — 被控端弱网收尾行为契约。
  * -------------------------------------------------------------------------
@@ -247,7 +248,7 @@ describe('[1] link-accept 发送失败的有限重试', () => {
   it('refreshes first-join authority and ignores an older failed open after a newer success', async () => {
     const client = mkClient();
     __testing.setActiveClient(client as never);
-    const peer = 'shared-task~m~guest~g~d';
+    const peer = sharedTaskGuestPeer('m', 'g', 'd');
     const payload = { controllerName: 'Guest', protocolVersion: PROTOCOL_VERSION, appVersion: '0.0.0-test', capabilities: [SHARED_TASK_CAPABILITY] };
     let rejectOld!: (error: Error) => void;
     sharedTask.capture.mockReturnValue({ author: { displayName: 'Guest' } });

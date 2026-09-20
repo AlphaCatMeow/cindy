@@ -56,6 +56,8 @@ export interface Envelope {
   src?: string;
   /** 目标 deviceId(隧道层帧必填) */
   dst?: string;
+  /** Optional cross-account task scope; absent means legacy same-account routing. */
+  sharedTask?: import('./sharedTask.js').SharedTaskScope;
   payload?: unknown;
 }
 
