@@ -2,6 +2,7 @@ import { emitTaskTagCatalog } from '@/features/task-tags/taskTagEvents';
 import { normalizeTaskTags } from '@cindy/maker-shared';
 import type { ImMessageSource } from '../../shared/imMessageSource';
 import { readBotAuthorizationCard } from '../../shared/botAuthorization';
+import { applyCindyMakeCardAttention } from './cindyMakeAttention';
 import { confirmRemoteUsers, reserveRemoteUser } from './remoteUserHandoff';
 import { readRemoteHistoryCache, remoteHistoryCacheWriter } from './remoteHistoryCache';
 /**
@@ -8335,6 +8336,20 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
     clearRemoteOptimisticSend(sessionId, mapped.clientId);
     const current = getOrCreateState(sessionId);
     const existing = current.messages.find((candidate) => candidate.clientId === mapped.clientId);
+    if (mapped.systemCardType?.startsWith('cindy-make')) {
+      // A late update to an older preparation card must not replace the current result.
+      const existingIndex = existing ? current.messages.indexOf(existing) : -1;
+      const newerMessage = current.messages.some(
+        (candidate, index) =>
+          candidate.clientId !== mapped.clientId &&
+          candidate.createdAt &&
+          mapped.createdAt &&
+          (candidate.createdAt > mapped.createdAt ||
+            (candidate.createdAt === mapped.createdAt && existingIndex >= 0 && index > existingIndex)),
+      );
+      if (!newerMessage)
+        applyCindyMakeCardAttention(sessionId, existing, mapped, _activeViewSessions.has(sessionId));
+    }
     const isLiveToolEcho =
       existing?.role === mapped.role &&
       (mapped.role === 'tool_use' || mapped.role === 'tool_result');

@@ -383,8 +383,8 @@ import {
 } from './cindy-make/versionService.js';
 import {
   deliverCindyVersionOpenEvents,
+  finishCindyVersionStartup,
   isCindyVersionLaunchPending,
-  recordCindyVersionActive,
   watchCindyVersionStartupResult,
 } from './cindy-make/versionStartup.js';
 import {
@@ -953,8 +953,10 @@ import {
   findOpenFolderInArgv,
   findOpenShareFileInArgv,
   setDeepLinkMainWindow,
+  focusMainWindow as activateMainWindow,
   takePendingDeepLink,
 } from './deepLink.js';
+import { createMakeTestWindowBehavior } from './cindy-make/testWindowBehavior.js';
 import { registerFolderContextMenu } from './folderContextMenu.js';
 import { healWindowsShortcuts } from './windowsShortcutSelfHeal.js';
 import { CURRENT_APP_ID, CURRENT_CINDY_REGION } from '../shared/brandRegion.js';
@@ -3790,7 +3792,7 @@ if (
     );
     app.quit();
   } else {
-    recordCindyVersionActive();
+    finishCindyVersionStartup();
     app.on('second-instance', (_event, argv) => {
       // Windows: 用户点 cindy://(或历史 xdt-maker://)链接 / 右键 "通过 Cindy 打开" 时,
       // OS 会再起一个本 app 实例; 单例锁把它 redirect 成 second-instance 事件,
@@ -4017,8 +4019,15 @@ const createWindow = () => {
   });
   // Main-window close policy is explicit because hidden utility windows (for
   // example the prewarmed global voice overlay) can keep the process alive.
+  const makeTestWindow = createMakeTestWindowBehavior({
+    isPackaged: app.isPackaged,
+    environment: process.env,
+    focus: () => activateMainWindow(),
+    quit: () => app.quit(),
+  });
   mainWindow.on('close', (event) => {
     if (isQuitting) return;
+    if (makeTestWindow.close(event)) return;
     // macOS: keep the window + renderer alive and hide only, so Dock activation
     // can restore it without remounting the renderer.
     if (process.platform === 'darwin') {
@@ -4117,6 +4126,7 @@ const createWindow = () => {
     showMainWindowAndRestoreFullscreen(mainWindow, {
       restoreFullscreen: shouldRestoreMacFullscreen,
     });
+    makeTestWindow.ready();
     refreshWindowsAppBadge();
     if (!app.isPackaged || isCindyVersionLaunchPending())
       markDesktopDevWindowReady(mainWindow.webContents.getOSProcessId());
@@ -7614,7 +7624,7 @@ const registerIpcHandlers = () => {
         const message = (error as { message?: unknown }).message;
         const reason =
           typeof message === 'string'
-            ? /^\[PRECONDITION_FAILED\]\s*(busy|dirty|conflict|cleanupFailed|directoryBusy|unavailable)$/.exec(
+            ? /^\[PRECONDITION_FAILED\]\s*(busy|dirty|conflict|cleanupFailed|directoryBusy|unavailable|stopFailed)$/.exec(
                 message,
               )?.[1]
             : undefined;
@@ -7662,6 +7672,7 @@ const registerIpcHandlers = () => {
     assertTrustedAppRendererEvent(event);
     return actCindyVersion(action, id);
   });
+  onQuit('cindy-make-tests', () => cindyMakeTestController.stopAllAndWait(), 'async');
   app.once('will-quit', () => cindyMakeTestController.stopAll());
   ipcMain.handle(
     'app:cindy-make-test',
