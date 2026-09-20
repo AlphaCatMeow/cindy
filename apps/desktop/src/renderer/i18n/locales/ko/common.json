@@ -12683,6 +12683,7 @@
     }
   },
   "cindyMake": {
+    "beta": "Beta",
     "description": "로컬 도구를 확인하고 준비하여 개인 버전 Cindy 제작을 시작합니다. 사용법: /cindy-make [변경 요청]",
     "localOnly": "/cindy-make는 현재 로컬 데스크톱 세션에서만 사용할 수 있습니다. 이 기기로 전환해 주세요.",
     "usage": "/cindy-make 또는 /cindy-make 요청 을 사용하세요. 환경 검사는 아직 첨부 파일, 참조, 댓글을 지원하지 않습니다. 입력 내용은 유지됩니다.",
@@ -12823,18 +12824,11 @@
       },
       "missing": "아직 소스가 준비되지 않았습니다",
       "details": {
-        "branch": "개인 버전 브랜치",
-        "baseRef": "{{ref}} 기준",
-        "baseCommit": "기준 버전",
-        "mainCommit": "main 버전",
-        "currentBranch": "프로젝트의 현재 브랜치",
-        "detached": "브랜치 없음 (고정 커밋)",
         "unknown": "소스를 업데이트해 확인하세요",
         "latest": {
-          "dev": "최신 main",
+          "dev": "온라인 main",
           "beta": "최신 beta",
           "release": "최신 정식 버전",
-          "unavailable": "확인하지 못했습니다. 설정을 다시 열어 재시도하세요",
           "same": "(동기화됨)",
           "behind_one": "({{count}}개 커밋 뒤)",
           "behind_other": "({{count}}개 커밋 뒤)",
@@ -12890,6 +12884,22 @@
       "changedFiles_other": "{{count}}개 파일 변경됨",
       "commit": "{{commit}} 기준",
       "branch": "{{branch}}에 커밋됨"
+    },
+    "overview": {
+      "description": "개인 버전 소스를 확인하고 사용할 버전을 전환하며 제작 기록을 관리합니다.",
+      "title": "버전 개요",
+      "switchVersion": "버전 전환",
+      "personalCode": "개인 버전 소스",
+      "localMain": "로컬 main",
+      "lookupUnavailable": "확인하지 못했습니다. 최신 소스를 동기화할 때 다시 확인합니다.",
+      "comparisonUnavailable": "(커밋 비교 불가)",
+      "comparison": {
+        "same": "개인 버전과 로컬 main의 커밋이 같습니다",
+        "personalAhead": "로컬 main을 포함하며 개인 커밋이 {{ahead}}개 더 있습니다",
+        "mainAhead": "로컬 main이 {{behind}}개 커밋 앞서 있습니다",
+        "diverged": "로컬 main이 {{behind}}개 커밋 앞서 있으며 개인 커밋이 {{ahead}}개 더 있습니다",
+        "unknown": "커밋을 비교할 수 없습니다. 최신 소스를 동기화한 후 다시 시도하세요."
+      }
     },
     "versions": {
       "title": "내 버전",
@@ -13094,7 +13104,7 @@
       "files_other": "파일 {{count}}개 변경"
     },
     "merge": {
-      "getLatest": "최신 소스 가져오기",
+      "getLatest": "최신 소스 동기화",
       "updateHint": "공식 소스를 업데이트하고 개인 변경 사항을 유지합니다.",
       "confirmTitle": "최신 소스로 업데이트할까요?",
       "confirmDescription": "개인 변경 사항은 유지됩니다. 충돌이 발생하면 별도 작업에서 해결을 도와드립니다.",

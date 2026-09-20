@@ -12700,6 +12700,7 @@
     }
   },
   "cindyMake": {
+    "beta": "Beta",
     "description": "Check and prepare local tools for a personal Cindy build. Usage: /cindy-make [request]",
     "localOnly": "/cindy-make currently supports local desktop sessions only. Switch to this device to use it.",
     "usage": "Use /cindy-make or /cindy-make request. Environment checks do not yet accept attachments, references or comments. Your input is preserved.",
@@ -12840,18 +12841,11 @@
       },
       "missing": "No source is prepared",
       "details": {
-        "branch": "Personal Branch",
-        "baseRef": "Based on {{ref}}",
-        "baseCommit": "Based on",
-        "mainCommit": "main Version",
-        "currentBranch": "Current Project Branch",
-        "detached": "No branch (fixed commit)",
         "unknown": "Update source to check",
         "latest": {
-          "dev": "Latest main",
+          "dev": "Online main",
           "beta": "Latest Beta",
           "release": "Latest Release",
-          "unavailable": "Could not check — reopen Settings to retry",
           "same": "(up to date)",
           "behind_one": "({{count}} commit behind)",
           "behind_other": "({{count}} commits behind)",
@@ -12907,6 +12901,22 @@
       "changedFiles_other": "{{count}} files changed",
       "commit": "Based on {{commit}}",
       "branch": "Committed to {{branch}}"
+    },
+    "overview": {
+      "description": "View personal source, switch app versions, and manage Make history.",
+      "title": "Version overview",
+      "switchVersion": "Switch version",
+      "personalCode": "Personal source",
+      "localMain": "Local main",
+      "lookupUnavailable": "Could not check the latest version. Sync latest source to check again.",
+      "comparisonUnavailable": "(comparison unavailable)",
+      "comparison": {
+        "same": "Personal source matches local main",
+        "personalAhead": "Includes local main · personal commits: {{ahead}}",
+        "mainAhead": "Commits ahead on local main: {{behind}}",
+        "diverged": "Commits ahead on local main: {{behind}} · personal commits: {{ahead}}",
+        "unknown": "Commit comparison unavailable. Sync latest source to try again."
+      }
     },
     "versions": {
       "title": "My Versions",
@@ -13113,7 +13123,7 @@
       "files_other": "{{count}} files changed"
     },
     "merge": {
-      "getLatest": "Get latest source",
+      "getLatest": "Sync latest source",
       "updateHint": "Update official source and reapply your personal changes.",
       "confirmTitle": "Update to the latest source?",
       "confirmDescription": "Your personal changes will be kept. If conflicts occur, a separate task will help resolve them.",
