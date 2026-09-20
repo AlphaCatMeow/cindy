@@ -21,7 +21,7 @@ import { OrcaWorkflowRoute } from '@/features/cc-agent/OrcaWorkflowRoute';
 import { WorkdirBrowseRoute } from '@/features/cc-agent/workdir-browse/WorkdirBrowseRoute';
 import { IssueTrackerFeatureLayout } from '@/features/issue-tracker/IssueTrackerFeatureLayout';
 import { SkillhubFeatureLayout } from '@/features/skillhub/SkillhubFeatureLayout';
-import { SkillhubHomeView } from '@/features/skillhub/SkillhubHomeView';
+import { SkillhubLocalLayout } from '@/features/skillhub/SkillhubLocalLayout';
 import { SkillhubDetailView } from '@/features/skillhub/SkillhubDetailView';
 import { SkillhubMarketListView } from '@/features/skillhub/SkillhubMarketListView';
 import { MakerExperimentalView } from '@/features/maker-experimental/MakerExperimentalView';
@@ -154,10 +154,11 @@ export const router = createHashRouter([
                       { index: true, element: <Navigate to="/skillhub/local" replace /> },
                       {
                         path: 'local',
+                        element: <SkillhubLocalLayout />,
                         children: [
                           {
                             index: true,
-                            element: <SkillhubHomeView />,
+                            element: null,
                           },
                           { path: 'by-path', element: <SkillhubDetailView /> },
                           { path: ':kind/global/:name', element: <SkillhubDetailView /> },

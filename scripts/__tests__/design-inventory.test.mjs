@@ -134,7 +134,7 @@ test('extractRouterFacts: 真实 router.tsx 的三类去向逐条钉死', () => 
     '/plugins GhostPluginPage',
     '/settings SettingsView',
     '/sidebar-window SidebarWindowLayout',
-    '/skillhub/local SkillhubHomeView',
+    '/skillhub/local SkillhubLocalLayout',
     '/skillhub/local/:kind/global/:name SkillhubDetailView',
     '/skillhub/local/:kind/project/:projectHash/:name SkillhubDetailView',
     '/skillhub/local/by-path SkillhubDetailView',
@@ -799,11 +799,11 @@ test('CSS 文件同样剥块注释后统计,globals.css 注释色值不进基线
   assert.ok(shell.bareColors > 0, '真实规则色值仍应计入');
 });
 
-test('skillhub.local 纳入直接渲染子组件的样式事实', () => {
+test('skillhub.local 纳入保留列表布局及直接渲染子组件的样式事实', () => {
   const catalog = catalogSurfaces();
   const local = catalog.find((surface) => surface.id === 'desktop.skillhub.local');
   assert.ok(local);
-  for (const component of ['PluginManagementLayout', 'SkillhubMarketPreviewPanel', 'InstallTargetPicker']) {
+  for (const component of ['SkillhubLocalLayout', 'SkillhubHomeView', 'PluginManagementLayout', 'SkillhubMarketPreviewPanel', 'InstallTargetPicker']) {
     assert.ok(
       local.reachableComponents.includes(component),
       `${component} 必须列入 skillhub.local 可达组件`,
@@ -814,6 +814,8 @@ test('skillhub.local 纳入直接渲染子组件的样式事实', () => {
   );
   const { surfaces } = buildGeneratedSurfaces(ROOT, {});
   const generated = surfaces.find((surface) => surface.id === 'desktop.skillhub.local');
+  assert.ok(generated.styleSources.some((file) => file.endsWith('SkillhubLocalLayout.tsx')));
+  assert.ok(generated.styleSources.some((file) => file.endsWith('SkillhubHomeView.tsx')));
   assert.ok(generated.styleSources.some((file) => file.endsWith('PluginManagementLayout.tsx')));
   assert.ok(generated.tokenCount > 33, `子组件并入后 token 数应高于只扫路由组件(实际 ${generated.tokenCount})`);
 });

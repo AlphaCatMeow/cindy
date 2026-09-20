@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, type Location } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { skillhubCatalogKey } from '../../../shared/skillhubCatalog';
 import { CATEGORY_ALL } from '../../../shared/skillhubCategory';
@@ -30,12 +30,13 @@ import {
   PluginManagementLayout,
   PluginManagementPage,
 } from '@/features/plugin/PluginManagementLayout';
-import { buildLocalSkillRoute, findLocalSkillByPath } from './lib/localRoutes';
+import { findLocalSkillByPath } from './lib/localRoutes';
 import {
   builtInSkillDescriptionKey,
   prioritizeCindyBuiltInSkills,
 } from './lib/builtInSkillPresentation';
 import { refresh as refreshSkillhub, useSkillhub } from './hooks/useSkillhub';
+import { useSkillhubHomeNavigation } from './hooks/useSkillhubHomeNavigation';
 import {
   MARKET_PAGE_SIZE,
   useCategoryList,
@@ -50,7 +51,6 @@ import {
   homeMarketQuery,
   isHomeMarketResponseCurrent,
   visibleHomeCatalogTabs,
-  type HomeCatalogTab,
   type HomeMarketFilter,
 } from './lib/homeMarketFilter';
 import { deriveSkillSource } from './lib/skillSource';
@@ -75,22 +75,25 @@ function includesSkillQuery(values: ReadonlyArray<string | undefined>, query: st
 
 export function SkillhubHomeView({
   embedded = false,
+  active = true,
+  navigationLocation,
   onSelectCatalogTab,
 }: {
   embedded?: boolean;
+  active?: boolean;
+  navigationLocation?: Location;
   onSelectCatalogTab?: (tab: 'plugins' | 'skills') => void;
 } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { skills, projects, bootstrapped, learnSkillEnabled, syncResults } = useSkillhub();
-  const [query, setQuery] = useState('');
+  const { catalogTab, query, setCatalogTab, setQuery, openLocalSkill } = useSkillhubHomeNavigation(navigationLocation);
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
   // 未登录也请求公开 Skill 目录；登录身份只扩大服务端可见范围。
   const { user } = useAuth();
   const identityPolicy = useSkillhubIdentityPolicy(user);
   const showOrganization = user?.membershipKind === 'org';
-  const [catalogTab, setCatalogTab] = useState<HomeCatalogTab>('public');
   const marketFilter: HomeMarketFilter = catalogTab === 'organization' ? 'organization' : 'public';
   const marketRequest = useMemo(() => homeMarketQuery(marketFilter), [marketFilter]);
 
@@ -127,8 +130,8 @@ export function SkillhubHomeView({
     setSearchQuery(query);
   }, [query, setSearchQuery]);
   useEffect(() => {
-    if (!showOrganization && catalogTab === 'organization') setCatalogTab('public');
-  }, [catalogTab, showOrganization]);
+    if (active && !showOrganization && catalogTab === 'organization') setCatalogTab('public');
+  }, [active, catalogTab, setCatalogTab, showOrganization]);
   const marketResponseCurrent = isHomeMarketResponseCurrent(marketRequest, {
     scope: resolvedScope,
     mine: resolvedMine,
@@ -213,14 +216,6 @@ export function SkillhubHomeView({
   const [importPickerOpen, setImportPickerOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
 
-  const openLocal = (s: SkillhubSkill) => {
-    // 从首页进入 = 一次全新入口:清掉旧的技能历史栈(resetHistory),并把回退落点
-    // 设为首页(from)。这样详情页「返回」回到首页这一步,而不是会话内残留的上一个技能。
-    // 详情→详情的链式跳转不带 resetHistory,链路仍能逐级回退。
-    navigate(buildLocalSkillRoute(s), {
-      state: { from: '/skillhub/local', resetHistory: true },
-    });
-  };
   const openMarket = () => navigate('/skillhub/market');
   const openCatalogSkill = (skill: MarketSkill) => setPreviewSkill(skill);
   const handleClone = (skill: MarketSkill) => {
@@ -267,6 +262,14 @@ export function SkillhubHomeView({
     setImportGrantToken(null);
     setImportTarget(null);
   }, []);
+
+  useEffect(() => {
+    if (active) return;
+    setPreviewSkill(null);
+    setPickerSkill(null);
+    setPickerOpen(false);
+    closeImportPicker();
+  }, [active, closeImportPicker]);
 
   return (
     <PluginManagementLayout
@@ -432,7 +435,7 @@ export function SkillhubHomeView({
                       <LocalGroup
                         skills={globalSkills}
                         syncResults={syncResults}
-                        onOpen={openLocal}
+                        onOpen={openLocalSkill}
                       />
                     )}
                     {projectGroups.map((g) => (
@@ -441,7 +444,7 @@ export function SkillhubHomeView({
                         label={g.label}
                         skills={g.skills}
                         syncResults={syncResults}
-                        onOpen={openLocal}
+                        onOpen={openLocalSkill}
                       />
                     ))}
                   </div>
@@ -458,92 +461,92 @@ export function SkillhubHomeView({
         </main>
 
         {/* Keep the preview outside the list scroller so it stays anchored to the viewport. */}
-        <SkillhubMarketPreviewPanel
-          open={previewSkill !== null}
-          skill={previewSkill}
-          onClose={() => setPreviewSkill(null)}
-          primaryAction={
-            previewSkill && user
-              ? (() => {
-                  const action = marketCardPrimaryAction({
-                    isMine: previewSkill.isMine,
-                    listVisibility: 'all',
-                    cardState: previewSkill.cardState,
-                  });
-                  return action === 'manage' && !identityPolicy.canWrite ? 'clone' : action;
-                })()
-              : 'none'
-          }
-          onClone={handleClone}
-          onManageAction={management.handleManageAction}
-          learnSkillEnabled={learnSkillEnabled}
-        />
-        <MarketManagementDialogs controller={management} />
-        <InstallTargetPicker
-          open={pickerOpen}
-          skill={pickerSkill}
-          onClose={() => setPickerOpen(false)}
-          onInstallComplete={() => {
-            void refreshSkillhub();
-            setPickerOpen(false);
-            // 安装后关掉预览浮层:否则它仍持有 stale previewSkill、CTA 继续显示「安装/克隆」,
-            // 可被重复点安装(PR #246 review)。
-            setPreviewSkill(null);
-          }}
-        />
-        <InstallTargetPicker
-          open={importPickerOpen}
-          skill={importTarget}
-          onClose={closeImportPicker}
-          titleKey="skillhub.home.importPickerTitle"
-          subtitleKey="skillhub.home.importPickerSubtitle"
-          successToastKey="skillhub.home.importSuccess"
-          failedToastKey="skillhub.home.importFailed"
-          runAction={async ({ installPath, force }) => {
-            if (!importGrantToken) {
-              return {
-                success: false,
-                errorCode: 'INVALID_FILE',
-                message: t('skillhub.home.importFailed'),
-              };
-            }
-            return window.electronAPI.skillhub.importLocal({
-              grantToken: importGrantToken,
-              installPath,
-              force,
-            });
-          }}
-          onInstallComplete={(result) => {
-            closeImportPicker();
-            if (!result?.name) return;
-            void refreshSkillhub().then((scannedSkills) => {
-              const imported = result.absolutePath
-                ? findLocalSkillByPath(scannedSkills, result.absolutePath)
-                : undefined;
-              if (imported) {
-                navigate(buildLocalSkillRoute(imported), {
-                  state: { from: '/skillhub/local', resetHistory: true },
-                });
-                return;
+        {active && (
+          <>
+            <SkillhubMarketPreviewPanel
+              open={previewSkill !== null}
+              skill={previewSkill}
+              onClose={() => setPreviewSkill(null)}
+              primaryAction={
+                previewSkill && user
+                  ? (() => {
+                      const action = marketCardPrimaryAction({
+                        isMine: previewSkill.isMine,
+                        listVisibility: 'all',
+                        cardState: previewSkill.cardState,
+                      });
+                      return action === 'manage' && !identityPolicy.canWrite ? 'clone' : action;
+                    })()
+                  : 'none'
               }
-              const projectRoot = result.absolutePath
-                ? deriveProjectWorkingDir(result.absolutePath)
-                : null;
-              const fallback = {
-                id: '',
-                absolutePath: result.absolutePath ?? '',
-                engine: 'claude-code' as const,
-                kind: 'skill' as const,
-                scope: projectRoot ? ('project' as const) : ('global' as const),
-                projectHash: projectRoot ? projectHash(projectRoot) : undefined,
-                name: result.name,
-              };
-              navigate(buildLocalSkillRoute(fallback), {
-                state: { from: '/skillhub/local', resetHistory: true },
-              });
-            });
-          }}
-        />
+              onClone={handleClone}
+              onManageAction={management.handleManageAction}
+              learnSkillEnabled={learnSkillEnabled}
+            />
+            <MarketManagementDialogs controller={management} />
+            <InstallTargetPicker
+              open={pickerOpen}
+              skill={pickerSkill}
+              onClose={() => setPickerOpen(false)}
+              onInstallComplete={() => {
+                void refreshSkillhub();
+                setPickerOpen(false);
+                // 安装后关掉预览浮层:否则它仍持有 stale previewSkill、CTA 继续显示「安装/克隆」,
+                // 可被重复点安装(PR #246 review)。
+                setPreviewSkill(null);
+              }}
+            />
+            <InstallTargetPicker
+              open={importPickerOpen}
+              skill={importTarget}
+              onClose={closeImportPicker}
+              titleKey="skillhub.home.importPickerTitle"
+              subtitleKey="skillhub.home.importPickerSubtitle"
+              successToastKey="skillhub.home.importSuccess"
+              failedToastKey="skillhub.home.importFailed"
+              runAction={async ({ installPath, force }) => {
+                if (!importGrantToken) {
+                  return {
+                    success: false,
+                    errorCode: 'INVALID_FILE',
+                    message: t('skillhub.home.importFailed'),
+                  };
+                }
+                return window.electronAPI.skillhub.importLocal({
+                  grantToken: importGrantToken,
+                  installPath,
+                  force,
+                });
+              }}
+              onInstallComplete={(result) => {
+                closeImportPicker();
+                if (!result?.name) return;
+                void refreshSkillhub().then((scannedSkills) => {
+                  const imported = result.absolutePath
+                    ? findLocalSkillByPath(scannedSkills, result.absolutePath)
+                    : undefined;
+                  if (imported) {
+                    openLocalSkill(imported);
+                    return;
+                  }
+                  const projectRoot = result.absolutePath
+                    ? deriveProjectWorkingDir(result.absolutePath)
+                    : null;
+                  const fallback = {
+                    id: '',
+                    absolutePath: result.absolutePath ?? '',
+                    engine: 'claude-code' as const,
+                    kind: 'skill' as const,
+                    scope: projectRoot ? ('project' as const) : ('global' as const),
+                    projectHash: projectRoot ? projectHash(projectRoot) : undefined,
+                    name: result.name,
+                  };
+                  openLocalSkill(fallback);
+                });
+              }}
+            />
+          </>
+        )}
       </div>
     </PluginManagementLayout>
   );
