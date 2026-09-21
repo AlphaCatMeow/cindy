@@ -160,6 +160,7 @@
       "synced": "Synced",
       "unknownComputer": "Unknown computer",
       "uncategorizedProject": "Uncategorized project",
+      "cindyMake": "Cindy Make",
       "empty": {
         "search": { "title": "No matches", "copy": "Try another project name, session title, computer name, or message keyword." },
         "waiting": { "title": "No pending requests", "copy": "Permission prompts, plan reviews, and questions will appear here." },

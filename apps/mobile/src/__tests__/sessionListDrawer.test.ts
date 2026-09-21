@@ -76,7 +76,7 @@ describe('mobile session list drawer', () => {
     // 与首页同一套共享层口径:排序 / 置顶 / 自动化折叠 / Orca worker 过滤 / 右槽状态档位。
     expect(text).toContain('excludeOrcaWorkerSessions(sessions)');
     expect(text).toContain('buildMobileHomePresentation({');
-    expect(text).toContain('buildHomeSections(home, false, false)');
+    expect(text).toContain('buildHomeSections(home, false, false, { groupCindyMake: false })');
     expect(text).toContain('resolveMobileSessionRowStatus(item, sessionIsRunning)');
     expect(text).toMatch(/buildRemoteSessionCardPreview\((?:(?!\);)[\s\S])*?\{ running \},?\s*\)/);
     expect(text).toContain('formatRemoteSessionSidebarTime(lastActivityAt)');

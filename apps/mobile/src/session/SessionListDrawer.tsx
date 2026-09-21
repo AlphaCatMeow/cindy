@@ -397,7 +397,7 @@ export function SessionListDrawer({
       // 已解析的 i18n 文案传给共享层(共享层不出中文串;en/ja/ko 不再回退「未命名任务」)。
       unnamedLabel: t('session.menu.unnamedTitle'),
     });
-    return buildHomeSections(home, false, false);
+    return buildHomeSections(home, false, false, { groupCindyMake: false });
   }, [scheduleIndex, devices, homeStatusVersion, indexedSearch.results, indexedSearch.status, messageSearchVersion, mounted, searchQuery, sessions, t]);
   const hasRows = useMemo(
     () => sections.some((section) => section.data.length > 0),
