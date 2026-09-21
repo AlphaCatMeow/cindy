@@ -1561,12 +1561,14 @@ export function registerBotIpc(): void {
       ),
       title: profile.displayName,
     };
+    const gitSafety = readGitSafetySettings();
     await ensureProjectGitInitialized({
       workingDir,
       workspaceKind,
       remoteHostId: null,
       sessionId,
-      autoSnapshotEnabled: readGitSafetySettings().autoSnapshotEnabled,
+      autoSnapshotEnabled: gitSafety.autoSnapshotEnabled,
+      autoInitProjectGit: gitSafety.autoInitProjectGit,
       source: 'local-db:bots:create-canonical-session',
     });
 

@@ -2569,9 +2569,15 @@
     },
     "gitSafety": {
       "title": "Git 안전",
-      "autoSnapshotTitle": "Git 안전 저장점",
-      "description": "Agent 편집 후 프로젝트 Git 저장소에 숨겨진 저장점을 자동으로 기록합니다. 브랜치에 commit이 추가되지 않습니다. 켜져 있을 때만 Codex rewind를 표시합니다.",
-      "toggleAria": "Git 안전 저장점 전환",
+      "autoSnapshotTitle": "파일 복구 지점",
+      "description": "Cindy가 숨겨진 파일 복구 지점을 기록할 범위를 선택합니다. 파일 복구 비용에만 영향을 주며 대화 되돌리기에는 영향을 주지 않습니다.",
+      "modeAria": "파일 복구 지점 모드",
+      "modes": {
+        "off": "끔",
+        "existingGit": "기존 Git 프로젝트만",
+        "allProjects": "새 빈 프로젝트 포함"
+      },
+      "toggleAria": "파일 복구 지점 모드",
       "saveFailed": "Git 안전 설정 저장에 실패했습니다"
     },
     "feishuBot": {
@@ -9408,6 +9414,7 @@
       "editCancel": "취소",
       "editSend": "전송",
       "editRollbackHint": "전송하면 이전 턴에서 변경된 파일 {{count}}개가 되돌려집니다",
+      "editConversationOnlyHint": "전송해도 프로젝트 파일은 복원되지 않으며, 이전 파일 변경은 그대로 남습니다",
       "forkErrors": {
         "unsupportedHistory": "이 지점에 해당하는 이전 에이전트 세션을 사용할 수 없어 여기서 새 세션을 시작할 수 없습니다",
         "noPriorAssistant": "AI 응답 뒤의 메시지에서 새 세션을 시작해 주세요",
@@ -9427,7 +9434,9 @@
       "viewThread": "스레드 컨텍스트 보기 ({{count}})"
     },
     "rewind": {
-      "noFilesToRollback": "롤백할 파일이 없습니다. 대화 기록만 잘립니다",
+      "noFilesToRollback": "복원할 수 있는 프로젝트 파일 변경이 감지되지 않았습니다",
+      "conversationOnlyNotice": "사용할 수 있는 파일 복원 지점이 없습니다. 계속하면 이 메시지 이후의 채팅이 삭제되고 프로젝트 파일은 복원되지 않습니다",
+      "gitSafetyDisabledNotice": "Git 파일 복원 지점이 비활성화되어 있습니다. 설정에서 켜세요. 계속하면 이 메시지 이후의 채팅이 삭제되고 프로젝트 파일은 복원되지 않습니다",
       "errors": {
         "noPriorAssistantPreview": "AI 응답 뒤의 질문에서 rewind 하세요(이전에 assistant 응답이 없습니다)",
         "sessionRunning": "작업 중지 대기 시간이 초과되었습니다. 다시 되돌리세요",
@@ -9442,11 +9451,11 @@
         "errorDescription": "이 Session에서는 파일 checkpointing이 활성화되어 있지 않아 도구가 수정한 파일을 되돌릴 수 없습니다.",
         "calculating": "rewind 영향 계산 중…",
         "noChanges": "롤백이 필요한 파일 변경이 없습니다",
-        "continueWillTruncate": "계속해도 이후 대화는 잘립니다",
+        "continueWillTruncate": "계속하면 이 메시지 이후의 채팅이 삭제됩니다",
         "noPerFileDiff": "이 SDK 버전은 파일별 diff 미리보기를 지원하지 않습니다",
         "summaryDefault": "이 메시지 이후의 대화는 폐기되며, 작업 디렉터리의 {{count}}개 파일이 그 시점으로 되돌아갑니다.",
-        "summaryRunning": "실행 중인 작업을 중지하고 이 메시지 이후의 대화와 관련 파일 변경을 되돌립니다.",
-        "summaryEmpty": "이 메시지 이후의 대화는 폐기됩니다. 파일은 변경되지 않았으며, 기록만 잘립니다.",
+        "summaryRunning": "실행 중인 작업을 중지하고 이 메시지 이후의 대화를 되돌립니다. 파일을 복원할 수 있는지는 중지 후에야 확인할 수 있습니다.",
+        "summaryEmpty": "이 메시지 이후의 채팅이 삭제됩니다. 프로젝트 파일은 변경되지 않았습니다.",
         "summaryEmptyWithNote": "이 메시지 이후의 대화는 폐기됩니다.",
         "runningNotice": "작업이 아직 실행 중입니다. 확인하면 작업을 중지한 뒤 최신 상태를 기준으로 되돌립니다.",
         "runningQueueNotice": "대기 중인 메시지는 일시 중지된 상태로 유지되며 자동 전송되지 않습니다.",

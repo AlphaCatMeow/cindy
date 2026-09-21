@@ -4433,7 +4433,14 @@ function cleanupClosedSessionRuntime(session: WiredSession): void {
   pendingCredentialSwitchHolder?.onSessionClosed(session.id);
   deferredCodexRestartHolder?.onSessionSettled();
   agentInputCoordinatorHolder?.onExternalTurnSettled(session.id);
-  refreshRemoteCodexMcpOnTurnSettledHolder?.(session.id);
+  try {
+    refreshRemoteCodexMcpOnTurnSettledHolder?.(session.id);
+  } catch (error) {
+    log.warn('optional remote MCP refresh failed during session close', {
+      sessionId: session.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   gitSnapshotCoordinator?.onSessionClosed(session.id);
   clearOrcaMcpHydrated(session.id);
   knownNonOrcaSessionIds.delete(session.id);
@@ -7380,6 +7387,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // holder 供各 turn 收口路径调用。远端 CC 走 holder 的 detach 补偿
   // (bridge 重建 / 端口重绑已让 fresh 失效时重建 query)。
   refreshRemoteCodexMcpOnTurnSettledHolder = (sessionId: string): void => {
+    // Shutdown closes sessions while the dynamic Maker facade rejects access.
+    // No remote reconfiguration belongs to the departing owner's boundary.
+    if (isAppSessionBoundaryPending()) return;
     const session = maker.getSession(sessionId);
     const remoteHostId = session?.remoteHostId;
     if (!remoteHostId) return;

@@ -134,7 +134,7 @@ vi.mock('../../../git-snapshot/projectGitBootstrap.js', () => ({
   ensureProjectGitInitialized: h.ensureGit,
 }));
 vi.mock('../../../maker-host/git-safety-settings-store.js', () => ({
-  readGitSafetySettings: () => ({ autoSnapshotEnabled: true }),
+  readGitSafetySettings: () => ({ mode: 'all-projects', autoSnapshotEnabled: true, autoInitProjectGit: true }),
 }));
 vi.mock('../../../maker-host/custom-mcp-store.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../../maker-host/custom-mcp-store.js')>(),

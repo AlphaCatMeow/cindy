@@ -2569,9 +2569,15 @@
     },
     "gitSafety": {
       "title": "Git セーフティ",
-      "autoSnapshotTitle": "Git セーフティ保存点",
-      "description": "Agent の編集後にプロジェクトの Git リポジトリへ隠し保存点を自動記録します。ブランチに commit は追加されません。有効な場合のみ Codex rewind を表示します。",
-      "toggleAria": "Git セーフティ保存点を切り替え",
+      "autoSnapshotTitle": "ファイル復元ポイント",
+      "description": "Cindy が隠しファイル復元ポイントを記録する範囲を選択します。ファイル復元のコストだけに影響し、会話の巻き戻しには影響しません。",
+      "modeAria": "ファイル復元ポイントのモード",
+      "modes": {
+        "off": "オフ",
+        "existingGit": "既存の Git プロジェクトのみ",
+        "allProjects": "新しい空のプロジェクトも含める"
+      },
+      "toggleAria": "ファイル復元ポイントのモード",
       "saveFailed": "Git セーフティ設定の保存に失敗しました"
     },
     "feishuBot": {
@@ -9408,6 +9414,7 @@
       "editCancel": "キャンセル",
       "editSend": "送信",
       "editRollbackHint": "送信すると前のターンで変更された {{count}} 個のファイルが元に戻ります",
+      "editConversationOnlyHint": "送信してもプロジェクトファイルは復元されず、前回のファイル変更は残ります",
       "forkErrors": {
         "unsupportedHistory": "この位置に対応する過去のエージェントセッションを利用できないため、ここから新しいセッションを始められません",
         "noPriorAssistant": "AI の返信より後のメッセージから新しいセッションを始めてください",
@@ -9427,7 +9434,9 @@
       "viewThread": "スレッドの文脈を見る ({{count}})"
     },
     "rewind": {
-      "noFilesToRollback": "ロールバック対象のファイルはありません。会話履歴のみ切り詰めます",
+      "noFilesToRollback": "復元できるプロジェクトファイルの変更は検出されませんでした",
+      "conversationOnlyNotice": "利用できるファイル復元ポイントがありません。このメッセージ以降のチャットが削除され、プロジェクトファイルは復元されません",
+      "gitSafetyDisabledNotice": "Git のファイル復元ポイントが無効です。設定で有効にしてください。このメッセージ以降のチャットが削除され、プロジェクトファイルは復元されません",
       "errors": {
         "noPriorAssistantPreview": "AI の返信の後ろにある質問で rewind してください（この前に assistant の返信がありません）",
         "sessionRunning": "タスクの停止待ちがタイムアウトしました。もう一度巻き戻してください",
@@ -9442,11 +9451,11 @@
         "errorDescription": "この Session ではファイルの checkpointing が有効になっていないため、ツールで変更されたファイルを戻せません。",
         "calculating": "rewind の影響を計算中…",
         "noChanges": "ロールバックが必要なファイル変更はありません",
-        "continueWillTruncate": "続行しても以降の会話は切り詰められます",
+        "continueWillTruncate": "続行すると、このメッセージ以降のチャットが削除されます",
         "noPerFileDiff": "この SDK バージョンはファイル単位の diff プレビューに対応していません",
         "summaryDefault": "このメッセージ以降の会話は破棄され、作業ディレクトリ内の {{count}} 件のファイルがその時点に戻ります。",
-        "summaryRunning": "実行中のタスクを停止し、このメッセージ以降の会話と対応するファイル変更を巻き戻します。",
-        "summaryEmpty": "このメッセージ以降の会話は破棄されます。ファイルは変更されず、履歴のみ切り詰めます。",
+        "summaryRunning": "実行中のタスクを停止し、このメッセージ以降の会話を巻き戻します。ファイルを復元できるかは停止後まで確定しません。",
+        "summaryEmpty": "このメッセージ以降のチャットが削除されます。プロジェクトファイルは変更されません。",
         "summaryEmptyWithNote": "このメッセージ以降の会話は破棄されます。",
         "runningNotice": "タスクはまだ実行中です。確認するとタスクを停止し、最新の状態から巻き戻します。",
         "runningQueueNotice": "送信待ちのメッセージは一時停止したまま保持され、自動送信されません。",
