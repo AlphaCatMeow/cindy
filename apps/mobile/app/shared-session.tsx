@@ -26,7 +26,7 @@ import { fontWeight, iconSize, lineHeight, radius, spacing, typeScale } from '@/
 
 /** Plan B management only; conversation/input continue through the ordinary remote task. */
 export default function SharedSessionScreen() {
-  const { sessionId, deviceId } = useLocalSearchParams<{ sessionId?: string; deviceId?: string }>();
+  const { sessionId, deviceId, sharedTaskId } = useLocalSearchParams<{ sessionId?: string; deviceId?: string; sharedTaskId?: string }>();
   const router = useRouter();
   const { t } = useTranslation();
   const { isAuthenticated, accountGeneration } = useAuth();
@@ -53,7 +53,7 @@ export default function SharedSessionScreen() {
   const mounted = useRef(true);
   const epoch = useRef(0);
   const peer = deviceId ? parseSharedTaskPeer(deviceId) : null;
-  const guestId = peer?.role === 'host' ? peer.sharedTaskId : joinedId;
+  const guestId = peer?.role === 'host' ? peer.sharedTaskId : joinedId ?? sharedTaskId;
   const guestTarget = peer?.role === 'host' ? deviceId
     : guestId && state?.detail ? sharedTaskHostPeer(guestId, state.detail.hostDeviceId) : undefined;
   const hostContext = !!sessionId && !!deviceId && !guestId;
@@ -73,7 +73,7 @@ export default function SharedSessionScreen() {
     const owner = getMobileAuthOwner();
     const current = () => visible() && mounted.current && captured === epoch.current && isMobileAuthOwnerCurrent(owner);
     if (!isAuthenticated || link.sharedTaskAvailable !== true || ended) return;
-    if (hostContext && tab === 'owned') {
+    if (!guestId && tab === 'owned') {
       const value = await api.list();
       if (!current()) return;
       const mine = value.filter((task) => task.ownerAccountId === owner.accountId);
@@ -105,7 +105,10 @@ export default function SharedSessionScreen() {
       }
     } else {
       const value = await api.list();
-      if (current()) setTasks(value.filter((task) => task.ownerAccountId !== owner.accountId));
+      if (current()) {
+        setTasks(value.filter((task) => task.ownerAccountId !== owner.accountId));
+        setOwned(value.filter((task) => task.ownerAccountId === owner.accountId));
+      }
     }
   }, [api, ended, endAccess, guestId, host, hostContext, isAuthenticated, link.readDeviceList, link.sharedTaskAvailable, sessionId, tab]);
   useEffect(() => {
@@ -114,7 +117,7 @@ export default function SharedSessionScreen() {
     setState(null); setTasks([]); setOwned([]); setGuestCounts({}); setJoinedId(undefined); setEnded(false);
     setInvitation(''); setName(''); setNotice(''); setLoadError(''); setTab('current'); confirmationPending.current = null;
     return () => { mounted.current = false; epoch.current++; };
-  }, [accountGeneration, deviceId, sessionId]);
+  }, [accountGeneration, deviceId, sessionId, sharedTaskId]);
   useFocusEffect(useCallback(() => {
     return () => { confirmationPending.current = null; };
   }, []));
@@ -173,18 +176,30 @@ export default function SharedSessionScreen() {
     });
   };
   const openTask = async (id: string, current: () => boolean) => {
+    const owner = getMobileAuthOwner();
     const detail = await api.get(id);
     if (!current()) return;
     if (detail.status !== 'active') { endAccess(); return; }
-    const target = sharedTaskHostPeer(id, detail.hostDeviceId);
+    const isOwner = detail.ownerAccountId === owner.accountId;
+    const target = isOwner ? detail.hostDeviceId : sharedTaskHostPeer(id, detail.hostDeviceId);
+    let targetName = detail.title;
+    if (isOwner) {
+      const devices = await link.readDeviceList();
+      if (!current()) return;
+      const device = devices.devices.find(item => item.deviceId === target);
+      if (device?.remoteControlEnabled === false) { setNotice(t('deviceLink.connectStep3')); return; }
+      targetName = device?.name ?? t('sharedTask.hostDevice');
+    }
     await link.openLink(target);
     if (!current()) return;
     const task = await link.invoke<RemoteSession>(target, 'local-db:sessions:get', [detail.sessionId]);
     if (!current() || task.id !== detail.sessionId) return;
-    remoteSessionStore.setDeviceSessions(target, detail.title, [task]);
-    router.replace({ pathname: '/sessions/[sessionId]', params: { sessionId: detail.sessionId, deviceId: target, deviceName: detail.title } });
+    if (isOwner) remoteSessionStore.upsertDeviceSession(target, targetName, task);
+    else remoteSessionStore.setDeviceSessions(target, targetName, [task]);
+    router.replace({ pathname: '/sessions/[sessionId]', params: { sessionId: detail.sessionId, deviceId: target, deviceName: targetName } });
   };
   const detail = state?.detail?.status === 'active' ? state.detail : null;
+  const ownDetail = !!detail && detail.ownerAccountId === getMobileAuthOwner().accountId;
   const task = remoteSessionStore.getSessions().find((task) => task.id === sessionId && task.deviceLinkDeviceId === deviceId);
   const title = detail?.title ?? task?.title ?? t('sharedTask.title');
   const deviceName = (id: string) => deviceNames[id] ?? remoteSessionStore.getSessions().find((task) => task.deviceLinkDeviceId === id)?.deviceLinkDeviceName ?? t('sharedTask.hostDevice');
@@ -207,38 +222,38 @@ export default function SharedSessionScreen() {
   }, false);
   const taskCard = <View style={styles.taskRow}><FileText size={iconSize.md} color={colors.textTertiary} /><View style={styles.grow}><Text style={styles.taskTitle}>{title}</Text><Text style={styles.metadata}>{task?.deviceLinkDeviceName ?? t('sharedTask.runsOnHostDevice')}</Text></View></View>;
   return <SharedTaskScreen
-    title={t(ended ? 'sharedTask.ended' : hostContext && tab === 'owned' ? 'sharedTask.ownedTitle' : hostContext || guestId ? 'sharedTask.title' : 'sharedTask.join')}
+    title={t(ended ? 'sharedTask.ended' : !guestId && tab === 'owned' ? 'sharedTask.ownedTitle' : hostContext || guestId ? 'sharedTask.title' : 'sharedTask.join')}
     onClose={() => goBackGuarded(router, '/devices')}>
     {confirmation.dialog}
     {!isAuthenticated ? <Text style={styles.intro}>{t('sharedTask.login')}</Text> : ended ? <SharedTaskEndedState onRejoin={() => {
       setJoinedId(undefined); setEnded(false); setState(null); setNotice(''); setLoadError('');
       router.replace('/shared-session');
     }} /> : link.sharedTaskAvailable !== true ? <Text style={styles.intro}>{t(link.sharedTaskAvailable === false ? 'sharedTask.upgrade' : 'sharedTask.retry')}</Text> : <>
-      {hostContext && <View style={styles.tabs}>
-        <MainWindowRowButton accessibilityLabel={t('sharedTask.tabCurrent')} selected={tab === 'current'} style={[styles.tab, tab === 'current' && styles.tabSelected]} onPress={() => { setNotice(''); setTab('current'); }}><Text style={styles.small}>{t('sharedTask.tabCurrent')}</Text></MainWindowRowButton>
+      {!guestId && <View style={styles.tabs}>
+        <MainWindowRowButton accessibilityLabel={t(hostContext ? 'sharedTask.tabCurrent' : 'sharedTask.join')} selected={tab === 'current'} style={[styles.tab, tab === 'current' && styles.tabSelected]} onPress={() => { setNotice(''); setTab('current'); }}><Text style={styles.small}>{t(hostContext ? 'sharedTask.tabCurrent' : 'sharedTask.join')}</Text></MainWindowRowButton>
         <MainWindowRowButton accessibilityLabel={t('sharedTask.tabOwned')} selected={tab === 'owned'} style={[styles.tab, tab === 'owned' && styles.tabSelected]} onPress={() => { setNotice(''); setTab('owned'); }}><Text style={styles.small}>{t('sharedTask.tabOwned')}</Text><View style={styles.badge}><Text style={styles.metadata}>{owned.length}</Text></View></MainWindowRowButton>
       </View>}
       {!!notice && <Text accessibilityRole="alert" style={styles.noticeText}>{notice}</Text>}
       {!!loadError && <Text accessibilityRole="alert" style={styles.noticeText}>{loadError}</Text>}
-      {hostContext && tab === 'owned' ? owned.length === 0 ? <View style={styles.empty}>
+      {!guestId && tab === 'owned' ? owned.length === 0 ? <View style={styles.empty}>
         <View style={styles.largeIcon}><Check size={iconSize.md} color={colors.textPrimary} /></View>
         <Text style={styles.emptyTitle}>{t('sharedTask.ownedEmptyTitle')}</Text><Text style={styles.emptyCopy}>{t('sharedTask.ownedEmptyHint')}</Text>
-        <SharedTaskAction action={{ label: t('sharedTask.shareCurrent'), onPress: () => setTab('current') }} />
+        {hostContext && <SharedTaskAction action={{ label: t('sharedTask.shareCurrent'), onPress: () => setTab('current') }} />}
       </View> : <>
         <Text style={styles.intro}>{t('sharedTask.ownedIntro', { count: owned.length })}</Text>
         {owned.map((item) => <View key={item.sharedTaskId} style={styles.taskRow}><Users size={iconSize.md} color={colors.textTertiary} /><View style={styles.grow}><Text style={styles.taskTitle}>{item.title}</Text><Text style={styles.metadata}>{deviceName(item.hostDeviceId)}{guestCounts[item.sharedTaskId] !== undefined ? ' · ' + t('sharedTask.guestCount', { count: guestCounts[item.sharedTaskId] }) : ''}</Text></View>
-          {item.sessionId === sessionId && item.hostDeviceId === deviceId ? <SharedTaskAction compact action={{ label: t('sharedTask.manage'), onPress: () => setTab('current') }} /> : <View style={styles.badge}><Text style={styles.metadata}>{t('sharedTask.sharingBadge')}</Text></View>}
+          {item.sessionId === sessionId && item.hostDeviceId === deviceId ? <SharedTaskAction compact action={{ label: t('sharedTask.manage'), onPress: () => setTab('current') }} /> : <SharedTaskAction compact action={{ label: t('sharedTask.enterTask'), disabled: busy, onPress: () => void run(current => openTask(item.sharedTaskId, current), false) }} />}
         </View>)}
         <View style={styles.rule} /><Text style={styles.smallMuted}>{t('sharedTask.closeAllNote')}</Text>
         <View style={styles.footer}><SharedTaskAction grow action={{ label: t('sharedTask.closeAll', { count: owned.length }), tone: 'danger', disabled: busy, onPress: () => closeTasks([...owned]) }} /></View>
-      </> : guestId ? <>
+      </> : guestId ? !detail ? <Text style={styles.intro}>{t('shared.syncing')}</Text> : <>
         <View style={styles.empty}>
           <View style={styles.largeIcon}><Check size={iconSize.md} color={colors.textPrimary} /></View>
-          <Text style={styles.emptyTitle}>{detail ? t('sharedTask.joinedTitle', { title: detail.title }) : t('sharedTask.joined')}</Text>
-          <Text style={styles.emptyCopy}>{t('sharedTask.joinedBody')}</Text>
+          <Text style={styles.emptyTitle}>{ownDetail ? detail.title : detail ? t('sharedTask.joinedTitle', { title: detail.title }) : t('sharedTask.joined')}</Text>
+          <Text style={styles.emptyCopy}>{t(ownDetail ? 'sharedTask.roleHost' : 'sharedTask.joinedBody')}</Text>
           <SharedTaskAction action={{ label: t('sharedTask.enterTask'), tone: 'primary', busy, onPress: () => void run((current) => openTask(guestId, current), false) }} />
         </View>
-        <View style={styles.rule} /><SharedTaskAction action={{ label: t('sharedTask.leave'), tone: 'danger', disabled: busy, onPress: leave }} />
+        {!ownDetail && <><View style={styles.rule} /><SharedTaskAction action={{ label: t('sharedTask.leave'), tone: 'danger', disabled: busy, onPress: leave }} /></>}
       </> : hostContext ? !state ? <Text style={styles.intro}>{t('shared.syncing')}</Text> : !state.available ? <Text style={styles.intro}>{t('sharedTask.upgrade')}</Text> : !detail ? <>
         <Text style={styles.intro}>{t('sharedTask.startIntro')}</Text>{taskCard}
         <View style={styles.noticeBox}><Users size={iconSize.sm} color={colors.textTertiary} /><Text style={[styles.smallMuted, styles.grow]}>{t('sharedTask.inviteNotice')}</Text></View>

@@ -7,13 +7,14 @@ import { setMobileAuthOwner } from '@/auth/authOwnerGeneration';
 import { ApiError } from '@/api/client';
 import { Platform } from 'react-native';
 import SharedSessionScreen from '../../app/shared-session';
+import { OwnedSharedTasks } from '@/session/OwnedSharedTasks';
 
 const h = vi.hoisted(() => ({
-  params: {} as { sessionId?: string; deviceId?: string }, generation: 1,
+  params: {} as { sessionId?: string; deviceId?: string; sharedTaskId?: string }, generation: 1,
   router: { replace: vi.fn() }, alert: vi.fn(), revoked: vi.fn(),
   link: { sharedTaskAvailable: true, invoke: vi.fn(), openLink: vi.fn(), closeLink: vi.fn(), readDeviceList: vi.fn() },
   api: { list: vi.fn(), get: vi.fn(), join: vi.fn(), leave: vi.fn(), close: vi.fn() },
-  store: { getSessions: () => [], removeDevice: vi.fn(), setDeviceSessions: vi.fn() },
+  store: { getSessions: () => [], removeDevice: vi.fn(), setDeviceSessions: vi.fn(), upsertDeviceSession: vi.fn() },
   t: (key: string, options?: { title?: string }) => options?.title ? key + ':' + options.title : key,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: h.t }) }));
@@ -65,7 +66,9 @@ const detail = { sharedTaskId: 'shared', sessionId: 'task', hostDeviceId: 'deskt
 const owned = (id: string) => ({ sharedTaskId: id, sessionId: 'task', title: id, ownerAccountId: 'owner', hostDeviceId: 'host' });
 async function render() { await act(async () => root.render(createElement(SharedSessionScreen))); }
 async function click(label: string) {
-  const button = [...element.querySelectorAll('button')].find((button) => button.textContent === label || button.getAttribute('aria-label') === label);
+  // The account page has a Join tab and a Join submit action; use the latter.
+  const buttons = [...element.querySelectorAll('button')];
+  const button = (label === 'sharedTask.join' ? buttons.reverse() : buttons).find((button) => button.textContent === label || button.getAttribute('aria-label') === label);
   expect(button, label).toBeDefined(); await act(async () => button!.click());
 }
 async function fill(label: string, value: string) {
@@ -85,6 +88,75 @@ beforeEach(() => {
   element = document.createElement('div'); root = createRoot(element);
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(); });
+it('shows home owner shortcuts without session hydration and hides the empty group', async () => {
+  const onSelect = vi.fn();
+  const item = { ...owned('shared'), revision: 1 };
+  await act(async () => root.render(createElement(OwnedSharedTasks, { tasks: [item], onSelect })));
+  expect(element.textContent).toContain('sharedTask.ownedTitle');
+  await click('shared'); expect(onSelect).toHaveBeenCalledWith(item);
+  await act(async () => root.render(createElement(OwnedSharedTasks, { tasks: [], onSelect })));
+  expect(element.textContent).toBe('');
+});
+it('removes closed owner shares without closing the same-account device connection', async () => {
+  h.api.list.mockResolvedValue([owned('shared')]);
+  await render(); await click('sharedTask.tabOwned');
+  h.api.list.mockResolvedValue([]);
+  await act(async () => vi.advanceTimersByTimeAsync(5_000));
+  expect(element.textContent).toContain('sharedTask.ownedEmptyTitle');
+  expect(element.textContent).not.toContain('sharedTask.enterTask');
+  expect(h.link.closeLink).not.toHaveBeenCalled();
+  expect(h.store.removeDevice).not.toHaveBeenCalled();
+});
+it('lists owned tasks from the account menu and enters through the physical owner device', async () => {
+  h.api.list.mockResolvedValue([owned('shared')]);
+  h.api.get.mockResolvedValue({ ...detail, ownerAccountId: 'owner', hostDeviceId: 'host' });
+  h.link.invoke.mockResolvedValue({ id: 'task' });
+  await render(); await click('sharedTask.tabOwned');
+  expect(element.textContent).toContain('shared');
+  await click('sharedTask.enterTask');
+  expect(h.link.openLink).toHaveBeenCalledExactlyOnceWith('host');
+  expect(h.link.invoke).toHaveBeenCalledExactlyOnceWith('host', 'local-db:sessions:get', ['task']);
+  expect(h.store.upsertDeviceSession).toHaveBeenCalledWith('host', 'Test computer', { id: 'task' });
+  expect(h.store.setDeviceSessions).not.toHaveBeenCalled();
+  expect(h.api.join).not.toHaveBeenCalled();
+  expect(h.router.replace).toHaveBeenCalledWith({ pathname: '/sessions/[sessionId]', params: { sessionId: 'task', deviceId: 'host', deviceName: 'Test computer' } });
+});
+it('opens an owner shortcut without showing guest membership or exit actions', async () => {
+  h.params = { sharedTaskId: 'shared' };
+  h.api.get.mockResolvedValue({ ...detail, ownerAccountId: 'owner', hostDeviceId: 'host' });
+  h.link.invoke.mockResolvedValue({ id: 'task' });
+  await render();
+  expect(element.textContent).toContain('Design review');
+  expect(element.textContent).not.toContain('sharedTask.joinedBody');
+  expect(element.textContent).not.toContain('sharedTask.leave');
+  await click('sharedTask.enterTask');
+  expect(h.link.openLink).toHaveBeenCalledWith('host');
+});
+it('keeps owner shares visible while remote control is disabled and lets the user retry after enabling it', async () => {
+  h.api.list.mockResolvedValue([owned('shared')]);
+  h.api.get.mockResolvedValue({ ...detail, ownerAccountId: 'owner', hostDeviceId: 'host' });
+  h.link.readDeviceList.mockResolvedValue({ devices: [{ deviceId: 'host', name: 'Test computer', remoteControlEnabled: false }] });
+  await render(); await click('sharedTask.tabOwned'); await click('sharedTask.enterTask');
+  expect(element.textContent).toContain('deviceLink.connectStep3');
+  expect(element.textContent).toContain('shared');
+  expect(h.link.openLink).not.toHaveBeenCalled();
+  expect(h.router.replace).not.toHaveBeenCalled();
+  h.link.readDeviceList.mockResolvedValue({ devices: [{ deviceId: 'host', name: 'Test computer', remoteControlEnabled: true }] });
+  h.link.invoke.mockResolvedValue({ id: 'task' });
+  await click('sharedTask.enterTask');
+  expect(h.router.replace).toHaveBeenCalledTimes(1);
+});
+it('does not enter or write owner session data after an account change during opening', async () => {
+  h.params = { sharedTaskId: 'shared' };
+  h.api.get.mockResolvedValue({ ...detail, ownerAccountId: 'owner', hostDeviceId: 'host' });
+  let finish!: () => void;
+  h.link.openLink.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await render(); await click('sharedTask.enterTask');
+  setMobileAuthOwner('other'); h.generation++; await render();
+  await act(async () => finish());
+  expect(h.store.upsertDeviceSession).not.toHaveBeenCalled();
+  expect(h.router.replace).not.toHaveBeenCalled();
+});
 it.each([['NOT_FOUND', 'sharedTask.invitationUnavailable'], ['PERMISSION_DENIED', 'sharedTask.invitationRenew']])(
   'keeps the invitation form and explains joining failure %s', async (code, key) => {
     h.api.join.mockRejectedValue({ code });

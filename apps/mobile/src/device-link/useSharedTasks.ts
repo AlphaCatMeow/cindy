@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { isSharedTaskPeer, sharedTaskHostPeer } from '@cindy/device-link';
+import { useEffect, useState } from 'react';
+import { isSharedTaskPeer, sharedTaskHostPeer, type SharedTaskListItem } from '@cindy/device-link';
 import { useAuth } from '@/auth/AuthContext';
 import { getMobileAuthOwner, isMobileAuthOwnerCurrent } from '@/auth/authOwnerGeneration';
 import { remoteSessionStore } from '@/session/remoteSessionStore';
@@ -8,10 +8,11 @@ import { useDeviceLink } from './DeviceLinkContext';
 import { useSharedTaskApi } from './useSharedTaskApi';
 
 /** Shared tasks have their own account authority list, separate from paired devices. */
-export function useSharedTasks(): void {
+export function useSharedTasks(): readonly SharedTaskListItem[] {
   const { accountGeneration, isAuthenticated } = useAuth();
   const api = useSharedTaskApi();
   const { openLink, closeLink, invoke, status, sharedTaskAvailable } = useDeviceLink();
+  const [owned, setOwned] = useState<{ owner: ReturnType<typeof getMobileAuthOwner>; tasks: SharedTaskListItem[] } | null>(null);
   useEffect(() => {
     if (!isAuthenticated || status !== 'online' || sharedTaskAvailable !== true) return;
     const owner = getMobileAuthOwner();
@@ -22,8 +23,12 @@ export function useSharedTasks(): void {
       if (busy || !current()) return;
       busy = true;
       try {
-        const tasks = (await api.list()).filter((task) => task.ownerAccountId !== owner.accountId);
+        const all = await api.list();
         if (!current()) return;
+        // Owner discovery must not depend on full-device remote-control permission.
+        // Only guests are auto-connected through task-scoped peers.
+        setOwned({ owner, tasks: all.filter(task => task.ownerAccountId === owner.accountId) });
+        const tasks = all.filter(task => task.ownerAccountId !== owner.accountId);
         const peers = new Set(tasks.map((task) => sharedTaskHostPeer(task.sharedTaskId, task.hostDeviceId)));
         for (const task of remoteSessionStore.getSessions()) {
           const peer = task.deviceLinkDeviceId;
@@ -50,4 +55,5 @@ export function useSharedTasks(): void {
     const timer = setInterval(() => { void poll(); }, 5_000);
     return () => { disposed = true; clearInterval(timer); };
   }, [accountGeneration, api, closeLink, invoke, isAuthenticated, openLink, sharedTaskAvailable, status]);
+  return isAuthenticated && owned && isMobileAuthOwnerCurrent(owned.owner) ? owned.tasks : [];
 }

@@ -33,6 +33,8 @@ import {
 import { Text } from '@/components/AppText';
 import { DeviceLinkError, isSharedTaskPeer, type DeviceView, type PresenceSnapshot } from '@cindy/device-link';
 import { useSharedTasks } from '@/device-link/useSharedTasks';
+import { OwnedSharedTasks } from '@/session/OwnedSharedTasks';
+import type { SharedTaskListItem } from '@cindy/device-link';
 import {
   Archive,
   Check,
@@ -357,16 +359,16 @@ class HomeSyncScopeSupersededError extends Error {
 }
 
 export default function HomeScreen() {
-  useSharedTasks();
+  const ownedSharedTasks = useSharedTasks();
   const screenFocused = useIsFocused();
   return (
     <RemoteSessionStoreSubscriptionGate enabled={screenFocused}>
-      <HomeScreenContent />
+      <HomeScreenContent ownedSharedTasks={ownedSharedTasks} />
     </RemoteSessionStoreSubscriptionGate>
   );
 }
 
-function HomeScreenContent() {
+function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly SharedTaskListItem[] }) {
   const screenFocused = useIsFocused();
   const screenFocusedRef = useRef(screenFocused);
   screenFocusedRef.current = screenFocused;
@@ -2635,6 +2637,7 @@ function HomeScreenContent() {
 
       <SectionList
         sections={sections}
+        ListHeaderComponent={<OwnedSharedTasks tasks={ownedSharedTasks} onSelect={task => guardedPush({ pathname: '/shared-session', params: { sharedTaskId: task.sharedTaskId } })} />}
         style={styles.homeList}
         keyExtractor={(item) => item.key}
         initialNumToRender={HOME_LIST_INITIAL_RENDER_COUNT}
