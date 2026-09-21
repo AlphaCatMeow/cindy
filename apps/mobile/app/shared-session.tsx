@@ -138,7 +138,7 @@ export default function SharedSessionScreen() {
     const timer = setInterval(() => void poll(), 5_000);
     return () => { disposed = true; clearInterval(timer); };
   }, [accountGeneration, load, sessionId, t]));
-  const run = async (work: (current: () => boolean) => Promise<void>, reload = true) => {
+  const run = async (work: (current: () => boolean) => Promise<void>, reload = true, context: 'join' | 'operation' = 'operation') => {
     if (pending.current) return;
     pending.current = true; setBusy(true); setNotice('');
     const owner = getMobileAuthOwner();
@@ -152,7 +152,7 @@ export default function SharedSessionScreen() {
     } catch (error) {
       if (current()) {
         if (guestId && isSharedTaskGone(error)) endAccess();
-        else setNotice(t(sharedTaskErrorKey(error)));
+        else setNotice(t(sharedTaskErrorKey(error, context)));
       }
     } finally { if (captured === epoch.current) { pending.current = false; setBusy(false); } }
   };
@@ -271,7 +271,7 @@ export default function SharedSessionScreen() {
           const joined = await api.join(invitation.trim(), name.trim());
           if (!current()) return;
           Keyboard.dismiss(); setInvitation(''); setJoinedId(joined.sharedTaskId);
-        }, false) }} /></View>
+        }, false, 'join') }} /></View>
         {tasks.map((task) => <MainWindowRowButton key={task.sharedTaskId} accessibilityLabel={task.title} disabled={busy} onPress={() => { setNotice(''); setJoinedId(task.sharedTaskId); }}><Text style={styles.taskTitle}>{task.title}</Text></MainWindowRowButton>)}
       </>}
     </>}

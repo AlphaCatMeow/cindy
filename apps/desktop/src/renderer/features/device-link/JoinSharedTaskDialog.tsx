@@ -76,7 +76,13 @@ export function JoinSharedTaskDialog({ open, onOpenChange }: { open: boolean; on
     }
     setError(false);
     void run(async (current) => {
-      const result = await window.electronAPI.sharedTask.account({ action: 'join', invitation: invitation.trim(), displayName: displayName.trim() }) as NonNullable<typeof request>;
+      let result: NonNullable<typeof request>;
+      try {
+        result = await window.electronAPI.sharedTask.account({ action: 'join', invitation: invitation.trim(), displayName: displayName.trim() }) as NonNullable<typeof request>;
+      } catch (error) {
+        if (current()) toast.error(t(sharedTaskErrorKey(error, 'join')));
+        return;
+      }
       if (current()) { setInvitation(''); setRequest(result); }
       if (!current()) return;
       const detail = await window.electronAPI.sharedTask.account({ action: 'get', sharedTaskId: result.sharedTaskId }) as SharedTaskDetail;

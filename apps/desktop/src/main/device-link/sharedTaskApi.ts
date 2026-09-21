@@ -36,6 +36,12 @@ export const sharedTaskApi = createSharedTaskApi({
       if (code === 'SHARED_TASK_HOST_LIMIT' || code === 'SHARED_TASK_JOIN_LIMIT' || code === 'SHARED_TASK_GUEST_LIMIT') {
         throwIpcError(code, 'Shared task limit reached');
       }
+      // Error properties do not survive Electron serialization. Preserve only
+      // actionable codes, never the server response or invitation details.
+      if (code === 'NOT_FOUND' || code === 'PERMISSION_DENIED' || code === 'INVALID_PARAMS') {
+        throwIpcError(code, 'Shared task request rejected');
+      }
+      if (code === 'NETWORK_ERROR') throwIpcError('DEVICE_LINK_NOT_CONNECTED', 'Shared task service unreachable');
       throw error;
     }
   },

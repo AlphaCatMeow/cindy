@@ -78,7 +78,7 @@ it('keeps invitation request failures distinct and does not attempt to copy', as
     ? Promise.reject(new Error('[DEVICE_LINK_TIMEOUT] timed out')) : Promise.resolve({ available: true, detail }));
   const body = await openWindow(ownerSession);
   fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.invite' }));
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('sharedTask.retry'));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('sharedTask.requestTimedOut'));
   expect(copy).not.toHaveBeenCalled();
 });
 it('ignores a late unsupported response after the data owner changes', async () => {

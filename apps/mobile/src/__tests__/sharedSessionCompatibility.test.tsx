@@ -77,6 +77,6 @@ it('does not query an old relay and does not mislabel disconnected as old', asyn
 });
 it('does not convert a timeout into an upgrade requirement', async () => {
   state.link.invoke.mockRejectedValue({ code: 'INVOKE_TIMEOUT' }); await render();
-  expect(host.textContent).toContain('sharedTask.retry');
+  expect(host.textContent).toContain('sharedTask.requestTimedOut');
   expect(host.textContent).not.toContain('sharedTask.upgrade');
 });

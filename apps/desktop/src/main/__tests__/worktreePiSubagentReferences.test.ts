@@ -139,8 +139,12 @@ describe('detached Pi Subagent worktree references', () => {
       await fs.mkdir(entry);
     } else {
       const target = path.join(state.root, 'link-target');
-      await fs.writeFile(target, '{}');
-      await fs.symlink(target, entry, process.platform === 'win32' ? 'file' : undefined);
+      // Junctions need no Windows file-symlink privilege; lstat rejects both
+      // before reading the target. Keep file-symlink coverage on POSIX.
+      if (process.platform === 'win32') await fs.mkdir(target);
+      else await fs.writeFile(target, '{}');
+      await fs.symlink(target, entry, process.platform === 'win32' ? 'junction' : 'file');
+      expect((await fs.lstat(entry)).isSymbolicLink()).toBe(true);
     }
     expect(await livePaths()).toBeNull();
   });

@@ -15,6 +15,15 @@ beforeEach(() => {
   http.mockReset();
 });
 describe('sharedTask Main HTTP adapter', () => {
+  it.each([['NOT_FOUND', 'NOT_FOUND'], ['PERMISSION_DENIED', 'PERMISSION_DENIED'],
+    ['INVALID_PARAMS', 'INVALID_PARAMS'], ['NETWORK_ERROR', 'DEVICE_LINK_NOT_CONNECTED']])(
+    'retains actionable %s across the Electron boundary without leaking details', async (code, ipcCode) => {
+      http.mockRejectedValue(Object.assign(new Error('private invitation details'), { code }));
+      const error = await sharedTaskApi.join('x'.repeat(43), 'Guest').catch((error: Error) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('[' + ipcCode + ']');
+      expect((error as Error).message).not.toContain('private invitation details');
+    });
   it.each(['SHARED_TASK_HOST_LIMIT', 'SHARED_TASK_JOIN_LIMIT', 'SHARED_TASK_GUEST_LIMIT'])(
     'preserves %s through redaction and Electron error serialization', async (code) => {
       http.mockImplementation(async (_path, options) => {

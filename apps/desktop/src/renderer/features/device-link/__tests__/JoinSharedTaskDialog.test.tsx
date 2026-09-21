@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { JoinSharedTaskDialog } from '../JoinSharedTaskDialog';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
+import { toast } from '@/lib/toast';
 const state = vi.hoisted(() => ({ account: vi.fn(), openLink: vi.fn(), invoke: vi.fn(), setSessions: vi.fn(), bind: vi.fn() }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, args?: { title?: string }) => key + (args?.title ? ':' + args.title : '') }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ dataOwnerId: 'guest', isAuthenticated: true }) }));
@@ -30,6 +31,17 @@ function fill() {
   fireEvent.change(screen.getByLabelText('sharedTask.joinNickname'), { target: { value: 'Guest' } });
   fireEvent.click(screen.getByRole('button', { name: 'sharedTask.join' }));
 }
+it.each([['NOT_FOUND', 'sharedTask.invitationUnavailable'], ['PERMISSION_DENIED', 'sharedTask.invitationRenew']])(
+  'explains a rejected %s invitation while preserving the form', async (code, key) => {
+    state.account.mockImplementation(async ({ action }) => {
+      if (action === 'join') throw new Error('[' + code + '] rejected');
+      return [];
+    });
+    open(); fill();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(key));
+    expect((screen.getByLabelText('sharedTask.invitation') as HTMLTextAreaElement).value).toBe('A'.repeat(43));
+    expect(state.openLink).not.toHaveBeenCalled();
+  });
 it('uses a multiline invitation form and focuses invalid input without sending', async () => {
   open();
   await act(async () => {});

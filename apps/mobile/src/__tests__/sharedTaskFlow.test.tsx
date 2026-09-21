@@ -85,6 +85,16 @@ beforeEach(() => {
   element = document.createElement('div'); root = createRoot(element);
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(); });
+it.each([['NOT_FOUND', 'sharedTask.invitationUnavailable'], ['PERMISSION_DENIED', 'sharedTask.invitationRenew']])(
+  'keeps the invitation form and explains joining failure %s', async (code, key) => {
+    h.api.join.mockRejectedValue({ code });
+    await render();
+    await fill('sharedTask.invitation', 'a'.repeat(43)); await fill('sharedTask.joinNickname', 'Guest');
+    await click('sharedTask.join');
+    expect(element.textContent).toContain(key);
+    expect(element.querySelector('textarea')?.value).toBe('a'.repeat(43));
+    expect(h.link.openLink).not.toHaveBeenCalled();
+  });
 it('uses a multiline invitation and stops at the joined screen before opening the task', async () => {
   await render();
   expect(element.querySelector('textarea')).not.toBeNull();

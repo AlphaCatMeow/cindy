@@ -12,8 +12,17 @@ describe('shared-task compatibility errors', () => {
       expect(sharedTaskErrorKey(Object.assign(new Error('unsupported'), { code }))).toBe('sharedTask.upgrade');
       expect(sharedTaskErrorKey(new Error(`Error invoking remote method 'device-link:invoke': Error: [${code}] unsupported`))).toBe('sharedTask.upgrade');
     });
-  it.each(['DEVICE_LINK_NOT_CONNECTED', 'DEVICE_LINK_TIMEOUT', 'DEVICE_LINK_ACCESS_REVOKED', 'NOT_FOUND'])(
-    'does not turn %s into an upgrade requirement', (code) => {
-      expect(sharedTaskErrorKey(new Error(`[${code}] DEVICE_LINK_CHANNEL_NOT_ALLOWED`))).toBe('sharedTask.retry');
+  it.each([['DEVICE_LINK_NOT_CONNECTED', 'sharedTask.connectionFailed'], ['DEVICE_LINK_TIMEOUT', 'sharedTask.requestTimedOut'],
+    ['DEVICE_LINK_ACCESS_REVOKED', 'sharedTask.unavailable'], ['NOT_FOUND', 'sharedTask.unavailable'],
+    ['PERMISSION_DENIED', 'sharedTask.permissionDenied']])(
+    'explains %s without trusting the error body', (code, key) => {
+      expect(sharedTaskErrorKey(new Error(`[${code}] DEVICE_LINK_CHANNEL_NOT_ALLOWED`))).toBe(key);
     });
+  it.each([['NOT_FOUND', 'sharedTask.invitationUnavailable'], ['PERMISSION_DENIED', 'sharedTask.invitationRenew']])(
+    'gives a new-invitation action for joining with %s', (code, key) => {
+      expect(sharedTaskErrorKey(new Error(`Error invoking remote method 'shared-task:account': Error: [${code}] rejected`), 'join')).toBe(key);
+    });
+  it('does not infer a cause from arbitrary error text', () => {
+    expect(sharedTaskErrorKey(new Error('NOT_FOUND NETWORK_ERROR'))).toBe('sharedTask.retry');
+  });
 });

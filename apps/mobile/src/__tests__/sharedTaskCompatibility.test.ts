@@ -12,9 +12,17 @@ describe('shared-task compatibility errors', () => {
       expect(sharedTaskErrorKey({ code })).toBe('sharedTask.upgrade');
       expect(sharedTaskErrorKey(Object.assign(new Error(`[${code}] unsupported`), { code: 'IPC_ERROR' }))).toBe('sharedTask.upgrade');
     });
-  it.each(['NOT_CONNECTED', 'INVOKE_TIMEOUT', 'ACCESS_REVOKED', 'NOT_FOUND'])(
-    'does not turn %s into an upgrade requirement', (code) => {
-      expect(sharedTaskErrorKey(Object.assign(new Error('[CHANNEL_NOT_ALLOWED]'), { code }))).toBe('sharedTask.retry');
+  it.each([['NOT_CONNECTED', 'sharedTask.connectionFailed'], ['NETWORK_ERROR', 'sharedTask.connectionFailed'],
+    ['INVOKE_TIMEOUT', 'sharedTask.requestTimedOut'], ['REQUEST_TIMEOUT', 'sharedTask.requestTimedOut'],
+    ['ACCESS_REVOKED', 'sharedTask.unavailable'], ['NOT_FOUND', 'sharedTask.unavailable'],
+    ['PERMISSION_DENIED', 'sharedTask.permissionDenied']])(
+    'explains %s without trusting the error body', (code, key) => {
+      expect(sharedTaskErrorKey(Object.assign(new Error('[CHANNEL_NOT_ALLOWED]'), { code }))).toBe(key);
+    });
+  it.each([['NOT_FOUND', 'sharedTask.invitationUnavailable'], ['PERMISSION_DENIED', 'sharedTask.invitationRenew']])(
+    'gives a new-invitation action for joining with %s', (code, key) => {
+      expect(sharedTaskErrorKey({ code }, 'join')).toBe(key);
+      expect(sharedTaskErrorKey(new Error(`[${code}] rejected`), 'join')).toBe(key);
     });
   it('does not match capability names inside unrelated error text', () => {
     expect(sharedTaskErrorKey(new Error('[INTERNAL] CHANNEL_NOT_ALLOWED'))).toBe('sharedTask.retry');
