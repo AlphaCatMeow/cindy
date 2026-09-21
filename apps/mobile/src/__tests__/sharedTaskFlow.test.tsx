@@ -88,6 +88,18 @@ beforeEach(() => {
   element = document.createElement('div'); root = createRoot(element);
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(); });
+it('keeps joined tasks out of the invitation form while retaining the owner tab', async () => {
+  h.api.list.mockResolvedValue([{ ...owned('Already joined'), ownerAccountId: 'someone' }, owned('My share')]);
+  await render();
+  expect(element.querySelector('textarea')).not.toBeNull();
+  expect(element.textContent).not.toContain('Already joined');
+  expect(element.textContent).not.toContain('My share');
+  expect(h.api.leave).not.toHaveBeenCalled();
+  expect(h.link.closeLink).not.toHaveBeenCalled();
+  await click('sharedTask.tabOwned');
+  expect(element.textContent).toContain('My share');
+  expect(element.textContent).not.toContain('Already joined');
+});
 it('shows home owner shortcuts without session hydration and hides the empty group', async () => {
   const onSelect = vi.fn();
   const item = { ...owned('shared'), revision: 1 };
@@ -205,8 +217,8 @@ it.each(['ios', 'android'] as const)('%s preserves the page on cancel and reject
   expect(h.router.replace).toHaveBeenCalledWith('/devices');
 });
 it('replaces stale guest state only for confirmed membership loss and can join again', async () => {
-  h.api.list.mockResolvedValue([{ ...owned('shared'), ownerAccountId: 'someone' }]);
-  await render(); await click('shared');
+  h.params = { sessionId: 'task', deviceId: sharedTaskHostPeer('shared', 'desktop') };
+  await render();
   expect(element.textContent).toContain('sharedTask.joinedTitle');
   await click('sharedTask.leave');
   const oldConfirm = confirmation()[1];
@@ -220,7 +232,10 @@ it('replaces stale guest state only for confirmed membership loss and can join a
   expect(h.revoked).toHaveBeenCalledWith(sharedTaskHostPeer('shared', 'desktop'));
   await act(async () => oldConfirm.onPress());
   expect(h.api.leave).not.toHaveBeenCalled();
-  await click('sharedTask.rejoin'); expect(element.querySelector('textarea')).not.toBeNull();
+  await click('sharedTask.rejoin');
+  expect(h.router.replace).toHaveBeenCalledWith('/shared-session');
+  h.params = {}; await render();
+  expect(element.querySelector('textarea')).not.toBeNull();
 });
 it('closes only the confirmed owned tasks and retains failures for retry', async () => {
   h.params = { sessionId: 'task', deviceId: 'host' };

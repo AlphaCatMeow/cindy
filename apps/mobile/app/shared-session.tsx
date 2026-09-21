@@ -38,7 +38,6 @@ export default function SharedSessionScreen() {
   const [invitation, setInvitation] = useState('');
   const [name, setName] = useState('');
   const [state, setState] = useState<SharedTaskHostState | null>(null);
-  const [tasks, setTasks] = useState<SharedTaskListItem[]>([]);
   const [owned, setOwned] = useState<SharedTaskListItem[]>([]);
   const [guestCounts, setGuestCounts] = useState<Record<string, number>>({});
   const [deviceNames, setDeviceNames] = useState<Record<string, string>>({});
@@ -106,7 +105,6 @@ export default function SharedSessionScreen() {
     } else {
       const value = await api.list();
       if (current()) {
-        setTasks(value.filter((task) => task.ownerAccountId !== owner.accountId));
         setOwned(value.filter((task) => task.ownerAccountId === owner.accountId));
       }
     }
@@ -114,7 +112,7 @@ export default function SharedSessionScreen() {
   useEffect(() => {
     mounted.current = true;
     epoch.current++; pending.current = false; setBusy(false);
-    setState(null); setTasks([]); setOwned([]); setGuestCounts({}); setJoinedId(undefined); setEnded(false);
+    setState(null); setOwned([]); setGuestCounts({}); setJoinedId(undefined); setEnded(false);
     setInvitation(''); setName(''); setNotice(''); setLoadError(''); setTab('current'); confirmationPending.current = null;
     return () => { mounted.current = false; epoch.current++; };
   }, [accountGeneration, deviceId, sessionId, sharedTaskId]);
@@ -287,7 +285,6 @@ export default function SharedSessionScreen() {
           if (!current()) return;
           Keyboard.dismiss(); setInvitation(''); setJoinedId(joined.sharedTaskId);
         }, false, 'join') }} /></View>
-        {tasks.map((task) => <MainWindowRowButton key={task.sharedTaskId} accessibilityLabel={task.title} disabled={busy} onPress={() => { setNotice(''); setJoinedId(task.sharedTaskId); }}><Text style={styles.taskTitle}>{task.title}</Text></MainWindowRowButton>)}
       </>}
     </>}
   </SharedTaskScreen>;
