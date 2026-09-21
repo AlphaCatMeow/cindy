@@ -57,9 +57,11 @@ export function buildMobileHomePresentation(options: MobileHomeOptions): MobileH
         deviceName,
         sessions: project.sessions.map((item) => localizeRemoteSessionListItem(item, now)),
         subtitle: [deviceName, workingDir].filter(Boolean).join(' · '),
-        title: project.workingDir
-          ? project.title
-          : i18n.t('devices.presentation.home.uncategorizedProject'),
+        title: project.kind === 'cindy-make'
+          ? i18n.t('devices.presentation.home.cindyMake')
+          : project.workingDir
+            ? project.title
+            : i18n.t('devices.presentation.home.uncategorizedProject'),
       };
     }),
   };

@@ -44,6 +44,7 @@ import {
   Folder,
   FolderOpen,
   FileText,
+  Hammer,
   LoaderCircle,
   Menu,
   Monitor,
@@ -2045,7 +2046,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
         ...patch,
         manualProjectOrder: snapshotManualProjectOrder(
           visualProjectKeysRef.current,
-          home.projects.map((project) => project.key),
+          home.projects.filter((project) => project.kind !== 'cindy-make').map((project) => project.key),
         ),
       };
     }
@@ -2064,7 +2065,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
         manualProjectOrder: nextPatch.projectOrder === 'custom'
           ? snapshotManualProjectOrder(
             visualProjectKeysRef.current,
-            home.projects.map((project) => project.key),
+            home.projects.filter((project) => project.kind !== 'cindy-make').map((project) => project.key),
           )
           : hostManualProjectOrder,
         knownHostKeys: hostProjectOrders.get(selectedDeviceId)?.manualProjectOrder,
@@ -2205,7 +2206,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
     const mountedKeysByY = session.layouts.map((item) => item.key);
     if (ledger === 'host' && selectedDeviceId) {
       const visibleKeys = home.projects
-        .filter((item) => item.deviceId === selectedDeviceId)
+        .filter((item) => item.kind !== 'cindy-make' && item.deviceId === selectedDeviceId)
         .map((item) => item.key);
       // 虚拟化下 session.hoverIndex 只在已挂载子集从 0 计,先翻译成完整可见列表的插入位;
       // 翻译不出(源行未测到 / 已挂载子集为空)则中止,不写主机账本。
@@ -2349,7 +2350,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
       expandedAutomationGroups={expandedAutomationGroups}
       isLastPinnedRow={section.key === 'pinned' && index === section.data.length - 1 && sections.length > 1}
       item={item}
-      machineIdentity={item.kind === 'project' ? projectMachineIdentities.get(item.project.key) : undefined}
+      machineIdentity={isFolderHomeRow(item) ? projectMachineIdentities.get(item.project.key) : undefined}
       nextIsBlock={isBlockHomeRow(section.data[index + 1])}
       onArchive={archiveSession}
       onOpenAutomationGroup={openAutomationGroup}
@@ -3475,7 +3476,7 @@ function ProjectRow({
   dragging?: boolean;
   expandedAutomationGroups: readonly string[];
   headerRefs?: MutableRefObject<Map<string, View>>;
-  kind?: 'project' | 'dialogue';
+  kind?: 'project' | 'dialogue' | 'cindy-make';
   machineIdentity?: HomeProjectMachineIdentity;
   onDragEnd?: () => void;
   onDragMove?: (absoluteY: number) => void;
@@ -3624,6 +3625,8 @@ function ProjectRow({
       )}
       {kind === 'dialogue' ? (
         <MessagesSquare color={colors.textSecondary} size={iconSize.xl} strokeWidth={iconStroke.thin} />
+      ) : kind === 'cindy-make' ? (
+        <Hammer color={colors.textSecondary} size={iconSize.xl} strokeWidth={iconStroke.thin} />
       ) : collapsed ? (
         <Folder color={colors.textSecondary} size={iconSize.xl} strokeWidth={iconStroke.thin} />
       ) : (
@@ -3821,7 +3824,7 @@ function HomeListRowInner({
   showAllDialogue: boolean;
   swipe: SessionSwipeControls;
 }) {
-  if (item.kind === 'project' || item.kind === 'dialogue') {
+  if (isFolderHomeRow(item)) {
     return (
       <ProjectRow
         collapsed={projectCollapsed}
@@ -3841,7 +3844,8 @@ function HomeListRowInner({
         project={item.project}
         homeScrollY={homeScrollY}
         viewportHeight={viewportHeight}
-        showAll={item.kind === 'dialogue' && showAllDialogue}
+        // Cindy Make spans separate workdirs; all tasks stay in this folder.
+        showAll={item.kind === 'cindy-make' || (item.kind === 'dialogue' && showAllDialogue)}
         suppressTopBorder={prevIsBlock}
         swipe={swipe}
       />

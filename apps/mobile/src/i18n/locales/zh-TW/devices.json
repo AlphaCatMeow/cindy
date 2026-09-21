@@ -160,6 +160,7 @@
       "synced": "已同步",
       "unknownComputer": "未知電腦",
       "uncategorizedProject": "未分類專案",
+      "cindyMake": "Cindy Make",
       "empty": {
         "search": { "title": "沒有符合結果", "copy": "請改用其他專案名稱、任務標題、電腦名稱或訊息關鍵字。" },
         "waiting": { "title": "沒有待處理請求", "copy": "權限確認、計畫審閱和問題選擇會集中顯示在這裡。" },
