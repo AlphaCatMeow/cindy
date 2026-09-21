@@ -160,6 +160,7 @@
       "synced": "同期済み",
       "unknownComputer": "不明なコンピューター",
       "uncategorizedProject": "未分類のプロジェクト",
+      "cindyMake": "Cindy Make",
       "empty": {
         "search": { "title": "一致する結果はありません", "copy": "別のプロジェクト名、セッション名、コンピューター名、またはメッセージのキーワードを試してください。" },
         "waiting": { "title": "保留中のリクエストはありません", "copy": "権限の確認、計画レビュー、質問がここに表示されます。" },

@@ -161,6 +161,7 @@
       "synced": "동기화됨",
       "unknownComputer": "알 수 없는 컴퓨터",
       "uncategorizedProject": "분류되지 않은 프로젝트",
+      "cindyMake": "Cindy Make",
       "empty": {
         "search": { "title": "일치하는 결과 없음", "copy": "다른 프로젝트 이름, 세션 제목, 컴퓨터 이름 또는 메시지 키워드를 사용해 보세요." },
         "waiting": { "title": "대기 중인 요청 없음", "copy": "권한 확인, 계획 검토 및 질문이 여기에 표시됩니다." },
