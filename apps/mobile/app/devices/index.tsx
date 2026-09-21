@@ -33,7 +33,7 @@ import {
 import { Text } from '@/components/AppText';
 import { DeviceLinkError, isSharedTaskPeer, type DeviceView, type PresenceSnapshot } from '@cindy/device-link';
 import { useSharedTasks } from '@/device-link/useSharedTasks';
-import { OwnedSharedTasks } from '@/session/OwnedSharedTasks';
+import { splitSharedHomeGroup } from '@/session/sharedHomeGroup';
 import type { SharedTaskListItem } from '@cindy/device-link';
 import {
   Archive,
@@ -43,6 +43,7 @@ import {
   Ellipsis,
   Folder,
   FolderOpen,
+  FileText,
   LoaderCircle,
   Menu,
   Monitor,
@@ -369,6 +370,7 @@ export default function HomeScreen() {
 }
 
 function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly SharedTaskListItem[] }) {
+  const [sharedCollapsed, setSharedCollapsed] = useState(false);
   const screenFocused = useIsFocused();
   const screenFocusedRef = useRef(screenFocused);
   screenFocusedRef.current = screenFocused;
@@ -1768,8 +1770,12 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
   );
   const displayedProjectOrder = displayed.projectOrder;
   const displayedManualProjectOrder = displayed.manualProjectOrder;
+  const sharedGroup = useMemo(() => splitSharedHomeGroup(home, ownedSharedTasks, {
+    sessions: homeSessions, searchQuery, statusFilter,
+  }), [home, ownedSharedTasks, homeSessions, searchQuery, statusFilter]);
+  const sharedRows = shouldReplaceListWithSearchResults(searchQuery, indexedSearch.status) ? [] : sharedGroup.rows;
   const homeSections = useMemo(
-    () => buildHomeSections(home, groupByProject, pinnedCollapsed, {
+    () => buildHomeSections(sharedGroup.home, groupByProject, pinnedCollapsed, {
       dialogueTitle: t('devices.list.menu.dialogueFolder'),
       groupDialogue,
       manualProjectOrder: displayedManualProjectOrder,
@@ -1777,7 +1783,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
       projectOrder: displayedProjectOrder,
       sortBy,
     }),
-    [displayedManualProjectOrder, displayedProjectOrder, groupByProject, groupDialogue, home, pinnedCollapsed, priorityContext, sortBy, t],
+    [displayedManualProjectOrder, displayedProjectOrder, groupByProject, groupDialogue, sharedGroup.home, pinnedCollapsed, priorityContext, sortBy, t],
   );
   const sections = useMemo(() => {
     if (!shouldReplaceListWithSearchResults(searchQuery, indexedSearch.status)) return homeSections;
@@ -1889,7 +1895,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
   // 无可控制电脑的引导态(landing)可见性,与 ListEmptyComponent 的分支同口径。
   // 引导态下首页没有可筛选的对话:表头「所有对话 ▾」退化为纯品牌标题、新建 FAB 隐藏,
   // 避免在产品说明页上摆一堆无意义的入口。
-  const homeListItemCount = sections.reduce((count, section) => count + section.data.length, 0);
+  const homeListItemCount = sharedRows.length + sections.reduce((count, section) => count + section.data.length, 0);
   const showRemoteGuide = homeListItemCount === 0
     && !initialHomeLoading
     && !initialHomeError
@@ -2637,7 +2643,56 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
 
       <SectionList
         sections={sections}
-        ListHeaderComponent={<OwnedSharedTasks tasks={ownedSharedTasks} onSelect={task => guardedPush({ pathname: '/shared-session', params: { sharedTaskId: task.sharedTaskId } })} />}
+        ListHeaderComponent={sharedRows.length > 0 ? <View style={styles.projectGroup} testID="home.sharedGroup">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('sharedTask.title')}
+            accessibilityState={{ expanded: !sharedCollapsed }}
+            onPress={() => { configureCollapseAnimation(); setSharedCollapsed(value => !value); }}
+            style={({ pressed }) => [styles.projectRow, pressed && styles.pressed]}
+            testID="home.sharedHeader"
+          >
+            {sharedCollapsed
+              ? <ChevronRight color={colors.textSecondary} size={iconSize.xl} strokeWidth={iconStroke.regular} />
+              : <ChevronDown color={colors.textSecondary} size={iconSize.xl} strokeWidth={iconStroke.regular} />}
+            <UsersRound color={colors.textSecondary} size={iconSize.action} strokeWidth={iconStroke.thin} />
+            <Text style={styles.projectTitle} numberOfLines={1}>{t('sharedTask.title')}</Text>
+          </Pressable>
+          {!sharedCollapsed && sharedRows.map((row, index) => {
+            if (row.item) {
+              const content = <HomeSessionRow
+                key={row.key}
+                indented
+                hideDivider={index === sharedRows.length - 1}
+                item={row.item}
+                expandedAutomationGroups={expandedAutomationGroups}
+                onToggleAutomationGroup={toggleAutomationGroup}
+                onOpenSession={openSession}
+                onOpenAutomationGroup={openAutomationGroup}
+                swipe={sessionSwipeControls}
+                testID="home.sharedSessionRow"
+              />;
+              if (row.item.automationGroup || !conversationSearchAllowsLocalWrites(row.item)) return content;
+              return <SwipeableSessionRow key={row.key} session={row.item.session as RemoteSession}
+                registry={swipeRegistry} onArchive={archiveSession} onShowOptions={showSessionOptions} onTogglePin={toggleSessionPinned}
+                testID="home.sharedSessionRow.swipe">{content}</SwipeableSessionRow>;
+            }
+            return <Pressable
+            key={row.key}
+            accessibilityRole="button"
+            accessibilityLabel={row.task.title}
+            onPress={() => guardedPush({ pathname: '/shared-session', params: { sharedTaskId: row.task.sharedTaskId } })}
+            style={({ pressed }) => [styles.sessionListRow, styles.sessionListRowSingleLine, styles.sessionListRowIndented, pressed && styles.pressed]}
+            testID="home.sharedOwnerRow"
+          >
+            <View style={[styles.sessionIconCell, styles.sessionIconCellSingleLine]}>
+              <FileText color={colors.textSecondary} size={iconSize.action} strokeWidth={iconStroke.thin} />
+            </View>
+            <View style={[styles.sessionListContent, index === sharedRows.length - 1 && styles.sessionListContentNoDivider]}>
+              <Text style={styles.sessionTitle} numberOfLines={1} ellipsizeMode="tail">{row.task.title}</Text>
+            </View>
+          </Pressable>; })}
+        </View> : null}
         style={styles.homeList}
         keyExtractor={(item) => item.key}
         initialNumToRender={HOME_LIST_INITIAL_RENDER_COUNT}
@@ -2672,7 +2727,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
           if (section.key !== 'pinned' || !section.title) return null;
           return (
             <Pressable
-              accessibilityLabel={t('devices.list.a11y.pinnedConversations', { count: home.pinned.length })}
+              accessibilityLabel={t('devices.list.a11y.pinnedConversations', { count: sharedGroup.home.pinned.length })}
               accessibilityRole="button"
               accessibilityState={{ expanded: !pinnedCollapsed }}
               onPress={togglePinned}
@@ -2686,7 +2741,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
               )}
               <Pin color={colors.textSecondary} size={iconSize.action} strokeWidth={iconStroke.thin} />
               <Text style={styles.projectTitle} numberOfLines={1}>{section.title}</Text>
-              <Text style={styles.projectCount} numberOfLines={1}>{home.pinned.length}</Text>
+              <Text style={styles.projectCount} numberOfLines={1}>{sharedGroup.home.pinned.length}</Text>
             </Pressable>
           );
         }}
@@ -2697,7 +2752,7 @@ function HomeScreenContent({ ownedSharedTasks }: { ownedSharedTasks: readonly Sh
             <View style={styles.pinnedFooter} testID="home.pinnedFooter" />
           ) : null}
         ListEmptyComponent={
-          initialHomeLoading || taskSuggestionsPending ? (
+          sharedRows.length > 0 ? null : initialHomeLoading || taskSuggestionsPending ? (
             <HomeInitialLoadingState
               style={{
                 marginTop: spacing.xxl,

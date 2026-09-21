@@ -7,7 +7,6 @@ import { setMobileAuthOwner } from '@/auth/authOwnerGeneration';
 import { ApiError } from '@/api/client';
 import { Platform } from 'react-native';
 import SharedSessionScreen from '../../app/shared-session';
-import { OwnedSharedTasks } from '@/session/OwnedSharedTasks';
 
 const h = vi.hoisted(() => ({
   params: {} as { sessionId?: string; deviceId?: string; sharedTaskId?: string }, generation: 1,
@@ -99,15 +98,6 @@ it('keeps joined tasks out of the invitation form while retaining the owner tab'
   await click('sharedTask.tabOwned');
   expect(element.textContent).toContain('My share');
   expect(element.textContent).not.toContain('Already joined');
-});
-it('shows home owner shortcuts without session hydration and hides the empty group', async () => {
-  const onSelect = vi.fn();
-  const item = { ...owned('shared'), revision: 1 };
-  await act(async () => root.render(createElement(OwnedSharedTasks, { tasks: [item], onSelect })));
-  expect(element.textContent).toContain('sharedTask.ownedTitle');
-  await click('shared'); expect(onSelect).toHaveBeenCalledWith(item);
-  await act(async () => root.render(createElement(OwnedSharedTasks, { tasks: [], onSelect })));
-  expect(element.textContent).toBe('');
 });
 it('removes closed owner shares without closing the same-account device connection', async () => {
   h.api.list.mockResolvedValue([owned('shared')]);
