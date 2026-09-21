@@ -1,7 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, apiFetchRaw } from '../api/client';
 import { sharedTaskErrorKey } from '../device-link/sharedTaskCompatibility';
 
 describe('shared-task compatibility errors', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('explains native network failures from the shared-task HTTP request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Network request failed')));
+    const error = await apiFetchRaw('/api/device-link/shared-tasks/join', {
+      baseUrl: 'https://relay.example.invalid',
+      method: 'POST',
+      body: { invitation: 'a'.repeat(43), displayName: 'Guest' },
+    }).catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: 'NETWORK_UNAVAILABLE', status: 0 });
+    expect(sharedTaskErrorKey(error, 'join')).toBe('sharedTask.connectionFailed');
+    expect(sharedTaskErrorKey(error)).toBe('sharedTask.connectionFailed');
+  });
+
   it.each([['SHARED_TASK_HOST_LIMIT', 'sharedTask.hostLimit'], ['SHARED_TASK_JOIN_LIMIT', 'sharedTask.joinLimit'],
     ['SHARED_TASK_GUEST_LIMIT', 'sharedTask.guestLimit']])('explains direct API and remote host %s', (code, key) => {
     expect(sharedTaskErrorKey({ code })).toBe(key);
