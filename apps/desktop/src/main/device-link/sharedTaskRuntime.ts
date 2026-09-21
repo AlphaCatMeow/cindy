@@ -1,6 +1,6 @@
 import { SHARED_TASK_CAPABILITY, type DeviceLinkClient } from '@cindy/device-link';
 import { getCurrentDbClientSnapshot } from '../localDb/client/current.js';
-import { createSharedTaskJournal } from '../localDb/sharedTasks.js';
+import { closeSharedTasksInJournalForSession, createSharedTaskJournal } from '../localDb/sharedTasks.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { getAuthState, getCurrentUserId, getDeviceId, getActiveAuthRealm } from '../authManager.js';
 import { createLogger } from '../logger.js';
@@ -80,10 +80,13 @@ export function startSharedTaskRuntime(options: {
   };
   const refresh = async () => {
     if (!current()) { rebindIfStable(); return; }
-    if (refreshing || !current() || !options.client.hasServerCapability(SHARED_TASK_CAPABILITY) ||
-        options.client.getStatus() !== 'online') return;
+    if (refreshing || !current()) return;
     refreshing = true;
-    try { await host.restore(); }
+    try {
+      // Local terminal records must revoke captures even while HTTP/relay is down.
+      await host.restore(options.client.hasServerCapability(SHARED_TASK_CAPABILITY) &&
+        options.client.getStatus() === 'online');
+    }
     catch { if (current()) log.debug('sharedTask authority refresh unavailable; retrying on next tick'); }
     finally { refreshing = false; }
   };
@@ -129,9 +132,14 @@ export async function closeSharedTasksBeforeLogout(): Promise<void> {
 
 /** Terminal task state is durable before this runs; never reopen it on a later restore. */
 export async function closeSharedTaskForTask(sessionId: string, database: unknown): Promise<void> {
-  if (getCurrentDbClientSnapshot()?.client !== database) return;
-  if (!binding || binding.dbEpoch !== getCurrentDbClientSnapshot()?.clientEpoch) return;
-  const ids = await binding.host.closeLocallyForBoundary(sessionId);
+  const db = getCurrentDbClientSnapshot();
+  if (!db || db.client !== database) return;
+  const outgoing = binding?.database === db.client && binding.dbEpoch === db.clientEpoch ? binding : null;
+  // Capture before any await: old-profile cleanup must never use a new account.
+  const ownerAccountId = getCurrentUserId();
+  const close = ownerAccountId ? captureSharedTaskBoundaryClose(ownerAccountId, getActiveAuthRealm()) : null;
+  const localIds = outgoing ? await outgoing.host.closeLocallyForBoundary(sessionId) : [];
+  const ids = new Set([...localIds, ...await closeSharedTasksInJournalForSession(db.client, sessionId)]);
   // Network failure is retried from the terminal journal; never undo the task archive.
-  for (const id of ids) void sharedTaskApi.close(id).catch(() => undefined);
+  if (close) await Promise.allSettled([...ids].map((id) => close(id)));
 }

@@ -1,5 +1,14 @@
 import { parseSharedTaskSnapshot, type SharedTaskIdentity, type SharedTaskSnapshot } from '@cindy/device-link';
 import type { DbClient } from './client/DbClient.js';
+import { CLOSE_SHARED_TASKS_FOR_SESSION_SQL } from './sharedTaskClosureSql.js';
+
+/** Does not require a live Host; the captured profile DB owns these closures. */
+export async function closeSharedTasksInJournalForSession(db: Pick<DbClient, 'exec' | 'query'>, sessionId: string): Promise<string[]> {
+  await db.exec(CLOSE_SHARED_TASKS_FOR_SESSION_SQL, [Date.now(), sessionId]);
+  const rows = await db.query<{ shared_task_id: string }>(
+    'SELECT DISTINCT shared_task_id FROM shared_task_events WHERE session_id = ? AND terminal = 1', [sessionId]);
+  return rows.map((row) => row.shared_task_id);
+}
 
 export interface SharedTaskJournalEntry {
   sharedTaskId: string;

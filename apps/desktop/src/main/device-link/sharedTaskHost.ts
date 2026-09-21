@@ -196,10 +196,37 @@ export class SharedTaskHost {
     return created.sharedTaskId;
   }
 
-  async restore(): Promise<void> {
+  private revokeLocally(sharedTaskId: string): void {
+    const alreadyClosed = this.closed.has(sharedTaskId);
+    this.closed.add(sharedTaskId);
+    const entry = this.entries.get(sharedTaskId);
+    entry?.access.close();
+    if (entry?.detail) entry.detail = Object.freeze({ ...entry.detail, status: 'closed' });
+    if (!alreadyClosed) {
+      this.options.revoke(sharedTaskId);
+      this.options.changed(sharedTaskId);
+    }
+  }
+
+  async restore(allowNetwork = true): Promise<void> {
     this.assertCurrent();
     const journal = await this.options.journal.latest();
     this.assertCurrent();
+    // Shared profile writers hand off terminal changes through the journal.
+    // Close access objects as well as the index so existing captures also expire.
+    for (const item of journal) if (item.terminal) this.revokeLocally(item.sharedTaskId);
+    const sessions = new Set([...this.entries.values()].map((entry) => entry.identity.sessionId));
+    for (const identity of this.created.values()) sessions.add(identity.sessionId);
+    for (const sessionId of this.creating.values()) sessions.add(sessionId);
+    for (const sessionId of sessions) {
+      const session = await this.options.readSession(sessionId);
+      this.assertCurrent();
+      if ((!session || session.status !== 'active') && !this.closedSessions.has(sessionId)) {
+        await this.closeLocallyForBoundary(sessionId);
+        this.assertCurrent();
+      }
+    }
+    if (!allowNetwork) return;
     const active = await this.options.api.list();
     this.assertCurrent();
     const owned = active.filter((item) => item.ownerAccountId === this.options.ownerAccountId && item.hostDeviceId === this.options.hostDeviceId);
@@ -215,6 +242,15 @@ export class SharedTaskHost {
     }
     for (const item of owned) {
       this.assertCurrent();
+      // Covers a create that reached the server but was never accepted/journaled
+      // here, and a terminal write made by a different process before startup.
+      const session = await this.options.readSession(item.sessionId);
+      this.assertCurrent();
+      if (!session || session.status !== 'active') {
+        this.revokeLocally(item.sharedTaskId);
+        await this.options.journal.close(item);
+        this.assertCurrent();
+      }
       if (this.closed.has(item.sharedTaskId)) {
         // Retry a previous explicit close that was persisted before connectivity
         // failed. A process restart itself never closes an active sharedTask.

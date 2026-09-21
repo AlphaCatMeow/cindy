@@ -54,6 +54,42 @@ beforeEach(() => {
   host = new SharedTaskHost(options);
 });
 describe('task host sharedTask lifecycle', () => {
+  it('consumes another instance closure offline and invalidates captured access without touching another share', async () => {
+    await host.open('session');
+    const old = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
+    const secondDetail = { ...detail(), sharedTaskId: 'other-share', sessionId: 'other-session' };
+    api.create.mockResolvedValueOnce({ sharedTaskId: 'other-share', revision: 1 });
+    api.get.mockResolvedValueOnce(secondDetail);
+    await host.open('other-session');
+    const other = host.capturePeer(sharedTaskGuestPeer('other-share', 'member-b', 'phone-b'))!;
+    await options.journal.close(detail());
+    vi.mocked(options.revoke).mockClear();
+    api.list.mockRejectedValue(new Error('offline'));
+    await host.restore(false);
+    expect(old.isCurrent()).toBe(false);
+    expect(canRead()).toBe(false);
+    expect(other.isCurrent()).toBe(true);
+    expect(options.revoke).toHaveBeenCalledExactlyOnceWith('sharedTask');
+    expect(api.list).not.toHaveBeenCalled();
+    await expect(host.restore()).rejects.toThrow('offline');
+    expect(old.isCurrent()).toBe(false);
+  });
+  it.each(['archived', 'deleted'])('closes externally %s tasks even when the writing process never notified runtime', async (status) => {
+    await host.open('session');
+    const old = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
+    options.readSession = vi.fn(async (id) => ({ id, title: 'Task', status }));
+    await host.restore();
+    expect(old.isCurrent()).toBe(false);
+    expect(records.get('sharedTask')?.terminal).toBe(true);
+    expect(api.close).toHaveBeenCalledWith('sharedTask');
+  });
+  it('closes a server-side share for a deleted task that was never restored locally', async () => {
+    options.readSession = vi.fn(async () => null);
+    await host.restore();
+    expect(records.get('sharedTask')?.terminal).toBe(true);
+    expect(api.close).toHaveBeenCalledWith('sharedTask');
+    expect(api.get).not.toHaveBeenCalled();
+  });
   it('allows first sharing after an unshared task is archived and restored', async () => {
     await host.closeLocallyForBoundary('session');
     options.readSession = vi.fn(async (id) => ({ id, title: 'Task', status: 'archived' }));

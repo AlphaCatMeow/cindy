@@ -11,10 +11,10 @@ const state = vi.hoisted(() => ({
   session: { mode: 'cloud', dataOwnerId: 'owner', generation: 1 }, boundary: false,
   db: { client: { query: vi.fn() }, clientEpoch: 1 },
   hosts: [] as HostRecord[], dispatch: vi.fn(),
-  captureClose: vi.fn(), close: vi.fn(),
+  captureClose: vi.fn(), close: vi.fn(), journalClose: vi.fn(),
 }));
 vi.mock('../../localDb/client/current.js', () => ({ getCurrentDbClientSnapshot: () => state.db }));
-vi.mock('../../localDb/sharedTasks.js', () => ({ createSharedTaskJournal: () => ({}) }));
+vi.mock('../../localDb/sharedTasks.js', () => ({ createSharedTaskJournal: () => ({}), closeSharedTasksInJournalForSession: state.journalClose }));
 vi.mock('../../appSessionState.js', () => ({
   activeOwnerScopeKey: () => [state.session.mode, state.session.dataOwnerId, state.session.generation].join(':'),
   getActiveAppSession: () => ({ ...state.session }), isAppSessionBoundaryPending: () => state.boundary,
@@ -36,7 +36,7 @@ vi.mock('../sharedTaskHost.js', () => ({
   },
 }));
 
-import { closeSharedTasksBeforeLogout, requireSharedTaskHost, startSharedTaskRuntime, stopSharedTaskRuntime } from '../sharedTaskRuntime';
+import { closeSharedTaskForTask, closeSharedTasksBeforeLogout, requireSharedTaskHost, startSharedTaskRuntime, stopSharedTaskRuntime } from '../sharedTaskRuntime';
 
 function start() {
   const client = { hasServerCapability: () => true, getStatus: () => 'online', start: vi.fn(), stop: vi.fn(), revoke: vi.fn() };
@@ -53,6 +53,7 @@ beforeEach(async () => {
   state.hosts.length = 0; state.dispatch.mockClear();
   state.captureClose.mockReset().mockReturnValue(state.close);
   state.close.mockReset().mockResolvedValue({ status: 'closed' });
+  state.journalClose.mockReset().mockResolvedValue(['sharedTask-a']);
 });
 afterEach(async () => {
   await stopSharedTaskRuntime();
@@ -60,6 +61,39 @@ afterEach(async () => {
 });
 
 describe('shared runtime stable owner recommit', () => {
+  it('persists terminal changes without a relay binding and closes using captured credentials', async () => {
+    const db = state.db.client;
+    let finish!: (ids: string[]) => void;
+    state.journalClose.mockImplementation(() => new Promise<string[]>((resolve) => { finish = resolve; }));
+    const pending = closeSharedTaskForTask('session', db);
+    expect(state.journalClose).toHaveBeenCalledWith(db, 'session');
+    expect(state.captureClose).toHaveBeenCalledWith('owner', 'global');
+    expect(state.close).not.toHaveBeenCalled();
+    state.accountId = 'new-owner'; state.region = 'cn';
+    state.db = { client: { query: vi.fn() }, clientEpoch: 2 };
+    finish(['sharedTask-a']);
+    await pending;
+    expect(state.close).toHaveBeenCalledExactlyOnceWith('sharedTask-a');
+    expect(state.captureClose).toHaveBeenCalledTimes(1);
+  });
+  it('does not report a non-owner closure durable on disk failure', async () => {
+    state.journalClose.mockRejectedValue(new Error('disk failed'));
+    await expect(closeSharedTaskForTask('session', state.db.client)).rejects.toThrow('disk failed');
+    expect(state.close).not.toHaveBeenCalled();
+  });
+  it('retains offline closure intent and ignores a different profile DB', async () => {
+    state.close.mockRejectedValue(new Error('offline'));
+    await expect(closeSharedTaskForTask('session', state.db.client)).resolves.toBeUndefined();
+    expect(state.journalClose).toHaveBeenCalledOnce();
+    await closeSharedTaskForTask('session', {});
+    expect(state.journalClose).toHaveBeenCalledOnce();
+  });
+  it('reconciles profile-local terminal changes while relay is offline', async () => {
+    const relay = start();
+    relay.getStatus = () => 'connecting';
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(state.hosts[0].restore).toHaveBeenLastCalledWith(false);
+  });
   it('preserves creation cleanup across same-profile rebind but not database replacement', () => {
     start();
     const original = state.hosts[0].options.creationState;

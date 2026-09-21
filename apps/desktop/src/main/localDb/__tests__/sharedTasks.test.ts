@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createSharedTaskJournal } from '../sharedTasks.js';
+import { closeSharedTasksInJournalForSession, createSharedTaskJournal } from '../sharedTasks.js';
 import type { SharedTaskSnapshot } from '@cindy/device-link';
 
 const snapshot = (revision = 1): SharedTaskSnapshot => ({
@@ -24,6 +24,22 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('sharedTask authority journal', () => {
+  it('hands off all generations of only the terminal task through the shared profile journal', async () => {
+    await journal.recordAuthority(snapshot());
+    await journal.recordAuthority({ ...snapshot(), sharedTaskId: 'new-share' });
+    await journal.recordAuthority({ ...snapshot(), sharedTaskId: 'other-share', sessionId: 'other-session' });
+    const writer = {
+      async exec(sql: string, params: unknown[] = []) { return db.prepare(sql).run(...params); },
+      async query<T>(sql: string, params: unknown[] = []) { return db.prepare(sql).all(...params) as T[]; },
+    };
+    expect((await closeSharedTasksInJournalForSession(writer, 'session')).sort()).toEqual(['new-share', 'sharedTask']);
+    await closeSharedTasksInJournalForSession(writer, 'session');
+    expect(await journal.recordAuthority(snapshot(99))).toBe(false);
+    const records = await journal.latest();
+    expect(records.filter((item) => item.sessionId === 'session').every((item) => item.terminal)).toBe(true);
+    expect(records.find((item) => item.sharedTaskId === 'other-share')?.terminal).toBe(false);
+    expect(await closeSharedTasksInJournalForSession(writer, 'unshared')).toEqual([]);
+  });
   it('retains membership changes and reads only the latest authority', async () => {
     expect(await journal.recordAuthority(snapshot())).toBe(true);
     expect(await journal.recordAuthority({ ...snapshot(2), guests: [] })).toBe(true);
