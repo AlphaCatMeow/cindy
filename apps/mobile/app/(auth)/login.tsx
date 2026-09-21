@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Animated,
-  AppState,
   Easing,
   Keyboard,
   Linking,
@@ -35,14 +34,7 @@ import { authErrorText, getAuthLocale, loginText } from '@/auth/loginMessages';
 import { canResumePendingConsent, makeConsentStamp, type ConsentStamp } from '@/auth/consentGate';
 import { acceptPrivacyConsent } from '@/analytics/analyticsConsentStore';
 import { initMobileTapdb } from '@/analytics/mobileTapdb';
-import {
-  isNativeSocialProviderAvailable,
-  isNativeSocialProviderSupported,
-} from '@/auth/nativeSocial';
-import {
-  resolveMobileSocialLoginMode,
-  type MobileSocialLoginMode,
-} from '@/auth/mobileSocialLoginMode';
+import { useMobileSocialProviderModes } from '@/auth/useMobileSocialProviderModes';
 import { Text, TextInput } from '@/components/AppText';
 import { useTheme, useThemedStyles, type ThemeColors } from '@/theme';
 import {
@@ -118,6 +110,8 @@ export interface LoginScreenProps {
   additionalAccount?: boolean;
   onClose?: () => void;
 }
+
+const NO_SOCIAL_PROVIDERS: readonly SocialProvider[] = [];
 
 export function LoginScreen({
   additionalAccount = false,
@@ -291,10 +285,17 @@ export function LoginScreen({
   const [accountDeletionStatus, setAccountDeletionStatus] =
     useState<AccountDeletionStatus | null>(null);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
-  const [iosWechatAvailable, setIosWechatAvailable] = useState(false);
   const styles = useThemedStyles(makeStyles);
   const configIssues = getMobileConfigIssues();
   const disabled = auth.isBusy || !auth.initialized || configIssues.length > 0;
+  const advertisedSocialProviders =
+    auth.loginState?.step === 'identifier'
+      ? auth.loginState.providers.social
+      : NO_SOCIAL_PROVIDERS;
+  const socialProviderModes = useMobileSocialProviderModes({
+    providers: advertisedSocialProviders,
+    region: BUILD_AUTH_REGION,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -303,23 +304,6 @@ export function LoginScreen({
     });
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    let cancelled = false;
-    const refresh = async () => {
-      const available = await isNativeSocialProviderAvailable('wechat');
-      if (!cancelled) setIosWechatAvailable(available);
-    };
-    void refresh();
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
-    });
-    return () => {
-      cancelled = true;
-      subscription.remove();
     };
   }, []);
 
@@ -490,19 +474,6 @@ export function LoginScreen({
     const state = auth.loginState;
     if (state?.step !== 'identifier') return null;
     const providers = state.providers;
-    const socialProviderModes = new Map<SocialProvider, MobileSocialLoginMode>();
-    for (const provider of providers.social) {
-      const mode = resolveMobileSocialLoginMode({
-        provider,
-        region: BUILD_AUTH_REGION,
-        platform: Platform.OS,
-        nativeSupported:
-          provider === 'wechat' && Platform.OS === 'ios'
-            ? iosWechatAvailable
-            : isNativeSocialProviderSupported(provider),
-      });
-      if (mode) socialProviderModes.set(provider, mode);
-    }
     const socialProviders = providers.social.filter((provider) =>
       socialProviderModes.has(provider),
     );
