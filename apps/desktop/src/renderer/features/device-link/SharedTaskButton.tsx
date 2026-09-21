@@ -22,7 +22,7 @@ type ConfirmState =
   | { kind: 'remove'; memberId: string; name: string }
   | { kind: 'leave' }
   | { kind: 'closeCurrent' }
-  | { kind: 'closeAll' };
+  | { kind: 'closeAll'; targets: SharedTaskOwnedItem[] };
 
 const tabButton = (active: boolean) => `rounded-full px-3 py-1 text-12 leading-5 transition-colors ${
   active ? 'bg-[var(--surface-chip)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover-soft)]'}`;
@@ -118,14 +118,27 @@ export function SharedTaskButton({ session }: { session: Session }) {
     }
     if (captured === epoch.current && isDataOwnerGenerationCurrent(owner)) toast.success(t('sharedTask.invitationCopied'));
   });
-  const closeAll = () => run(async () => {
+  const closeAll = (targets: SharedTaskOwnedItem[]) => run(async () => {
     const captured = epoch.current;
     const owner = getDataOwnerGeneration();
-    const result = await window.electronAPI.sharedTask.account({ action: 'close', all: true }) as SharedTaskCloseResult;
-    if (captured !== epoch.current || !isDataOwnerGenerationCurrent(owner)) return;
-    setConfirm(null);
-    if (result.closed.length) toast.success(t('sharedTask.closedToast', { count: result.closed.length }));
-    if (result.failed.length) toast.error(t('sharedTask.closeFailedToast', { count: result.failed.length }));
+    const current = () => captured === epoch.current && isDataOwnerGenerationCurrent(owner);
+    const failed: SharedTaskOwnedItem[] = [];
+    let closed = 0;
+    for (const item of targets) {
+      if (!current()) return;
+      try {
+        const result = await window.electronAPI.sharedTask.account({ action: 'close', sharedTaskId: item.sharedTaskId }) as SharedTaskCloseResult;
+        if (!current()) return;
+        if (result.closed.includes(item.sharedTaskId)) closed++;
+        else failed.push(item);
+      } catch {
+        if (!current()) return;
+        failed.push(item);
+      }
+    }
+    setConfirm(failed.length ? { kind: 'closeAll', targets: failed } : null);
+    if (closed) toast.success(t('sharedTask.closedToast', { count: closed }));
+    if (failed.length) toast.error(t('sharedTask.closeFailedToast', { count: failed.length }));
   });
   const memberName = (memberId: string, fallback: string) =>
     detail?.memberLabels.find((label) => label.memberId === memberId)?.displayName ?? fallback;
@@ -145,8 +158,8 @@ export function SharedTaskButton({ session }: { session: Session }) {
           run: () => void run(async () => { await host({ action: 'close', sharedTaskId: detail!.sharedTaskId }); setConfirm(null); toast.success(t('sharedTask.closedToast', { count: 1 })); }) };
       case 'closeAll':
         return { title: t('sharedTask.closeAllTitle'), body: t('sharedTask.closeAllBody'), keep: t('sharedTask.closeAllKeep'),
-          action: t('sharedTask.closeAllAction', { count: owned?.length ?? 0 }), danger: true,
-          run: () => void closeAll() };
+          action: t('sharedTask.closeAllAction', { count: state.targets.length }), danger: true,
+          run: () => void closeAll(state.targets) };
     }
   };
   const emptyIcon = (icon: React.ReactNode) => <span className="mb-4 inline-flex size-11 items-center justify-center rounded-full border border-[var(--border-default)]">{icon}</span>;
@@ -237,7 +250,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
       </div>
       <div className="mt-4 border-t border-[var(--border-default)] pt-4 text-12 text-[var(--text-secondary)]">{t('sharedTask.closeAllNote')}</div>
       <div className="mt-5 flex justify-center"><Button variant="secondary" size="lg" disabled={busy} className="w-full gap-2 text-[var(--error-fg)]"
-        onClick={() => setConfirm({ kind: 'closeAll' })}><CircleStop size={18} aria-hidden />{t('sharedTask.closeAll', { count: owned.length })}</Button></div>
+        onClick={() => setConfirm({ kind: 'closeAll', targets: owned.map((item) => ({ ...item })) })}><CircleStop size={18} aria-hidden />{t('sharedTask.closeAll', { count: owned.length })}</Button></div>
     </>;
   const confirmation = confirm ? confirmCopy(confirm) : null;
   return <>
@@ -269,7 +282,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
             confirmVariant="destructive" descriptionClassName="text-13" loading={busy} zIndex={10002} maxWidth={440} onConfirm={confirmation?.run}
             content={confirm?.kind === 'closeAll' ? <>
               <div className="space-y-2 rounded-lg bg-[var(--surface-chip)] p-3 text-12">
-                {(owned ?? []).map((item) => <div key={item.sharedTaskId} className="break-words">{item.title} <span className="text-[var(--text-secondary)]">· {item.local ? t('sharedTask.thisDevice') : t('sharedTask.otherDevice')}</span></div>)}
+                {confirm.targets.map((item) => <div key={item.sharedTaskId} className="break-words">{item.title} <span className="text-[var(--text-secondary)]">· {item.local ? t('sharedTask.thisDevice') : t('sharedTask.otherDevice')}</span></div>)}
               </div><p className="mt-4 text-12 text-[var(--text-secondary)]">{t('sharedTask.closeAllScopeNote')}</p>
             </> : undefined} />
         </Dialog.Content>

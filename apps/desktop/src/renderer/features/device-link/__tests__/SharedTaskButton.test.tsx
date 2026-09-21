@@ -3,12 +3,12 @@ import { createElement } from 'react';
 import { act, fireEvent, waitFor, within } from '@testing-library/react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { sharedTaskHostPeer, type SharedTaskDetail } from '@cindy/device-link';
+import { sharedTaskHostPeer, type SharedTaskCloseResult, type SharedTaskDetail, type SharedTaskOwnedItem } from '@cindy/device-link';
 import { SharedTaskButton } from '../SharedTaskButton';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import type { Session } from '@/lib/ccAgent.types';
 import { toast } from '@/lib/toast';
-const state = vi.hoisted(() => ({ invoke: vi.fn(), host: vi.fn(), account: vi.fn(), t: (key: string) => key }));
+const state = vi.hoisted(() => ({ invoke: vi.fn(), host: vi.fn(), account: vi.fn(), t: vi.fn((key: string, _options?: unknown) => key) }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: state.t }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ dataOwnerId: 'owner' }) }));
 vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -120,15 +120,18 @@ it('ignores a late unsupported response after the data owner changes', async () 
   await act(async () => reject(new Error('[DEVICE_LINK_CHANNEL_NOT_ALLOWED] unsupported')));
   expect(body.textContent).not.toContain('sharedTask.upgrade');
 });
-it('lists owned shares and routes close-all through the account command', async () => {
-  state.account.mockImplementation((command: { action: string }) => {
+it('keeps the confirmed snapshot when an owned-list refresh completes before closing', async () => {
+  let refresh!: (items: SharedTaskOwnedItem[]) => void;
+  let reads = 0;
+  state.account.mockImplementation((command: { action: string; sharedTaskId?: string }) => {
     if (command.action === 'owned') {
+      if (++reads === 2) return new Promise<SharedTaskOwnedItem[]>((resolve) => { refresh = resolve; });
       return Promise.resolve([
         { sharedTaskId: 'st1', sessionId: 'session-1', ownerAccountId: 'owner', hostDeviceId: 'device-a', title: 'Task A', revision: 1, local: true },
         { sharedTaskId: 'st9', sessionId: 'session-9', ownerAccountId: 'owner', hostDeviceId: 'device-b', title: 'Task B', revision: 1, local: false },
       ]);
     }
-    if (command.action === 'close') return Promise.resolve({ closed: ['st1', 'st9'], failed: [] });
+    if (command.action === 'close') return Promise.resolve({ closed: [command.sharedTaskId], failed: [] });
     return Promise.resolve(detail);
   });
   const body = await openWindow(ownerSession);
@@ -151,8 +154,68 @@ it('lists owned shares and routes close-all through the account command', async 
     'sharedTask.closeAllKeep', 'sharedTask.closeAllAction',
   ]);
   expect(body.textContent).toContain('Task B');
+  await act(async () => refresh([{ ...detail, sharedTaskId: 'new-share', title: 'New Task', local: false }]));
+  expect(body.textContent).toContain('New Task');
+  expect(confirmation.textContent).not.toContain('New Task');
+  expect(confirmation.textContent).toContain('Task A');
+  expect(confirmation.textContent).toContain('Task B');
+  expect(state.t.mock.calls.filter(([key]) => key === 'sharedTask.closeAllAction').at(-1)).toEqual(['sharedTask.closeAllAction', { count: 2 }]);
   await act(async () => { fireEvent.click([...body.querySelectorAll('button')].find((b) => b.textContent?.startsWith('sharedTask.closeAllAction'))!); });
-  await waitFor(() => expect(state.account).toHaveBeenCalledWith({ action: 'close', all: true }));
+  expect(state.account.mock.calls.filter(([command]) => command.action === 'close')).toEqual([
+    [{ action: 'close', sharedTaskId: 'st1' }],
+    [{ action: 'close', sharedTaskId: 'st9' }],
+  ]);
+  expect(within(body).queryByRole('alertdialog')).toBeNull();
+});
+it.each(['response', 'rejection'])('retries only failed snapshot items after a close %s', async (failure) => {
+  let retry = false;
+  const items = [
+    { ...detail, local: true },
+    { ...detail, sharedTaskId: 'st9', title: 'Task B', local: false },
+  ];
+  state.account.mockImplementation(async (command: { action: string; sharedTaskId?: string }) => {
+    if (command.action === 'owned') return retry ? [{ ...detail, sharedTaskId: 'new-share', title: 'New Task', local: true }] : items;
+    if (command.sharedTaskId === 'st1' && !retry) {
+      if (failure === 'rejection') throw new Error('offline');
+      return { closed: [], failed: [{ sharedTaskId: 'st1' }] };
+    }
+    return { closed: [command.sharedTaskId], failed: [] };
+  });
+  const body = await openWindow(ownerSession);
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: /sharedTask.tabOwned/ })));
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.closeAll' })));
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.closeAllAction' })));
+  const confirmation = within(body).getByRole('alertdialog');
+  expect(confirmation.textContent).toContain('Task A');
+  expect(confirmation.textContent).not.toContain('Task B');
+  expect(state.t.mock.calls.filter(([key]) => key === 'sharedTask.closeAllAction').at(-1)).toEqual(['sharedTask.closeAllAction', { count: 1 }]);
+  expect(toast.error).toHaveBeenCalledWith('sharedTask.closeFailedToast');
+  retry = true;
+  await act(async () => fireEvent.click(within(confirmation).getByRole('button', { name: 'sharedTask.closeAllAction' })));
+  expect(state.account.mock.calls.filter(([command]) => command.action === 'close')).toEqual([
+    [{ action: 'close', sharedTaskId: 'st1' }],
+    [{ action: 'close', sharedTaskId: 'st9' }],
+    [{ action: 'close', sharedTaskId: 'st1' }],
+  ]);
+  expect(within(body).queryByRole('alertdialog')).toBeNull();
+});
+it.each(['account change', 'unmount'])('stops the confirmed batch after %s', async (invalidation) => {
+  let finish!: (result: SharedTaskCloseResult) => void;
+  state.account.mockImplementation((command: { action: string }) => command.action === 'owned'
+    ? Promise.resolve([{ ...detail, local: true }, { ...detail, sharedTaskId: 'st9', title: 'Task B', local: false }])
+    : new Promise<SharedTaskCloseResult>((resolve) => { finish = resolve; }));
+  const body = await openWindow(ownerSession);
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: /sharedTask.tabOwned/ })));
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.closeAll' })));
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.closeAllAction' })));
+  if (invalidation === 'account change') setDataOwnerGeneration('other');
+  else await act(async () => root.render(null));
+  await act(async () => finish({ closed: ['st1'], failed: [] }));
+  expect(state.account.mock.calls.filter(([command]) => command.action === 'close')).toEqual([
+    [{ action: 'close', sharedTaskId: 'st1' }],
+  ]);
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
 });
 it('keeps the member screen behind a named removal confirmation and cancels without removing', async () => {
   state.host.mockResolvedValue({ available: true, detail: { ...detail,
