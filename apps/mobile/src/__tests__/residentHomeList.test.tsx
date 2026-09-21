@@ -6,8 +6,9 @@ import { homeRowPropsEqual } from '../session/homeRowPropsEqual';
 import { ResidentHomeList, ResidentHomeListProvider } from '../session/ResidentHomeList';
 
 const state = vi.hoisted(() => ({
-  segments: ['devices'], width: 1000, anchorWidth: 1000, mounts: 0, unmounts: 0,
+  mode: 'tasks', segments: ['devices'], width: 1000, anchorWidth: 1000, mounts: 0, unmounts: 0,
 }));
+vi.mock('../session/useHomeMode', () => ({ useHomeMode: () => ({ mode: state.mode }) }));
 vi.mock('expo-router', () => ({ useSegments: () => state.segments }));
 vi.mock('@/hooks/useReduceMotion', () => ({ useReduceMotionEnabled: () => true }));
 vi.mock('@/platform/AdaptiveWindowContext', () => ({ useAdaptiveWindow: () => ({
@@ -37,7 +38,7 @@ vi.mock('react-native-reanimated', () => ({
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(() => {
   act(() => roots.splice(0).forEach(root => root.unmount()));
-  state.segments = ['devices']; state.width = 1000; state.anchorWidth = 1000;
+  state.mode = 'tasks'; state.segments = ['devices']; state.width = 1000; state.anchorWidth = 1000;
   state.mounts = 0; state.unmounts = 0;
 });
 const ListProbe = memo(function ListProbe({ onSelect }: { onSelect(): void }) {
@@ -86,5 +87,24 @@ it('hides the resident list and pauses row subscriptions on other routes without
   state.segments = ['settings']; render();
   expect(host.querySelector('[data-host]')?.getAttribute('data-pointer')).toBe('none');
   expect(host.querySelector('[data-subscriptions]')?.getAttribute('data-subscriptions')).toBe('false');
+  expect(state.mounts).toBe(1); expect(state.unmounts).toBe(0);
+});
+
+it.each([{ homeSegments: [] }, { homeSegments: ['index'] }, { homeSegments: ['devices'] }, { homeSegments: ['devices', 'index'] }])('keeps task state but hides the resident list in teammate mode on %j', ({ homeSegments }) => {
+  state.segments = homeSegments;
+  const host = document.createElement('div');
+  const root = createRoot(host); roots.push(root);
+  const render = (detail = false) => act(() => root.render(<Scene detail={detail} homeSelect={() => {}} detailSelect={() => {}} />));
+  render();
+  act(() => (host.querySelector('[data-scroll]') as HTMLButtonElement).click());
+  state.mode = 'teammates'; render();
+  expect(host.querySelector('[data-host]')?.getAttribute('data-pointer')).toBe('none');
+  expect(host.querySelector('[data-subscriptions]')?.getAttribute('data-subscriptions')).toBe('false');
+  // An actual task route still owns the upstream persistent sidebar, irrespective of home preference.
+  state.segments = ['sessions', '[sessionId]']; render(true);
+  expect(host.querySelector('[data-host]')?.getAttribute('data-pointer')).toBe('box-none');
+  state.segments = homeSegments; state.mode = 'tasks'; render();
+  expect(host.querySelector('[data-host]')?.getAttribute('data-pointer')).toBe('box-none');
+  expect(host.querySelector('[data-select]')?.textContent).toBe('240');
   expect(state.mounts).toBe(1); expect(state.unmounts).toBe(0);
 });
