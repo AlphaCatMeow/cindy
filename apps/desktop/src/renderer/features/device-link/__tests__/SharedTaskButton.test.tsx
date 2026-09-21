@@ -108,6 +108,7 @@ it.each([false, true])('refreshes members after an already-left removal complete
   const closeCurrent = within(body).getByRole('button', { name: 'sharedTask.closeCurrent' });
   expect(closeCurrent).toBeDefined();
   expect(closeCurrent.className).toContain('w-full');
+  expect(closeCurrent.parentElement?.className).toContain('justify-center');
   expect(command).toHaveBeenCalledWith({ action: 'remove', sharedTaskId: 'st1', memberId: 'left' });
   expect(toast.error).not.toHaveBeenCalled();
 });
@@ -143,6 +144,9 @@ it('lists owned shares and routes close-all through the account command', async 
   expect(confirmation.contains(document.activeElement)).toBe(true);
   expect(document.activeElement?.textContent).toBe('sharedTask.closeAllKeep');
   expect(within(confirmation).getByText('sharedTask.closeAllBody').className).toContain('text-13');
+  const closeAll = [...body.querySelectorAll('button')].find((button) => button.textContent?.startsWith('sharedTask.closeAll'))!;
+  expect(closeAll.className).toContain('w-full');
+  expect(closeAll.parentElement?.className).toContain('justify-center');
   expect(within(confirmation).getAllByRole('button').map((button) => button.textContent)).toEqual([
     'sharedTask.closeAllKeep', 'sharedTask.closeAllAction',
   ]);

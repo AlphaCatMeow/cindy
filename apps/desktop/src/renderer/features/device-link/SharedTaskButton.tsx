@@ -201,7 +201,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
         </div>;
       })}
       <div className={noticeClass}><Clock size={16} className="mt-0.5 shrink-0" aria-hidden /><p>{t(session.deviceLinkDeviceId ? 'sharedTask.remoteHostOfflineNote' : 'sharedTask.hostOfflineNote')}</p></div>
-      <div className="mt-5"><Button variant="secondary" size="lg" disabled={busy} className="w-full px-4 text-[var(--error-fg)]"
+      <div className="mt-5 flex justify-center"><Button variant="secondary" size="lg" disabled={busy} className="w-full px-4 text-[var(--error-fg)]"
         onClick={() => setConfirm({ kind: 'closeCurrent' })}>{t('sharedTask.closeCurrent')}</Button></div>
     </>
     : <div className="px-1 py-6 text-center">
@@ -236,7 +236,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
         </div>)}
       </div>
       <div className="mt-4 border-t border-[var(--border-default)] pt-4 text-12 text-[var(--text-secondary)]">{t('sharedTask.closeAllNote')}</div>
-      <div className="mt-5"><Button variant="secondary" size="lg" disabled={busy} className="w-full gap-2 text-[var(--error-fg)]"
+      <div className="mt-5 flex justify-center"><Button variant="secondary" size="lg" disabled={busy} className="w-full gap-2 text-[var(--error-fg)]"
         onClick={() => setConfirm({ kind: 'closeAll' })}><CircleStop size={18} aria-hidden />{t('sharedTask.closeAll', { count: owned.length })}</Button></div>
     </>;
   const confirmation = confirm ? confirmCopy(confirm) : null;
