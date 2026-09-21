@@ -79,7 +79,12 @@ export function SharedTasksSection({ activeSessionId, localSessions = [], onSele
     finally { if (current()) { pending.current = false; setOpening(null); } }
   };
   if (!isAuthenticated) return null;
-  return <>{(owned.length > 0 || joined.length > 0) && <section className="mx-3 mb-2 border-b border-[var(--border-default)] pb-3" aria-label={t('sharedTask.title')}>
+  return <>{(owned.length > 0 || joined.length > 0) && <section className="mx-3 mb-2 border-b border-[var(--border-default)] pb-3" aria-label={t('sharedTask.title')}
+    onContextMenu={event => {
+      // Shared entries have no context menu; do not open the sidebar's blank-space menu.
+      event.preventDefault();
+      event.stopPropagation();
+    }}>
     <div className="flex min-h-8 items-center justify-between gap-2">
       {both ? <SegmentedControl role="tablist" fullWidth className="min-w-0 flex-1"
         aria-label={t('sharedTask.title')} value={visibleTab} onValueChange={value => { setTab(value); setCollapsed(false); }}

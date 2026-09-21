@@ -1,6 +1,6 @@
 import { sharedTaskHostPeer } from '@cindy/device-link';
 // @vitest-environment jsdom
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, createEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SharedTasksSection } from '../SharedTasksSection';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
@@ -22,6 +22,59 @@ beforeEach(() => {
   Object.assign(window, { electronAPI: { sharedTask: { account: state.account }, deviceLink: { openLink: state.openLink } } });
 });
 afterEach(cleanup);
+it.each(['owned', 'joined'] as const)('suppresses context menus within the %s group without changing left-click actions or sidebar blank space', async (role) => {
+  if (role === 'owned') {
+    state.sessions = [];
+    state.account.mockResolvedValue([{ sharedTaskId: 'owned-1', sessionId: 'host-task', local: true, title: 'Hosted task' }]);
+  }
+  const organize = vi.fn();
+  const select = vi.fn();
+  render(<div onContextMenu={organize}>
+    <SharedTasksSection onSelect={select} />
+    <div data-testid="sidebar-blank" />
+  </div>);
+  const heading = await screen.findByRole('button', { name: `sharedTask.${role}Section` });
+  const title = role === 'owned' ? 'Hosted task' : 'Joined task';
+  for (const target of [heading, screen.getByText(title), screen.getByRole('region')]) {
+    const event = createEvent.contextMenu(target);
+    fireEvent(target, event);
+    expect(event.defaultPrevented).toBe(true);
+  }
+  expect(organize).not.toHaveBeenCalled();
+  expect(select).not.toHaveBeenCalled();
+  expect(state.openLink).not.toHaveBeenCalled();
+  expect(heading.getAttribute('aria-expanded')).toBe('true');
+  fireEvent.click(heading);
+  expect(screen.queryByText(title)).toBeNull();
+  fireEvent.click(heading);
+  fireEvent.click(screen.getByText(title));
+  expect(select).toHaveBeenCalledWith(role === 'owned' ? 'host-task' : 'joined-1');
+  fireEvent.contextMenu(screen.getByTestId('sidebar-blank'));
+  expect(organize).toHaveBeenCalledTimes(1);
+});
+it('suppresses context menus on role tabs and both task lists without switching or opening tasks', async () => {
+  state.account.mockResolvedValue([{ sharedTaskId: 'owned-1', sessionId: 'host-task', local: true, title: 'Hosted task' }]);
+  const organize = vi.fn();
+  const select = vi.fn();
+  render(<div onContextMenu={organize}><SharedTasksSection onSelect={select} /></div>);
+  await screen.findByRole('tablist');
+  for (const role of ['owned', 'joined']) {
+    const tab = screen.getByRole('tab', { name: `sharedTask.${role}Tab` });
+    const selected = tab.getAttribute('aria-selected');
+    const event = createEvent.contextMenu(tab);
+    fireEvent(tab, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(tab.getAttribute('aria-selected')).toBe(selected);
+    fireEvent.click(tab);
+    const row = screen.getByText(role === 'owned' ? 'Hosted task' : 'Joined task');
+    const rowEvent = createEvent.contextMenu(row);
+    fireEvent(row, rowEvent);
+    expect(rowEvent.defaultPrevented).toBe(true);
+  }
+  expect(organize).not.toHaveBeenCalled();
+  expect(select).not.toHaveBeenCalled();
+  expect(state.openLink).not.toHaveBeenCalled();
+});
 it('shows only joined tasks independently of the machine filter and does not reopen the active task', async () => {
   const select = vi.fn();
   render(<SharedTasksSection activeSessionId="joined-1" onSelect={select} />);
