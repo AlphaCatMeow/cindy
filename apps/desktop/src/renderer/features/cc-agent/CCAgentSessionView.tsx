@@ -5339,8 +5339,9 @@ export function CCAgentSessionView({
                   messages={messages}
                   placeholder={
                     botChatIdentity
-                      ? t(botComposerPlaceholderKey(botChatIdentity.name), {
+                      ? t(botChatIdentity.deviceId ? 'bots.devicePicker.remotePlaceholder' : botComposerPlaceholderKey(botChatIdentity.name), {
                           name: botChatIdentity.name,
+                          device: botChatIdentity.deviceName || botChatIdentity.deviceId,
                         })
                       : t('ccAgent.layout.chatPlaceholder')
                   }

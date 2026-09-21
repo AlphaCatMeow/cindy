@@ -130,7 +130,7 @@ describe('shared Home group', () => {
 });
 
 describe('shared role row wiring', () => {
-  const source = readFileSync(resolve(process.cwd(), 'app/devices/index.tsx'), 'utf8');
+  const source = readFileSync(resolve(process.cwd(), 'src/session/HomeSurface.tsx'), 'utf8');
 
   it('adds roles only to the existing shared group and still hides an empty group', () => {
     expect(source).toContain('ListHeaderComponent={sharedRows.length > 0 ?');
