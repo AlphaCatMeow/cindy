@@ -4449,7 +4449,7 @@ function FoldablePanel({
   /**
    * 传入则展开态走共享进程内记忆(默认折叠,虚拟化重挂/切会话/重分组不丢,
    * 见 expandedBlockMemory),**此时 defaultExpanded 无效**;不传则回退
-   * 本地 state + defaultExpanded(TodoCard / Orca 协同卡这类默认展开、无需记忆的卡)。
+   * 本地 state + defaultExpanded(TodoCard / Orca 协同卡这类无需记忆的卡)。
    */
   blockId?: string;
   title: string;
@@ -4603,7 +4603,7 @@ function CollabCardShell({
   leadingIcon: ReactNode;
   title: string;
   subtitle?: string;
-  /** 仅无 blockId 时生效(Orca 协同卡默认展开);blockId 存在时由共享记忆决定。 */
+  /** 仅无 blockId 时生效;blockId 存在时由共享记忆决定。 */
   defaultExpanded?: boolean;
   screenWidth?: number;
   testID?: string;
@@ -4872,7 +4872,7 @@ function MobileAutoResumeActionRow({
 
 // Orca 协同卡片:Lead 派活(dispatch)/ worker 回报(report)。与 SubagentCard 共用 CollabCardShell
 // chrome(同款 leadingIcon+title+可折叠 body),视觉一致;数据路径仍是 message.orcaCard,不碰 parentUuid。
-// 默认展开(协同消息是 Lead 对话的主内容),正文可选中(长按复制)。识别/文案抽取在 @/session/orcaCollab。
+// worker 回报默认收起,Lead 派活保持默认展开;正文可选中(长按复制)。识别/文案抽取在 @/session/orcaCollab。
 function OrcaCollabCard({ card, screenWidth }: { card: OrcaCollabCardModel; screenWidth?: number }) {
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -4892,7 +4892,7 @@ function OrcaCollabCard({ card, screenWidth }: { card: OrcaCollabCardModel; scre
     <CollabCardShell
       leadingIcon={<Bot color={colors.textTertiary} size={iconSize.md} strokeWidth={iconStroke.regular} />}
       title={card.title}
-      defaultExpanded
+      defaultExpanded={card.variant === 'dispatch'}
       screenWidth={screenWidth}
       testID={`message.orcaCard.${card.variant}`}
     >
