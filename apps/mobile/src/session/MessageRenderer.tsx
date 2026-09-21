@@ -46,7 +46,6 @@ import {
   Alert,
   Animated,
   Easing,
-  Image,
   Linking,
   Modal,
   Platform,
@@ -150,7 +149,7 @@ import {
   type MessagePayload,
   type MessagePayloadPreview,
 } from '@/session/messagePayload';
-import { partitionMessageAttachments } from '@/session/messageAttachments';
+import { partitionMessageAttachments, svgAttachmentForDisplay } from '@/session/messageAttachments';
 import {
   AUTOMATION_USER_MESSAGE_COLLAPSED_LINES,
   AUTOMATION_USER_MESSAGE_VISUAL_LINE_THRESHOLD,
@@ -3268,6 +3267,7 @@ function MessageBubble({
     <AttachmentStrip
       align={isUser ? 'right' : 'left'}
       attachments={item.message.attachments}
+      messageKey={item.message.key}
       clientId={item.message.source.clientId ?? item.message.source.id}
       getImagePreview={actions.getSentImagePreview}
       layout={contentLayout}
@@ -5768,9 +5768,10 @@ function renderInline(
           testID="message.markdownInlineImage"
         >
           <View style={size}>
-            <Image
+            <ExpoImage
               accessibilityLabel={inline.alt || i18n.t('message.renderer.imageFallbackTitle')}
-              resizeMode="cover"
+              contentFit="cover"
+              recyclingKey={inline.url}
               source={{ uri: inline.url }}
               style={[styles.markdownInlineImage, size]}
             />
@@ -5832,6 +5833,7 @@ function MarkdownSessionLinkSpan({
 
 function AttachmentStrip({
   attachments,
+  messageKey,
   clientId,
   getImagePreview,
   align,
@@ -5840,6 +5842,7 @@ function AttachmentStrip({
   onResolveRemoteMedia,
 }: {
   attachments: readonly NormalizedAttachment[];
+  messageKey: string;
   clientId?: string;
   getImagePreview?: GetSentMessageImagePreview;
   align: 'left' | 'right';
@@ -5851,7 +5854,10 @@ function AttachmentStrip({
   // 订阅本地缩略兜底版本:hydrate / 新注册落盘后,已渲染的 cindy-oss-attach:// 气泡
   // 自动从占位卡切到本地图(返回值不消费,订阅本身驱动重渲染)。
   useSentAttachmentThumbsVersion();
-  const { imageAttachments, fileAttachments } = partitionMessageAttachments(attachments);
+  const fileContext = useContext(ChatFilePathContext);
+  const { imageAttachments, fileAttachments } = partitionMessageAttachments(attachments.map((attachment) =>
+    svgAttachmentForDisplay(attachment, fileContext?.workdir, messageKey, fileContext?.remoteHostId, fileContext?.sessionId),
+  ));
   const alignStyle = align === 'right' ? styles.attachmentStripRight : styles.attachmentStripLeft;
 
   return (
@@ -5985,7 +5991,7 @@ function PluginResultCard({ callId, sessionId, excludedUrls, actions }: {
 /**
  * 附件图原图尺寸的模块级缓存(键 = 源 media.url,跨 presign 刷新稳定)。
  * FlatList 虚拟化反复 unmount/remount MediaPreview,组件态存不住尺寸;
- * 上限兜底防长会话无界增长(整表清空即可,丢了只是多一次 getSize)。
+ * 上限兜底防长会话无界增长(整表清空即可,下次解码时重新记录)。
  */
 const attachmentIntrinsicSizeCache = new Map<string, AttachmentImageIntrinsicSize>();
 const ATTACHMENT_INTRINSIC_CACHE_MAX = 500;
@@ -6129,28 +6135,16 @@ function MediaPreview({
     resolveThumbnail(true);
   }, [resolveThumbnail]);
 
-  // attachment 变体:异步量原图宽高并写入模块级缓存;失败置 -1 走 max 框回落帧,
-  // 图仍照常渲染(不作为出图门控,见下)。已有尺寸(含缓存命中)不重复测量。
-  useEffect(() => {
-    if (variant !== 'attachment' || localUri || !thumbUri || intrinsicSize) return;
-    let cancelled = false;
-    Image.getSize(
-      thumbUri,
-      (width, height) => {
-        if (attachmentIntrinsicSizeCache.size >= ATTACHMENT_INTRINSIC_CACHE_MAX) {
-          attachmentIntrinsicSizeCache.clear();
-        }
-        attachmentIntrinsicSizeCache.set(media.url, { height, width });
-        if (!cancelled) setIntrinsicSize({ height, width });
-      },
-      () => {
-        if (!cancelled) setIntrinsicSize({ height: -1, width: -1 });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [variant, localUri, thumbUri, intrinsicSize, media.url]);
+  // Measure with the same decoder that displays the image: RN getSize cannot
+  // decode SVG. Reuse the decoded dimensions without a second image request.
+  const handleImageLoad = useCallback(({ source: { width, height } }: { source: AttachmentImageIntrinsicSize }) => {
+    if (!(width > 0 && height > 0)) return;
+    if (attachmentIntrinsicSizeCache.size >= ATTACHMENT_INTRINSIC_CACHE_MAX) {
+      attachmentIntrinsicSizeCache.clear();
+    }
+    attachmentIntrinsicSizeCache.set(media.url, { width, height });
+    setIntrinsicSize({ width, height });
+  }, [media.url, setIntrinsicSize]);
 
   if (localUri) {
     return (
@@ -6189,13 +6183,12 @@ function MediaPreview({
             <Text style={styles.mediaHint} numberOfLines={2}>{preview.detail}</Text>
           </View>
         ) : thumbUri ? (
-          <Image
-            // 有 uri 立即渲染真图,不等 getSize(direct 图有立即可用的 URI,
-            // 门控只会平白多一帧灰底占位;尺寸未知时先 max 框 contain letterbox,
-            // getSize 返回后收敛到真实比例)。contain 而非 cover:帧比例与原图
-            // 一致时两者等价;max 框帧时保证不裁内容。
-            resizeMode="contain"
+          <ExpoImage
+            // 尺寸未知时先 contain 进最大框，解码后收敛到真实比例。
+            contentFit="contain"
+            recyclingKey={thumbUri}
             source={{ uri: thumbUri }}
+            onLoad={handleImageLoad}
             onError={phase.kind === 'resolved' ? handleImageError : undefined}
             style={[styles.attachmentImage, displaySize]}
           />
@@ -6222,8 +6215,9 @@ function MediaPreview({
         testID="message.mediaPreviewButton"
       >
         {uri ? (
-          <Image
-            resizeMode="cover"
+          <ExpoImage
+            contentFit="cover"
+            recyclingKey={uri}
             source={{ uri }}
             onError={phase.kind === 'resolved' ? handleImageError : undefined}
             style={[styles.imagePreview, frameSize]}
