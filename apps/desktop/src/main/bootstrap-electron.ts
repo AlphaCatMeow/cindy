@@ -7637,10 +7637,10 @@ const registerIpcHandlers = () => {
       }
     },
   );
-  ipcMain.handle('app:cindy-make-history-build', async (event) => {
+  ipcMain.handle('app:cindy-make-history-build', async (event, selection: unknown) => {
     assertTrustedAppRendererEvent(event);
     try {
-      return await generateHistoryPersonalVersion();
+      return await generateHistoryPersonalVersion(selection);
     } catch {
       throwIpcError('PRECONDITION_FAILED', 'unavailable');
     }
