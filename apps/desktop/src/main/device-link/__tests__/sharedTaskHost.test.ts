@@ -262,6 +262,26 @@ describe('task host sharedTask lifecycle', () => {
     expect(canRead()).toBe(false);
     await expect(host.dispose()).rejects.toThrow('disk failed');
   });
+  it('keeps both guests revoked and retries closure after disk failure and relay disposal', async () => {
+    await host.open('session');
+    const a = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
+    const b = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-b', 'phone-b'))!;
+    const persist = options.journal.close;
+    options.journal.close = vi.fn().mockRejectedValueOnce(new Error('disk failed')).mockImplementation(persist);
+    await expect(host.closeLocallyForBoundary()).rejects.toThrow('disk failed');
+    expect(a.isCurrent()).toBe(false);
+    expect(b.isCurrent()).toBe(false);
+    expect(canRead('a')).toBe(false);
+    expect(canRead('b')).toBe(false);
+    await expect(host.dispose()).rejects.toThrow('disk failed');
+    // Relay release clears live entries, but the retained old DB still provides
+    // the identity needed to retry the failed close record.
+    await expect(host.closeLocallyForBoundary()).resolves.toEqual(['sharedTask']);
+    expect(records.get('sharedTask')?.terminal).toBe(true);
+    await expect(host.dispose()).resolves.toBeUndefined();
+    expect(a.isCurrent()).toBe(false);
+    expect(b.isCurrent()).toBe(false);
+  });
   it('invalidates old captures without revoking existing devices when a member adds a device', async () => {
     await host.open('session');
     expect(host.capturePeer(sharedTaskHostPeer('sharedTask', 'desktop'))).toBeNull();
