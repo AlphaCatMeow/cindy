@@ -2,7 +2,17 @@ import { Stack } from 'expo-router';
 import { X } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Animated, Easing, Keyboard, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  AppState,
+  Easing,
+  Keyboard,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AccountDeletionStatus, SocialProvider, VerificationKind } from '@cindy/auth-client';
 
@@ -25,7 +35,10 @@ import { authErrorText, getAuthLocale, loginText } from '@/auth/loginMessages';
 import { canResumePendingConsent, makeConsentStamp, type ConsentStamp } from '@/auth/consentGate';
 import { acceptPrivacyConsent } from '@/analytics/analyticsConsentStore';
 import { initMobileTapdb } from '@/analytics/mobileTapdb';
-import { isNativeSocialProviderSupported } from '@/auth/nativeSocial';
+import {
+  isNativeSocialProviderAvailable,
+  isNativeSocialProviderSupported,
+} from '@/auth/nativeSocial';
 import {
   resolveMobileSocialLoginMode,
   type MobileSocialLoginMode,
@@ -278,6 +291,7 @@ export function LoginScreen({
   const [accountDeletionStatus, setAccountDeletionStatus] =
     useState<AccountDeletionStatus | null>(null);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
+  const [iosWechatAvailable, setIosWechatAvailable] = useState(false);
   const styles = useThemedStyles(makeStyles);
   const configIssues = getMobileConfigIssues();
   const disabled = auth.isBusy || !auth.initialized || configIssues.length > 0;
@@ -289,6 +303,23 @@ export function LoginScreen({
     });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    let cancelled = false;
+    const refresh = async () => {
+      const available = await isNativeSocialProviderAvailable('wechat');
+      if (!cancelled) setIosWechatAvailable(available);
+    };
+    void refresh();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+    return () => {
+      cancelled = true;
+      subscription.remove();
     };
   }, []);
 
@@ -465,7 +496,10 @@ export function LoginScreen({
         provider,
         region: BUILD_AUTH_REGION,
         platform: Platform.OS,
-        nativeSupported: isNativeSocialProviderSupported(provider),
+        nativeSupported:
+          provider === 'wechat' && Platform.OS === 'ios'
+            ? iosWechatAvailable
+            : isNativeSocialProviderSupported(provider),
       });
       if (mode) socialProviderModes.set(provider, mode);
     }

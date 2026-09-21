@@ -55,6 +55,12 @@ describe('mobile auth-server login', () => {
     );
     expect(nativeSource).toContain('GoogleSignin.configure({');
     expect(nativeSource).toContain("import('xdt-wechat-login')");
+    expect(loginSource).toContain(
+      "isNativeSocialProviderAvailable('wechat')",
+    );
+    expect(loginSource).toContain(
+      "provider === 'wechat' && Platform.OS === 'ios'",
+    );
     expect(nativeSource).toContain('requestWechatAuthCode({');
     expect(nativeSource).toContain('createNativeWechatLoginTimeout()');
     expect(nativeSource).toContain('cancelWechatAuthRequest().catch');
