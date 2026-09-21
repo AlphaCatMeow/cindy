@@ -95,6 +95,8 @@ pnpm --filter mobile test:smoke
   仅 OTA 无法添加回调配置；按下方冷更规则比对 fingerprint。
 - 真机验证 iOS Universal Link/AASA、Android 包名/签名与 WXEntryActivity，覆盖
   同意授权、取消、未安装微信、回到前台超时后重试。iOS Simulator 不支持微信授权。
+  iOS 登录页仅在 OpenSDK 确认已安装微信后显示微信入口；Android 保持入口可见，点击时
+  再由原生桥确认微信是否可用。凭据获取前仍须二次检查安装状态，不能只依赖页面显隐。
   未绑手机号须短信验证，已绑用户免短信；用同一微信在 PC 和两种手机上确认账号一致。
 
 - 模拟器与真机排错：
