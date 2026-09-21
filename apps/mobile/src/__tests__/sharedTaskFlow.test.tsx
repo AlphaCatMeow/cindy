@@ -178,6 +178,33 @@ it('guards current-task close and member removal behind separate confirmations',
   await act(async () => confirmation()[1].onPress!());
   expect(h.link.invoke).toHaveBeenCalledWith('host', 'maker:shared-task', [{ action: 'close', sharedTaskId: 'shared' }]);
 });
+it.each(['ios', 'android'] as const)('%s refreshes members after the host reconciles an already-left removal', async (platform) => {
+  Platform.OS = platform;
+  h.params = { sessionId: 'task', deviceId: 'host' };
+  let currentDetail = { ...detail, memberLabels: [
+    { memberId: 'member', displayName: 'Departing Guest' },
+    { memberId: 'staying', displayName: 'Remaining Guest' },
+  ] };
+  h.link.invoke.mockImplementation(async (_peer, _channel, [command]) => {
+    if (command.action === 'remove') {
+      // SharedTaskHost verified the guest is absent while sharing stays active.
+      currentDetail = { ...currentDetail, memberLabels: currentDetail.memberLabels.slice(1) };
+      return { ok: true };
+    }
+    return { available: true, detail: currentDetail };
+  });
+  await render();
+  await click('sharedTask.removeShort');
+  await act(async () => confirmation()[1].onPress!());
+  expect(h.link.invoke).toHaveBeenCalledWith('host', 'maker:shared-task', [{ action: 'remove', sharedTaskId: 'shared', memberId: 'member' }]);
+  expect(element.textContent).not.toContain('Departing Guest');
+  expect(element.textContent).toContain('Remaining Guest');
+  expect(element.textContent).toContain('sharedTask.closeCurrent');
+  expect(element.textContent).not.toContain('sharedTask.unavailable');
+  expect(element.textContent).not.toContain('sharedTask.ended');
+  expect(h.revoked).not.toHaveBeenCalled();
+  expect(h.link.closeLink).not.toHaveBeenCalled();
+});
 it('ignores an old poll after switching away from and back to the current task', async () => {
   h.params = { sessionId: 'task', deviceId: 'host' };
   let finishOld!: (value: unknown) => void;

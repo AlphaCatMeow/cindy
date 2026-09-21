@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSharedTaskApi, parseSharedTaskSnapshot, type SharedTaskDetail } from '@cindy/device-link';
 import type { SharedTaskJournalEntry } from '../../localDb/sharedTasks.js';
 import { SharedTaskHost, type SharedTaskHostOptions } from '../sharedTaskHost.js';
+import { executeSharedTaskHostCommand } from '../sharedTaskCommands.js';
+import { createIpcError } from '../../../shared/ipc-errors.js';
 
 const detail = (revision = 1): SharedTaskDetail => ({
   sharedTaskId: 'sharedTask', sessionId: 'session', ownerAccountId: 'owner', hostDeviceId: 'desktop',
@@ -330,6 +332,51 @@ describe('task host sharedTask lifecycle', () => {
     expect(canRead()).toBe(false);
     expect(canRead('b')).toBe(true);
   });
+  it('completes removal through the shared command when the guest already left', async () => {
+    await host.open('session');
+    const oldPeer = host.capturePeer(sharedTaskGuestPeer('sharedTask', 'member-a', 'phone-a'))!;
+    api.remove.mockImplementation(async () => {
+      serverDetail = { ...detail(2), guests: [detail().guests[1]] };
+      throw createIpcError('NOT_FOUND', 'Member no longer joined');
+    });
+    await expect(executeSharedTaskHostCommand(
+      { action: 'remove', sharedTaskId: 'sharedTask', memberId: 'member-a' },
+      { available: () => true, host: () => host },
+    )).resolves.toEqual({ ok: true });
+    expect(host.detail('sharedTask')?.status).toBe('active');
+    expect(host.detail('sharedTask')?.guests.map((guest) => guest.memberId)).toEqual(['member-b']);
+    expect(oldPeer.isCurrent()).toBe(false);
+    expect(canRead()).toBe(false);
+    expect(canRead('b')).toBe(true);
+    expect(options.revoke).toHaveBeenCalledExactlyOnceWith('sharedTask', 'member-a');
+    expect(api.close).not.toHaveBeenCalled();
+  });
+  it.each(['still-joined', 'closed', 'refresh-failed', 'account-changed'])(
+    'does not treat NOT_FOUND as removal success when %s', async (outcome) => {
+      await host.open('session');
+      api.remove.mockRejectedValue(createIpcError('NOT_FOUND', 'Missing'));
+      if (outcome === 'closed') serverDetail = { ...detail(2), status: 'closed', guests: [] };
+      if (outcome === 'refresh-failed') api.get.mockRejectedValueOnce(new Error('offline'));
+      if (outcome === 'account-changed') api.get.mockImplementationOnce(async () => {
+        current = false; return { ...detail(2), guests: [] };
+      });
+      await expect(host.remove('sharedTask', 'member-a')).rejects.toThrow();
+      if (outcome === 'refresh-failed') {
+        expect(canRead()).toBe(false);
+        expect(canRead('b')).toBe(true);
+      }
+    },
+  );
+  it.each(['PERMISSION_DENIED', 'DEVICE_LINK_NOT_CONNECTED'] as const)(
+    'preserves %s even if the refreshed member has left', async (code) => {
+      await host.open('session');
+      const error = createIpcError(code, 'Request failed');
+      api.remove.mockRejectedValue(error);
+      serverDetail = { ...detail(2), guests: [detail().guests[1]] };
+      await expect(host.remove('sharedTask', 'member-a')).rejects.toBe(error);
+      expect(canRead('b')).toBe(true);
+    },
+  );
   it('retains a removal fence on network failure and recovers it only by reconciliation', async () => {
     await host.open('session');
     api.remove.mockRejectedValue(new Error('offline'));

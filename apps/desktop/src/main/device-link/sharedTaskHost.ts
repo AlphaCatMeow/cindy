@@ -3,6 +3,7 @@ import {
   type SharedTaskDetail, type SharedTaskIdentity, type SharedTaskQueueItem,
 } from '@cindy/device-link';
 import type { SharedTaskJournal } from '../localDb/sharedTasks.js';
+import { isIpcError } from '../../shared/ipc-errors.js';
 import { SharedTaskAccess } from './sharedTaskAccess.js';
 
 interface HostedSharedTask {
@@ -244,9 +245,13 @@ export class SharedTaskHost {
     // Suspend host reads/writes immediately. A failed request can leave this
     // member authorized, so send permanent revocation only from fresh authority.
     return this.serial(sharedTaskId, async () => {
+      let missingMember: Error | undefined;
       try {
         this.requireEntry(sharedTaskId);
         await this.options.api.remove(sharedTaskId, memberId);
+      } catch (error) {
+        if (!isIpcError(error) || error.code !== 'NOT_FOUND') throw error;
+        missingMember = error;
       } finally {
         // On an ambiguous timeout, regain permission only from a fresh authority
         // response. If reconciliation also fails, this member stays suspended.
@@ -259,6 +264,14 @@ export class SharedTaskHost {
           const previous = pending.get(memberId);
           pending.set(memberId, () => { previous?.(); release(); });
           throw error;
+        }
+      }
+      if (missingMember) {
+        // A guest may leave while the owner confirms removal. Only a verified,
+        // still-active task with that member absent makes removal complete.
+        const detail = this.detail(sharedTaskId);
+        if (detail?.status !== 'active' || detail.guests.some((guest) => guest.memberId === memberId)) {
+          throw missingMember;
         }
       }
     });

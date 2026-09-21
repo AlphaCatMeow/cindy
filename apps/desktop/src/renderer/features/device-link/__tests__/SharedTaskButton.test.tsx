@@ -81,6 +81,34 @@ it('keeps invitation request failures distinct and does not attempt to copy', as
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith('sharedTask.requestTimedOut'));
   expect(copy).not.toHaveBeenCalled();
 });
+it.each([false, true])('refreshes members after an already-left removal completes (remote=%s)', async (remote) => {
+  let currentDetail: SharedTaskDetail = { ...detail, guests: [
+    { memberId: 'left', accountId: 'guest-left', deviceIds: ['phone-a'], version: 1 },
+    { memberId: 'staying', accountId: 'guest-staying', deviceIds: ['phone-b'], version: 1 },
+  ], memberLabels: [
+    { memberId: 'left', displayName: 'Departing Guest', joinedAt: 1 },
+    { memberId: 'staying', displayName: 'Remaining Guest', joinedAt: 1 },
+  ] };
+  const command = vi.fn(async (input: { action: string }) => {
+    if (input.action === 'remove') {
+      // The host reconciled NOT_FOUND against the active task's fresh members.
+      currentDetail = { ...currentDetail, revision: 2, guests: currentDetail.guests.slice(1), memberLabels: currentDetail.memberLabels.slice(1) };
+      return { ok: true };
+    }
+    return { available: true, detail: currentDetail };
+  });
+  state.host.mockImplementation(command);
+  state.invoke.mockImplementation((_peer, _channel, [input]) => command(input));
+  const body = await openWindow(remote ? { ...ownerSession, deviceLinkDeviceId: 'owner-computer' } : ownerSession);
+  await act(async () => fireEvent.click(within(body).getAllByRole('button', { name: 'sharedTask.removeShort' })[0]));
+  await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.remove' })));
+  await waitFor(() => expect(body.textContent).not.toContain('Departing Guest'));
+  expect(body.textContent).toContain('Remaining Guest');
+  expect(within(body).queryByRole('button', { name: 'sharedTask.remove' })).toBeNull();
+  expect(within(body).getByRole('button', { name: 'sharedTask.closeCurrent' })).toBeDefined();
+  expect(command).toHaveBeenCalledWith({ action: 'remove', sharedTaskId: 'st1', memberId: 'left' });
+  expect(toast.error).not.toHaveBeenCalled();
+});
 it('ignores a late unsupported response after the data owner changes', async () => {
   let reject!: (error: unknown) => void;
   state.host.mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
