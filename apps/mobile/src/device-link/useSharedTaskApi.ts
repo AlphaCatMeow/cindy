@@ -14,7 +14,11 @@ export function useSharedTaskApi() {
     request(path, options) {
       if (!options.isCurrent()) throw new SharedTaskScopeChangedError();
       return apiFetch(path, { baseUrl: DEVICE_LINK_API_BASE_URL, method: options.method,
-        body: options.body, cache: 'no-store', timeoutMs: 12_000 });
+        body: options.body, cache: 'no-store', timeoutMs: 12_000,
+        assertCurrent() {
+          if (!options.isCurrent()) throw new SharedTaskScopeChangedError();
+        },
+      });
     },
   }), [apiFetch, accountGeneration]);
 }

@@ -1358,7 +1358,7 @@ export function getDeviceLinkStatus(): DeviceLinkStatus {
 }
 
 export function isSharedTaskAvailable(): boolean {
-  return !linkTornDown && !!client?.hasServerCapability(SHARED_TASK_CAPABILITY) &&
+  return !linkTornDown && client?.getStatus() === 'online' && client.hasServerCapability(SHARED_TASK_CAPABILITY) &&
     authManager.getAuthState().isAuthenticated;
 }
 
