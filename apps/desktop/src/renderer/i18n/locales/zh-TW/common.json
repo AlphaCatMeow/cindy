@@ -2460,9 +2460,15 @@
     },
     "gitSafety": {
       "title": "Git 安全",
-      "autoSnapshotTitle": "Git 安全儲存點",
-      "description": "Agent 修改後自動在專案 Git 倉庫裡記錄隱藏儲存點，不會在你的分支上產生 commit。只有開啟後才顯示 Codex rewind 入口。",
-      "toggleAria": "切換 Git 安全儲存點",
+      "autoSnapshotTitle": "檔案恢復點",
+      "description": "選擇 Cindy 記錄隱藏檔案恢復點的範圍。這只影響檔案恢復成本，不影響對話回退。",
+      "modeAria": "檔案恢復點模式",
+      "modes": {
+        "off": "關閉",
+        "existingGit": "僅已有 Git 專案",
+        "allProjects": "包括新的空專案"
+      },
+      "toggleAria": "檔案恢復點模式",
       "saveFailed": "儲存 Git 安全設定失敗"
     },
     "feishuBot": {
@@ -9298,6 +9304,7 @@
       "editCancel": "取消",
       "editSend": "傳送",
       "editRollbackHint": "傳送將撤銷上一輪對 {{count}} 個檔案的改動",
+      "editConversationOnlyHint": "傳送不會恢復專案檔案，上一輪的檔案改動會保留",
       "forkErrors": {
         "unsupportedHistory": "目標位置對應的歷史引擎會話已不可用，無法從這裡開啟新任務",
         "noPriorAssistant": "請在 AI 回覆之後的訊息上開啟新任務",
@@ -9317,7 +9324,9 @@
       "viewThread": "檢視 thread 上下文 ({{count}})"
     },
     "rewind": {
-      "noFilesToRollback": "沒有可回滾的檔案，僅會截斷對話歷史",
+      "noFilesToRollback": "沒有偵測到可恢復的專案檔案改動",
+      "conversationOnlyNotice": "目前無法恢復專案檔案，因為沒有可用的 Git 保存點；繼續後會移除這則訊息之後的對話記錄，專案檔案不會回到之前的狀態",
+      "gitSafetyDisabledNotice": "Git 安全保存點未開啟，因此目前無法恢復專案檔案。請在設定中開啟後再使用檔案恢復；繼續後會移除這則訊息之後的對話記錄，專案檔案不會回到之前的狀態",
       "errors": {
         "noPriorAssistantPreview": "請在 AI 回覆之後的提問上 rewind（這條之前沒有 assistant 回覆）",
         "sessionRunning": "等待任務停止超時，請重新回退",
@@ -9332,11 +9341,11 @@
         "errorDescription": "這個任務的檔案 checkpointing 未啟用，無法回退被工具改動過的檔案。",
         "calculating": "正在計算回退影響…",
         "noChanges": "沒有需要回滾的檔案改動",
-        "continueWillTruncate": "繼續回退仍會截斷後續訊息",
+        "continueWillTruncate": "繼續後會移除這則訊息之後的對話記錄",
         "noPerFileDiff": "該 SDK 版本不支援單檔案 diff 預覽",
         "summaryDefault": "後續訊息會被丟棄，工作目錄裡的 {{count}} 個檔案會回退到那一刻。",
-        "summaryRunning": "當前執行會被停止；後續訊息和對應檔案改動會被回退。",
-        "summaryEmpty": "後續訊息會被丟棄。沒有檔案被改動，僅截斷歷史。",
+        "summaryRunning": "當前任務會被停止；這則訊息之後的對話會被回退。停止前無法確認專案檔案是否會恢復。",
+        "summaryEmpty": "這則訊息之後沒有偵測到專案檔案改動，繼續後會移除後續對話記錄。",
         "summaryEmptyWithNote": "後續訊息會被丟棄。",
         "runningNotice": "任務仍在執行。確認後會先停止任務，再按最新狀態執行回退。",
         "runningQueueNotice": "排隊訊息會保留並暫停，不會自動傳送。",

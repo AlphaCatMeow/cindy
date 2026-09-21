@@ -880,7 +880,8 @@ import { createChatEmbeddingSettingsWatcher } from './maker-host/chat-embedding-
 import {
   readGitSafetySettingsState,
   resetGitSafetySettings,
-  writeGitSafetyAutoSnapshotEnabled,
+  writeGitSafetyMode,
+  type GitSafetyMode,
 } from './maker-host/git-safety-settings-store.js';
 import {
   CHAT_EMBED_MODEL_ID,
@@ -5011,11 +5012,12 @@ const registerIpcHandlers = () => {
   ipcMain.handle(MAKER_IPC_INVOKE.GIT_SAFETY_GET, async () => {
     return gitSafetyWire();
   });
-  ipcMain.handle(MAKER_IPC_INVOKE.GIT_SAFETY_SET, async (_e, enabled: unknown) => {
-    if (typeof enabled !== 'boolean') {
-      throwIpcError('INVALID_PARAMS', 'git safety enabled required (boolean)');
+  ipcMain.handle(MAKER_IPC_INVOKE.GIT_SAFETY_SET, async (_e, mode: unknown) => {
+    if (typeof mode === 'boolean') mode = mode ? 'all-projects' : 'off';
+    if (mode !== 'off' && mode !== 'existing-git' && mode !== 'all-projects') {
+      throwIpcError('INVALID_PARAMS', 'git safety mode required');
     }
-    writeGitSafetyAutoSnapshotEnabled(enabled);
+    writeGitSafetyMode(mode as GitSafetyMode);
     return gitSafetyWire();
   });
   ipcMain.handle(MAKER_IPC_INVOKE.GIT_SAFETY_RESET, async () => {
@@ -10202,8 +10204,11 @@ function chatEmbeddingWire() {
 function gitSafetyWire() {
   const state = readGitSafetySettingsState();
   return {
+    mode: state.value.mode,
     autoSnapshotEnabled: state.value.autoSnapshotEnabled,
+    autoInitProjectGit: state.value.autoInitProjectGit,
     isCustomized: state.isCustomized,
+    defaultMode: state.defaults.mode,
     defaultAutoSnapshotEnabled: state.defaults.autoSnapshotEnabled,
   };
 }

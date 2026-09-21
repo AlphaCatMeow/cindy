@@ -620,6 +620,7 @@ import { createExpoRemoteMediaDiskCacheIO, downloadRemoteMediaShareTemp } from '
 import {
   buildRewindPreviewState,
   isCommitReadyRewindState,
+  rewindCommitBindOpts,
   type RewindPreviewState,
 } from '@/session/rewindPreview';
 import { projectMobileSessionActions } from '@/session/sessionActionProjection';
@@ -8891,7 +8892,11 @@ export default function SessionScreen() {
     setMessageActionBusy({ clientId: state.clientId, kind: 'rewind' });
     setError(null);
     try {
-      const updated = await maker.rewindCommit(sessionId, state.clientId);
+      const updated = await maker.rewindCommit(
+        sessionId,
+        state.clientId,
+        rewindCommitBindOpts(state),
+      );
       // applySessionPatch 按显式 sessionId 写目标 session 的分片,与当前浏览无关,即使用户已切走
       // 也必须执行,否则该 session 的回撤结果丢失——不受下面 guard 影响。
       remoteSessionStore.applySessionPatch(deviceId, sessionId, updated);

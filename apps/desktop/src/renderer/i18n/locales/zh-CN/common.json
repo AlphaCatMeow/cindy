@@ -2460,9 +2460,15 @@
     },
     "gitSafety": {
       "title": "Git 安全",
-      "autoSnapshotTitle": "Git 安全保存点",
-      "description": "Agent 修改后自动在项目 Git 仓库里记录隐藏保存点，不会在你的分支上产生 commit。只有开启后才显示 Codex rewind 入口。",
-      "toggleAria": "切换 Git 安全保存点",
+      "autoSnapshotTitle": "文件恢复点",
+      "description": "选择 Cindy 记录隐藏文件恢复点的范围。这只影响文件恢复成本，不影响对话回退。",
+      "modeAria": "文件恢复点模式",
+      "modes": {
+        "off": "关闭",
+        "existingGit": "仅已有 Git 项目",
+        "allProjects": "包括新的空项目"
+      },
+      "toggleAria": "文件恢复点模式",
       "saveFailed": "保存 Git 安全设置失败"
     },
     "feishuBot": {
@@ -9299,6 +9305,7 @@
       "editCancel": "取消",
       "editSend": "发送",
       "editRollbackHint": "发送将撤销上一轮对 {{count}} 个文件的改动",
+      "editConversationOnlyHint": "发送不会恢复项目文件，上一轮的文件改动会保留",
       "forkErrors": {
         "unsupportedHistory": "目标位置对应的历史引擎会话已不可用，无法从这里开启新任务",
         "noPriorAssistant": "请在 AI 回复之后的消息上开启新任务",
@@ -9318,7 +9325,9 @@
       "viewThread": "查看 thread 上下文 ({{count}})"
     },
     "rewind": {
-      "noFilesToRollback": "没有可回滚的文件，仅会截断对话历史",
+      "noFilesToRollback": "没有检测到可恢复的项目文件改动",
+      "conversationOnlyNotice": "当前无法恢复项目文件，因为没有可用的 Git 保存点；继续后会移除这条消息之后的对话记录，项目文件不会回到之前的状态",
+      "gitSafetyDisabledNotice": "Git 安全保存点未开启，因此当前无法恢复项目文件。请在设置中开启后再使用文件恢复；继续后会移除这条消息之后的对话记录，项目文件不会回到之前的状态",
       "errors": {
         "noPriorAssistantPreview": "请在 AI 回复之后的提问上 rewind（这条之前没有 assistant 回复）",
         "sessionRunning": "等待任务停止超时，请重新回退",
@@ -9333,11 +9342,11 @@
         "errorDescription": "这个任务的文件 checkpointing 未启用，无法回退被工具改动过的文件。",
         "calculating": "正在计算回退影响…",
         "noChanges": "没有需要回滚的文件改动",
-        "continueWillTruncate": "继续回退仍会截断后续消息",
+        "continueWillTruncate": "继续后会移除这条消息之后的对话记录",
         "noPerFileDiff": "该 SDK 版本不支持单文件 diff 预览",
         "summaryDefault": "后续消息会被丢弃，工作目录里的 {{count}} 个文件会回退到那一刻。",
-        "summaryRunning": "当前执行会被停止；后续消息和对应文件改动会被回退。",
-        "summaryEmpty": "后续消息会被丢弃。没有文件被改动，仅截断历史。",
+        "summaryRunning": "当前任务会被停止；这条消息之后的对话会被回退。停止前无法确认项目文件是否会恢复。",
+        "summaryEmpty": "这条消息之后没有检测到项目文件改动，继续后会移除后续对话记录。",
         "summaryEmptyWithNote": "后续消息会被丢弃。",
         "runningNotice": "任务仍在运行。确认后会先停止任务，再按最新状态执行回退。",
         "runningQueueNotice": "排队消息会保留并暂停，不会自动发送。",
