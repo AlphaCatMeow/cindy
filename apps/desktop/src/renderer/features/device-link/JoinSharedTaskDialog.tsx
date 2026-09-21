@@ -141,22 +141,24 @@ export function JoinSharedTaskDialog({ open, onOpenChange }: { open: boolean; on
         onInteractOutside={(event) => { if (pending.current || closeTargets) event.preventDefault(); }}>
         <div className="mb-4 flex items-center justify-between gap-2">
           <Dialog.Title className="text-18 font-medium">{t(closeTargets ? 'sharedTask.closeAllTitle' : request ? 'sharedTask.title' : 'sharedTask.join')}</Dialog.Title>
-          {!closeTargets && <Dialog.Close asChild>
-            <Button variant="secondary" size="lg" className="w-9 border-transparent bg-transparent p-0" aria-label={t('sharedTask.dismiss')} disabled={busy}><X size={18} aria-hidden /></Button>
-          </Dialog.Close>}
+          {closeTargets ? <Button variant="secondary" size="lg" className="w-9 border-transparent bg-transparent p-0" aria-label={t('sharedTask.closeAllCancel')} disabled={busy}
+            onClick={() => setCloseTargets(null)}><X size={18} aria-hidden /></Button>
+            : <Dialog.Close asChild>
+              <Button variant="secondary" size="lg" className="w-9 border-transparent bg-transparent p-0" aria-label={t('sharedTask.dismiss')} disabled={busy}><X size={18} aria-hidden /></Button>
+            </Dialog.Close>}
         </div>
-        <Dialog.Description className={request ? 'sr-only' : 'mb-4 text-13 text-[var(--text-secondary)]'}>{t(closeTargets ? 'sharedTask.closeAllBody' : request ? 'sharedTask.joinedBody' : 'sharedTask.joinIntro')}</Dialog.Description>
+        <Dialog.Description className={request ? 'sr-only' : 'mb-4 text-13 text-[var(--text-secondary)]'}>{t(closeTargets ? 'sharedTask.closeAllJoinBody' : request ? 'sharedTask.joinedBody' : 'sharedTask.joinIntro', { count: closeTargets?.length ?? 0 })}</Dialog.Description>
         {closeTargets && <div>
-          <div className="max-h-56 space-y-2 overflow-y-auto">{closeTargets.map(item => <div key={item.sharedTaskId} className="rounded-lg border border-[var(--border-default)] p-3">
+          <div className="max-h-56 overflow-y-auto rounded-xl border border-[var(--border-default)]">{closeTargets.map((item, index) => <div key={item.sharedTaskId} className={index ? 'border-t border-[var(--border-default)] p-3' : 'p-3'}>
             <p className="break-words text-13 font-medium">{item.title}</p>
-            <p className="text-11 text-[var(--text-secondary)]">{t(item.local ? 'sharedTask.thisDevice' : 'sharedTask.otherDevice')}</p>
+            <p className="text-12 text-[var(--text-secondary)]">{t(item.local ? 'sharedTask.thisDevice' : 'sharedTask.otherDevice')}</p>
           </div>)}</div>
           <p className="mt-4 text-12 text-[var(--text-secondary)]">{t('sharedTask.closeAllScopeNote')}</p>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <Button ref={keepSharing} variant="secondary" size="lg" disabled={busy} onClick={() => setCloseTargets(null)}>{t('sharedTask.closeAllKeep')}</Button>
             <Button variant="primary" size="lg" loading={busy} onClick={closeOwned}
               className="h-auto min-h-9 max-w-full whitespace-normal border-transparent bg-[hsl(var(--destructive))] py-1.5 text-[var(--accent-pure-cta-fg)] enabled:hover:border-transparent enabled:active:border-transparent enabled:hover:bg-[hsl(var(--destructive))] enabled:active:bg-[hsl(var(--destructive))]">
-              {t('sharedTask.closeAllAction', { count: closeTargets.length })}
+              {t('sharedTask.closeAllJoinAction')}
             </Button>
           </div>
         </div>}
@@ -174,7 +176,7 @@ export function JoinSharedTaskDialog({ open, onOpenChange }: { open: boolean; on
           : <>
             <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] p-3">
               <div className="min-w-0"><p className="text-13">{t('sharedTask.ownedTitle')}</p>
-                <p className="text-11 text-[var(--text-secondary)]" role="status">{t(ownedError ? 'sharedTask.ownedLoadFailed' : owned === null ? 'sharedTask.loadingOwned' : 'sharedTask.ownedActiveCount', { count: owned?.length ?? 0 })}</p>
+                <p className="text-11 text-[var(--text-secondary)]" role="status">{t(ownedError ? 'sharedTask.ownedLoadFailed' : owned === null ? 'sharedTask.loadingOwned' : owned.length ? 'sharedTask.ownedActiveCount' : 'sharedTask.ownedNone', { count: owned?.length ?? 0 })}</p>
               </div>
               {ownedError ? <Button variant="secondary" disabled={busy} className="px-3 text-12" onClick={() => void loadOwned()}>{t('sharedTask.retryAction')}</Button>
                 : <Button variant="secondary" className="px-3 text-12" disabled={busy || !owned?.length} onClick={() => setCloseTargets([...(owned ?? [])])}>{t('sharedTask.closeAllShort')}</Button>}

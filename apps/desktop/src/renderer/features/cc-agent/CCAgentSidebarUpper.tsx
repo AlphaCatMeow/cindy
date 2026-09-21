@@ -69,6 +69,7 @@ import { SidebarTopNav } from '@/components/sidebar/SidebarTopNav';
 import { SidebarFilterPopover } from './sidebar/SidebarFilterPopover';
 import { MainListScopeHeader } from './sidebar/MainListScopeHeader';
 import { SharedTasksSection } from '@/features/device-link/SharedTasksSection';
+import { sharedTaskErrorKey } from '@/features/device-link/sharedTaskCompatibility';
 import { isSharedTaskPeer } from '@cindy/device-link';
 import { stripTrailingPathSeparators } from '../../../shared/pathText';
 import {
@@ -824,6 +825,8 @@ interface ConfirmState {
   action: 'delete' | 'archive';
   /** P1: 会话 worktree 有未提交更改 → 确认文案追加警告(打开前预检)。 */
   dirtyWorktree: boolean;
+  /** Owned shared task to close before the confirmed archive/delete. */
+  sharedTaskId?: string;
 }
 
 const CONFIRM_INITIAL: ConfirmState = {
@@ -831,6 +834,7 @@ const CONFIRM_INITIAL: ConfirmState = {
   sessionId: '',
   action: 'delete',
   dirtyWorktree: false,
+  sharedTaskId: undefined,
 };
 
 function ExpandedView({
@@ -2894,8 +2898,23 @@ function ExpandedView({
     includeArchived: filter.status,
   });
 
+  const closeOwnedSharedTask = useCallback(async (sharedTaskId?: string): Promise<boolean> => {
+    if (!sharedTaskId) return true;
+    try {
+      await window.electronAPI.sharedTask.account({ action: 'close', sharedTaskId });
+      return true;
+    } catch (error) {
+      toast.error(t(sharedTaskErrorKey(error)));
+      return false;
+    }
+  }, [t]);
+
   const handleActionClick = useCallback(
-    async (sessionId: string, action: 'delete' | 'archive' | 'archive-now' | 'unarchive') => {
+    async (
+      sessionId: string,
+      action: 'delete' | 'archive' | 'archive-now' | 'unarchive',
+      sharedTaskId?: string,
+    ) => {
       const session = sessionsByIdRef.current.get(sessionId);
       if (isRemoteSessionWriteBlocked(session)) {
         toast.warning(t('ccAgent.remoteSession.actionsUnavailable'));
@@ -2963,12 +2982,14 @@ function ExpandedView({
             sessionId,
             action: 'archive',
             dirtyWorktree: preflight === 'dirty',
+            sharedTaskId,
           });
           return;
         }
         // 重定向判定用 viewedSessionId:files 路由下归档「正在浏览的会话」也要
         // 跳离失效的文件视图(codex review;正常路由下两者恒等)。经 ref 读:它随
         // 路由切换而变,留在 deps 里会让本 handler 每次切换都重建、打穿整表 memo。
+        if (!(await closeOwnedSharedTask(sharedTaskId))) return;
         await runSessionAction(sessionId, 'archive', {
           activeSessionId: viewedSessionIdRef.current,
         });
@@ -2981,22 +3002,28 @@ function ExpandedView({
         const dirtyWorktree =
           (await resolveWorktreeRemovalPreflight(sessionId, session?.deviceLinkDeviceId)) ===
           'dirty';
+        // Keep the existing confirm-state shape for the normal delete flow, then attach
+        // the shared-task scope in a functional update so cancellation still leaves it open.
         setConfirm({ open: true, sessionId, action, dirtyWorktree });
+        if (sharedTaskId) {
+          setConfirm((previous) => ({ ...previous, sharedTaskId }));
+        }
         return;
       }
       await unarchiveSession(sessionId);
     },
-    [runningSessionIds, runSessionAction, unarchiveSession, t],
+    [closeOwnedSharedTask, runningSessionIds, runSessionAction, unarchiveSession, t],
   );
 
   const handleConfirm = useCallback(async () => {
-    const { sessionId, action } = confirm;
+    const { sessionId, action, sharedTaskId } = confirm;
     const session = sessionsById.get(sessionId);
     if (isRemoteSessionWriteBlocked(session)) {
       toast.warning(t('ccAgent.remoteSession.actionsUnavailable'));
       setConfirm(CONFIRM_INITIAL);
       return;
     }
+    if (!(await closeOwnedSharedTask(sharedTaskId))) return;
     // 重定向判定统一用 viewedSessionId(files 路由下 = 被浏览文件的会话,
     // 正常路由下与 activeSessionId 恒等):从面板删除/归档正在浏览的会话时
     // 也要跳离失效的 /cc-agent/files/:id(codex review)。
@@ -3009,7 +3036,7 @@ function ExpandedView({
       deleteRedirectRoute,
     });
     setConfirm(CONFIRM_INITIAL);
-  }, [viewedSessionId, confirm, resolveSessionRemovalRedirect, runSessionAction, sessionsById, t]);
+  }, [closeOwnedSharedTask, viewedSessionId, confirm, resolveSessionRemovalRedirect, runSessionAction, sessionsById, t]);
 
   const handleCancelConfirm = useCallback(() => {
     setConfirm(CONFIRM_INITIAL);
@@ -3594,7 +3621,10 @@ function ExpandedView({
           ) : null}
           {/* 搜索时原列表只隐藏、不卸载:置顶段折叠等本地 state 才能保住。 */}
           <div hidden={searchActive} className="flex flex-col gap-2">
-            <SharedTasksSection activeSessionId={activeSessionId} localSessions={sessions} onSelect={(id) => {
+            <SharedTasksSection activeSessionId={activeSessionId} localSessions={sessions}
+              runningSessionIds={displayRunningSessionIds} attachedSessionIds={attachedSessionIds} notifications={sidebarNotifications}
+              onAction={handleActionClick} onRename={handleRename} onTogglePin={handleTogglePin}
+              onMoveSession={handleMoveSession} projectOptions={projectPickerOptions} onSelect={(id) => {
               clearNotification(id);
               navigate('/cc-agent/' + encodeURIComponent(id));
             }} />

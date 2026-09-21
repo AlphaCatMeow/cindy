@@ -21,6 +21,8 @@ export interface ConfirmDialogProps {
   description?: string;
   /** 可选的标题与正文样式；富内容区与按钮不受影响。 */
   textClassName?: string;
+  /** 可选的正文样式；不改变标题字号。 */
+  descriptionClassName?: string;
   /**
    * 富内容区(如装意识的逐项权限清单):渲染在 description 之后、复选框之前。
    * 与 description 独立 —— Radix Description 是 <p>,块级列表不能塞进去。
@@ -104,6 +106,7 @@ export function ConfirmDialog({
   title,
   description,
   textClassName,
+  descriptionClassName,
   content,
   maxWidth,
   confirmText,
@@ -287,7 +290,7 @@ export function ConfirmDialog({
               >
                 {description && (
                   <AlertDialog.Description
-                    className={cn('text-base text-[var(--confirm-desc)]', textClassName)}
+                    className={cn('text-base text-[var(--confirm-desc)]', textClassName, descriptionClassName)}
                   >
                     {description}
                   </AlertDialog.Description>

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { sharedTaskHostPeer } from '@cindy/device-link';
 import { buildMobileHomePresentation, type MobileHomeSessionLike } from '@/session/mobileHome';
 import { buildHomeScopeMenuItems, buildHomeScopePullDownActions } from '@/session/homeChromeMenus';
@@ -64,12 +66,14 @@ describe('shared Home group', () => {
   it('groups joined and owned tasks, retaining ordinary tasks without duplicates', () => {
     const result = split([session('joined', peer, 'Joined'), session('owner-task', 'desktop', 'My share'), session('normal', 'desktop', 'Normal')]);
     expect(result.rows.map(row => row.item?.session.id).sort()).toEqual(['joined', 'owner-task']);
+    expect(result.rows.find(row => row.item?.session.id === 'joined')?.role).toBe('joined');
+    expect(result.rows.find(row => row.item?.session.id === 'owner-task')?.role).toBe('owned');
     expect(result.home.chats.map(item => item.session.id)).toEqual(['normal']);
     expect((result.rows.find(row => row.item?.session.id === 'joined')?.item?.session as MobileHomeSessionLike).deviceLinkDeviceId).toBe(peer);
   });
 
   it('keeps account-discovered owner tasks visible before their device is controllable', () => {
-    expect(split([]).rows).toEqual([{ key: 'shared:mine', task: own }]);
+    expect(split([]).rows).toEqual([{ key: 'shared:mine', role: 'owned', task: own }]);
     expect(split([], []).rows).toEqual([]);
   });
 
@@ -101,7 +105,7 @@ describe('shared Home group', () => {
 
   it('does not merge a same-ID task on a different host', () => {
     const result = split([session('owner-task', 'other', 'Unrelated')]);
-    expect(result.rows).toEqual([{ key: 'shared:mine', task: own }]);
+    expect(result.rows).toEqual([{ key: 'shared:mine', role: 'owned', task: own }]);
     expect(result.home.chats[0].title).toBe('Unrelated');
   });
 
@@ -109,5 +113,48 @@ describe('shared Home group', () => {
     const result = split([session('owner-task', 'desktop', 'My share')], []);
     expect(result.rows).toEqual([]);
     expect(result.home.chats).toHaveLength(1);
+  });
+
+  it('keeps a joined role when a different host owns a task with the same session ID', () => {
+    const result = split([session('owner-task', peer, 'Joined elsewhere')]);
+    expect(result.rows.map(row => row.role)).toEqual(['joined', 'owned']);
+  });
+
+  it.each(['owned', 'joined'] as const)('keeps a single-role %s group without an extra subgroup', (role) => {
+    const result = role === 'owned'
+      ? split([session('owner-task', 'desktop', 'Mine')])
+      : split([session('joined', peer, 'Joined')], []);
+    expect(result.rows.map(row => row.role)).toEqual([role]);
+    expect(result.home.chats).toEqual([]);
+  });
+});
+
+describe('shared role row wiring', () => {
+  const source = readFileSync(resolve(process.cwd(), 'app/devices/index.tsx'), 'utf8');
+
+  it('adds roles only to the existing shared group and still hides an empty group', () => {
+    expect(source).toContain('ListHeaderComponent={sharedRows.length > 0 ?');
+    expect(source.match(/sharedRole={row.role}/g)).toHaveLength(1);
+    expect(source).toContain('testID="home.sharedOwnerRoleBadge"');
+  });
+
+  it('keeps empty-preview roles in the second line, after existing trailing icons', () => {
+    expect(source).toContain('const showPreviewLine = !!preview?.trim() || showSchedule || showPinned || !!sharedRole;');
+    const row = source.slice(source.indexOf('function HomeSessionRowInner('), source.indexOf('function AutomationGroupChildren('));
+    const badge = row.indexOf('<View style={styles.sharedRoleBadge}');
+    expect(badge).toBeGreaterThan(row.indexOf('<View style={styles.sessionPreviewRow}>'));
+    expect(badge).toBeGreaterThan(row.indexOf('<View style={styles.sessionTrailingIcons}>'));
+    expect(row).toContain("sharedRole === 'owned' ? 'sharedTask.roleOwnedBadge' : 'sharedTask.roleJoinedBadge'");
+  });
+
+  it.each(['en', 'zh-CN', 'zh-TW', 'ja', 'ko'])('provides distinct role copy in %s', (locale) => {
+    const copy = JSON.parse(readFileSync(resolve(process.cwd(), 'src/i18n/locales', locale, 'sharedTask.json'), 'utf8'));
+    expect(copy.roleOwnedBadge).toBeTruthy();
+    expect(copy.roleJoinedBadge).toBeTruthy();
+    expect(copy.roleOwnedBadge).not.toBe(copy.roleJoinedBadge);
+    if (locale === 'zh-CN') {
+      expect(copy.roleOwnedBadge).toBe('我开启');
+      expect(copy.roleJoinedBadge).toBe('已加入');
+    }
   });
 });

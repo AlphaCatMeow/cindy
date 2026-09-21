@@ -71,6 +71,18 @@ it('keeps the C confirmation in one dialog and preserves the invitation on cance
   expect((screen.getByLabelText('sharedTask.joinNickname') as HTMLInputElement).value).toBe('Guest');
   expect(state.account).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'close' }));
 });
+it('returns to the join form from the confirmation close button and preserves the form', async () => {
+  state.account.mockResolvedValue(owned); open();
+  await waitFor(() => expect((screen.getByRole('button', { name: 'sharedTask.closeAllShort' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('sharedTask.invitation'), { target: { value: 'A'.repeat(43) } });
+  fireEvent.change(screen.getByLabelText('sharedTask.joinNickname'), { target: { value: 'Guest' } });
+  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllShort' }));
+  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllCancel' }));
+  expect((screen.getByLabelText('sharedTask.invitation') as HTMLTextAreaElement).value).toBe('A'.repeat(43));
+  expect((screen.getByLabelText('sharedTask.joinNickname') as HTMLInputElement).value).toBe('Guest');
+  expect(screen.getByRole('button', { name: 'sharedTask.closeAllShort' })).toBeTruthy();
+  expect(state.account).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'close' }));
+});
 
 it('closes only confirmed owned tasks and retries just the failed task', async () => {
   let secondAttempt = false;
@@ -82,10 +94,10 @@ it('closes only confirmed owned tasks and retries just the failed task', async (
   open();
   await waitFor(() => expect((screen.getByRole('button', { name: 'sharedTask.closeAllShort' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllShort' }));
-  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllAction' }));
+  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllJoinAction' }));
   await waitFor(() => expect(screen.queryByText('First owned task')).toBeNull());
   expect(screen.getByText('Other computer task')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllAction' }));
+  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllJoinAction' }));
   await waitFor(() => expect(screen.queryByText('sharedTask.closeAllTitle')).toBeNull());
   const closes = state.account.mock.calls.map(([command]) => command).filter(command => command.action === 'close');
   expect(closes).toEqual([
@@ -99,7 +111,7 @@ it('stops the batch after an account change and ignores its late result', async 
   open();
   await waitFor(() => expect((screen.getByRole('button', { name: 'sharedTask.closeAllShort' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllShort' }));
-  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllAction' }));
+  fireEvent.click(screen.getByRole('button', { name: 'sharedTask.closeAllJoinAction' }));
   await act(async () => {
     setDataOwnerGeneration('another-account');
     finish({ closed: ['own-1'], failed: [] });

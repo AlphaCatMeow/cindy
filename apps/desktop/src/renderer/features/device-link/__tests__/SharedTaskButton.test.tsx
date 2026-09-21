@@ -105,7 +105,9 @@ it.each([false, true])('refreshes members after an already-left removal complete
   await waitFor(() => expect(body.textContent).not.toContain('Departing Guest'));
   expect(body.textContent).toContain('Remaining Guest');
   expect(within(body).queryByRole('button', { name: 'sharedTask.remove' })).toBeNull();
-  expect(within(body).getByRole('button', { name: 'sharedTask.closeCurrent' })).toBeDefined();
+  const closeCurrent = within(body).getByRole('button', { name: 'sharedTask.closeCurrent' });
+  expect(closeCurrent).toBeDefined();
+  expect(closeCurrent.className).toContain('w-full');
   expect(command).toHaveBeenCalledWith({ action: 'remove', sharedTaskId: 'st1', memberId: 'left' });
   expect(toast.error).not.toHaveBeenCalled();
 });
@@ -140,6 +142,7 @@ it('lists owned shares and routes close-all through the account command', async 
   const confirmation = within(body).getByRole('alertdialog');
   expect(confirmation.contains(document.activeElement)).toBe(true);
   expect(document.activeElement?.textContent).toBe('sharedTask.closeAllKeep');
+  expect(within(confirmation).getByText('sharedTask.closeAllBody').className).toContain('text-13');
   expect(within(confirmation).getAllByRole('button').map((button) => button.textContent)).toEqual([
     'sharedTask.closeAllKeep', 'sharedTask.closeAllAction',
   ]);
@@ -178,4 +181,13 @@ it('shows the host-offline ending for a guest whose share closed', async () => {
   await waitFor(() => expect(body.textContent).toContain('sharedTask.hostOfflineTitle'));
   expect(body.textContent).toContain('sharedTask.hostOfflineBody');
   expect(body.textContent).not.toContain('sharedTask.leave');
+});
+it('does not offer to enter a guest task that is already open', async () => {
+  state.account.mockImplementation((command: { action: string }) => command.action === 'get'
+    ? Promise.resolve(detail)
+    : Promise.resolve([]));
+  const body = await openWindow({ id: 'session-1', deviceLinkDeviceId: sharedTaskHostPeer('st1', 'desktop') } as Session);
+  await waitFor(() => expect(body.textContent).toContain('sharedTask.joinedTitle'));
+  expect(within(body).queryByRole('button', { name: 'sharedTask.enterTask' })).toBeNull();
+  expect(within(body).getByRole('button', { name: 'sharedTask.leave' })).toBeDefined();
 });

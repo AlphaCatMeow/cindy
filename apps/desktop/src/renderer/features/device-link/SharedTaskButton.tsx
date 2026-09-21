@@ -172,7 +172,6 @@ export function SharedTaskButton({ session }: { session: Session }) {
         {emptyIcon(<Check size={18} aria-hidden />)}
         <h3 className="break-words text-14 font-medium">{t('sharedTask.joinedTitle', { title: detail.title })}</h3>
         <p className="mx-auto mb-5 mt-2 max-w-[280px] text-12 text-[var(--text-secondary)]">{t('sharedTask.joinedBody')}</p>
-        <Button variant="cta" size="lg" onClick={() => setOpen(false)}>{t('sharedTask.enterTask')}</Button>
       </div>
       <div className="border-t border-[var(--border-default)] pt-4"><Button variant="secondary" size="lg" disabled={busy} className="w-full text-[var(--error-fg)]"
         onClick={() => setConfirm({ kind: 'leave' })}>{t('sharedTask.leave')}</Button></div>
@@ -202,7 +201,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
         </div>;
       })}
       <div className={noticeClass}><Clock size={16} className="mt-0.5 shrink-0" aria-hidden /><p>{t(session.deviceLinkDeviceId ? 'sharedTask.remoteHostOfflineNote' : 'sharedTask.hostOfflineNote')}</p></div>
-      <div className="mt-5"><Button variant="secondary" size="lg" disabled={busy} className="text-[var(--error-fg)]"
+      <div className="mt-5"><Button variant="secondary" size="lg" disabled={busy} className="w-full px-4 text-[var(--error-fg)]"
         onClick={() => setConfirm({ kind: 'closeCurrent' })}>{t('sharedTask.closeCurrent')}</Button></div>
     </>
     : <div className="px-1 py-6 text-center">
@@ -220,18 +219,22 @@ export function SharedTaskButton({ session }: { session: Session }) {
     </div>
     : <>
       <p className="mb-4 text-[var(--text-secondary)]">{t('sharedTask.ownedIntro', { count: owned.length })}</p>
-      {owned.map((item) => <div key={item.sharedTaskId} className="my-2.5 flex items-center gap-2.5 rounded-lg border border-[var(--border-default)] p-3">
-        <Users size={18} className="shrink-0" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-13 font-medium">{item.title}</div>
-          <div className="text-11 text-[var(--text-secondary)]">{item.local ? t('sharedTask.thisDevice') : t('sharedTask.otherDevice')}
-            {item.sharedTaskId === detail?.sharedTaskId && <> · {t('sharedTask.guestCount', { count: detail.guests.length })}</>}
+      <div className="my-4 overflow-hidden rounded-xl border border-[var(--border-default)]">
+        {owned.map((item, index) => <div key={item.sharedTaskId} className={index
+          ? 'flex items-center gap-2.5 border-t border-[var(--border-default)] p-3'
+          : 'flex items-center gap-2.5 p-3'}>
+          <Users size={18} className="shrink-0" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-13 font-medium">{item.title}</div>
+            <div className="text-12 text-[var(--text-secondary)]">{item.local ? t('sharedTask.thisDevice') : t('sharedTask.otherDevice')}
+              {item.sharedTaskId === detail?.sharedTaskId && <> · {t('sharedTask.guestCount', { count: detail.guests.length })}</>}
+            </div>
           </div>
-        </div>
-        {item.sessionId === session.id && item.hostDeviceId === detail?.hostDeviceId
-          ? <Button variant="secondary" disabled={busy} className="px-3 text-12" onClick={() => switchTab('current')}>{t('sharedTask.manage')}</Button>
-          : <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-11 text-[var(--text-secondary)]">{t('sharedTask.sharingBadge')}</span>}
-      </div>)}
+          {item.sessionId === session.id && item.hostDeviceId === detail?.hostDeviceId
+            ? <Button variant="secondary" disabled={busy} className="px-3 text-12" onClick={() => switchTab('current')}>{t('sharedTask.manage')}</Button>
+            : <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-11 text-[var(--text-secondary)]">{t('sharedTask.sharingBadge')}</span>}
+        </div>)}
+      </div>
       <div className="mt-4 border-t border-[var(--border-default)] pt-4 text-12 text-[var(--text-secondary)]">{t('sharedTask.closeAllNote')}</div>
       <div className="mt-5"><Button variant="secondary" size="lg" disabled={busy} className="w-full gap-2 text-[var(--error-fg)]"
         onClick={() => setConfirm({ kind: 'closeAll' })}><CircleStop size={18} aria-hidden />{t('sharedTask.closeAll', { count: owned.length })}</Button></div>
@@ -263,7 +266,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
           <div className="text-13">{tab === 'current' ? currentTab : ownedTab}</div>
           <ConfirmDialog presentation="standard" cancelFirst open={!!confirmation} onOpenChange={(next) => { if (!next && !pending.current) setConfirm(null); }}
             title={confirmation?.title ?? ''} description={confirmation?.body} cancelText={confirmation?.keep} confirmText={confirmation?.action}
-            confirmVariant="destructive" loading={busy} zIndex={10002} maxWidth={440} onConfirm={confirmation?.run}
+            confirmVariant="destructive" descriptionClassName="text-13" loading={busy} zIndex={10002} maxWidth={440} onConfirm={confirmation?.run}
             content={confirm?.kind === 'closeAll' ? <>
               <div className="space-y-2 rounded-lg bg-[var(--surface-chip)] p-3 text-12">
                 {(owned ?? []).map((item) => <div key={item.sharedTaskId} className="break-words">{item.title} <span className="text-[var(--text-secondary)]">· {item.local ? t('sharedTask.thisDevice') : t('sharedTask.otherDevice')}</span></div>)}

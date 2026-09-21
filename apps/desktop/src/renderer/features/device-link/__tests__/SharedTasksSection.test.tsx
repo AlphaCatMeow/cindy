@@ -5,7 +5,20 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SharedTasksSection } from '../SharedTasksSection';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import type { Session } from '@/lib/ccAgent.types';
-const state = vi.hoisted(() => ({ sessions: [] as Session[], account: vi.fn(), openLink: vi.fn(), pin: vi.fn() }));
+const state = vi.hoisted(() => ({ sessions: [] as Session[], account: vi.fn(), openLink: vi.fn(), pin: vi.fn(), row: vi.fn(), mode: 'list' as 'list' | 'text' }));
+vi.mock('@/hooks/useSidebarCardMode', () => ({ useSidebarMainViewMode: () => ({ mode: state.mode }) }));
+vi.mock('@/features/cc-agent/sidebar/SessionCard', () => ({
+  SessionCard: (props: { session: Session; onClick(): void }) => {
+    state.row(props);
+    return <button data-testid="ordinary-list-row" onClick={props.onClick}>{props.session.title}<span>{props.session.preview}</span></button>;
+  },
+}));
+vi.mock('@/features/cc-agent/sidebar/SessionItem', () => ({
+  SessionItem: (props: { session: Session; onClick(): void }) => {
+    state.row(props);
+    return <button data-testid="ordinary-text-row" onClick={props.onClick}>{props.session.title}</button>;
+  },
+}));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, args?: { count?: number }) => key + (args?.count === undefined ? '' : ':' + args.count) }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ dataOwnerId: 'guest', isAuthenticated: true }) }));
 vi.mock('../JoinSharedTaskDialog', () => ({ JoinSharedTaskDialog: () => null }));
@@ -17,11 +30,68 @@ vi.mock('../remoteProjectsStore', () => ({
 const guestTask = { id: 'joined-1', title: 'Joined task', deviceLinkDeviceId: sharedTaskHostPeer('share-1', 'desktop') } as Session;
 beforeEach(() => {
   vi.clearAllMocks(); setDataOwnerGeneration('guest');
+  state.mode = 'list';
   state.sessions = [guestTask, { id: 'own-device-task', title: 'Own device task', deviceLinkDeviceId: 'my-computer' } as Session];
   state.account.mockResolvedValue([]);
   Object.assign(window, { electronAPI: { sharedTask: { account: state.account }, deviceLink: { openLink: state.openLink } } });
 });
 afterEach(cleanup);
+it('uses the ordinary list row with the joined session preview and live status props', async () => {
+  const session = { ...guestTask, preview: 'Latest shared message', agentKind: 'codex' } as Session;
+  state.sessions = [session];
+  render(<SharedTasksSection onSelect={vi.fn()} runningSessionIds={new Set([session.id])} attachedSessionIds={new Set([session.id])} notifications={new Set([session.id])} />);
+  await act(async () => {});
+  expect(screen.getByTestId('ordinary-list-row').textContent).toContain(session.preview);
+  expect(state.row).toHaveBeenLastCalledWith(expect.objectContaining({
+    session, navigationOnly: true, variant: 'list', isRunning: true, isAttached: true, hasAttentionNotification: true,
+  }));
+  expect(screen.queryByText('sharedTask.title')).toBeNull();
+});
+it('uses the local session title and preview instead of device labels and follows the ordinary text mode', async () => {
+  state.sessions = [];
+  const session = { id: 'host-task', title: 'Current title', preview: 'Latest local message' } as Session;
+  state.account.mockResolvedValue([{ sharedTaskId: 'owned-1', sessionId: session.id, local: true, title: 'Old title' }]);
+  const onAction = vi.fn();
+  const onRename = vi.fn();
+  const onTogglePin = vi.fn();
+  const { rerender } = render(<SharedTasksSection localSessions={[session]} onAction={onAction} onRename={onRename} onTogglePin={onTogglePin} onSelect={vi.fn()} />);
+  expect(await screen.findByTestId('ordinary-list-row')).toBeTruthy();
+  expect(screen.getByText(session.preview!)).toBeTruthy();
+  expect(screen.queryByText('sharedTask.thisDevice')).toBeNull();
+  expect(screen.queryByText('Old title')).toBeNull();
+  state.mode = 'text';
+  rerender(<SharedTasksSection localSessions={[session]} onAction={onAction} onRename={onRename} onTogglePin={onTogglePin} onSelect={vi.fn()} />);
+  expect(screen.getByTestId('ordinary-text-row')).toBeTruthy();
+  expect(screen.queryByTestId('ordinary-list-row')).toBeNull();
+  expect(state.row).toHaveBeenLastCalledWith(expect.objectContaining({ navigationOnly: false }));
+  state.row.mock.lastCall?.[0].onAction(session.id, 'archive');
+  expect(onAction).toHaveBeenCalledWith(session.id, 'archive', 'owned-1');
+  state.row.mock.lastCall?.[0].onRename(session.id, 'Renamed');
+  state.row.mock.lastCall?.[0].onTogglePin(session.id, false);
+  expect(onRename).toHaveBeenCalledWith(session.id, 'Renamed');
+  expect(onTogglePin).toHaveBeenCalledWith(session.id, false);
+});
+it('keeps undiscovered host tasks navigable and only hydrates from the matching host mirror', async () => {
+  const item = { sharedTaskId: 'owned-1', sessionId: 'host-task', hostDeviceId: 'other-pc', local: false, title: 'Hosted task' };
+  state.account.mockResolvedValue([item]);
+  state.sessions = [{ id: item.sessionId, title: 'Wrong host', preview: 'Wrong preview', deviceLinkDeviceId: 'unrelated-pc' } as Session];
+  state.openLink.mockResolvedValue(undefined);
+  const select = vi.fn();
+  const { rerender } = render(<SharedTasksSection onSelect={select} />);
+  const fallback = await screen.findByRole('button', { name: item.title });
+  expect(screen.queryByTestId('ordinary-list-row')).toBeNull();
+  expect(screen.queryByText('sharedTask.otherDevice')).toBeNull();
+  expect(screen.queryByText('Wrong preview')).toBeNull();
+  fireEvent.click(fallback);
+  await waitFor(() => expect(select).toHaveBeenCalledWith(item.sessionId));
+  expect(state.openLink).toHaveBeenCalledWith(item.hostDeviceId);
+  state.sessions = [{ id: item.sessionId, title: item.title, preview: 'Host preview', deviceLinkDeviceId: item.hostDeviceId } as Session];
+  rerender(<SharedTasksSection onSelect={select} />);
+  expect(screen.getByTestId('ordinary-list-row').textContent).toContain('Host preview');
+  fireEvent.click(screen.getByTestId('ordinary-list-row'));
+  await act(async () => {});
+  expect(state.openLink).toHaveBeenCalledTimes(1);
+});
 it.each(['owned', 'joined'] as const)('suppresses context menus within the %s group without changing left-click actions or sidebar blank space', async (role) => {
   if (role === 'owned') {
     state.sessions = [];
