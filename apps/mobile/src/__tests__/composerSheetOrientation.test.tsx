@@ -18,7 +18,7 @@ vi.mock('@expo/ui/swift-ui', () => {
   };
 });
 vi.mock('@expo/ui/swift-ui/modifiers', () => ({
-  ...Object.fromEntries(['accessibilityLabel', 'contentShape', 'buttonStyle', 'font', 'foregroundStyle', 'frame', 'padding', 'presentationDetents', 'presentationDragIndicator', 'scrollContentBackground'].map(name => [name, vi.fn(() => ({}))])),
+  ...Object.fromEntries(['accessibilityLabel', 'contentShape', 'buttonStyle', 'font', 'foregroundStyle', 'frame', 'padding', 'presentationDetents', 'presentationDragIndicator', 'interactiveDismissDisabled', 'scrollContentBackground'].map(name => [name, vi.fn(() => ({}))])),
   shapes: { rectangle: () => ({}) },
 }));
 vi.mock('@/theme', () => ({ iconSize: { lg: 20 }, useTheme: () => ({ mode: 'light', colors: {} }) }));

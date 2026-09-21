@@ -1,3 +1,4 @@
+import type { HomeMode } from './homeViewPreferenceStore';
 import { TaskTagDots } from '@/session/TaskTags';
 import { ResidentHomeList, useResidentHomeList } from './ResidentHomeList';
 import { HomeNewTaskButton } from './HomeNewTaskButton';
@@ -360,6 +361,8 @@ class HomeSyncScopeSupersededError extends Error {
 }
 
 export interface MobileHomeProps {
+  active?: boolean;
+  onModeChange?(mode: HomeMode): void;
   /** The same Home surface, constrained by its host rather than the screen width. */
   width?: number;
   currentSessionId?: string;
@@ -374,14 +377,14 @@ const ActiveHomeSession = createContext<string | undefined>(undefined);
 export function MobileHome(props: MobileHomeProps) {
   const screenFocused = useIsFocused();
   const { accountGeneration } = useAuth();
-  return <RemoteSessionStoreSubscriptionGate enabled={screenFocused}>
+  return <RemoteSessionStoreSubscriptionGate enabled={screenFocused && props.active !== false}>
     <ActiveHomeSession.Provider value={props.currentSessionId}>
       <HomeScreenContent key={accountGeneration} {...props} />
     </ActiveHomeSession.Provider>
   </RemoteSessionStoreSubscriptionGate>;
 }
 
-function HomeScreenContent({ width, onDismiss, newSessionInSystemBar = false, onSelectSession, runNavigation, newSessionActionRef }: MobileHomeProps) {
+function HomeScreenContent({ active = true, onModeChange, width, onDismiss, newSessionInSystemBar = false, onSelectSession, runNavigation, newSessionActionRef }: MobileHomeProps) {
   const ownedSharedTasks = useSharedTasks();
   const [sharedCollapsed, setSharedCollapsed] = useState(false);
   // The retained page and its visible sidebar must never release each other's subscriptions.
@@ -392,7 +395,8 @@ function HomeScreenContent({ width, onDismiss, newSessionInSystemBar = false, on
   const rememberTask = rememberRecentTask;
   const viewSession = getHomeViewSession();
   const [restoredView] = useState(() => viewSession.has('preferencesHydrated'));
-  const screenFocused = useIsFocused();
+  const routeFocused = useIsFocused();
+  const screenFocused = routeFocused && active;
   const screenFocusedRef = useRef(screenFocused);
   screenFocusedRef.current = screenFocused;
   const styles = useThemedStyles(makeStyles);
@@ -2780,7 +2784,7 @@ function HomeScreenContent({ width, onDismiss, newSessionInSystemBar = false, on
       testID="devices.screen"
     >
       {nativeHomeHeader ? <SessionHeaderNativeBlur height={nativeHeaderHeight + spacing.xxl} /> : null}
-      {nativeHomeHeader ? (
+      {nativeHomeHeader && active ? (
         <HomeNativeStackHeader
           keepMenuTopLeft={keepMenuTopLeft}
           syncing={quietSyncing}
@@ -2975,6 +2979,12 @@ function HomeScreenContent({ width, onDismiss, newSessionInSystemBar = false, on
         visible={deviceMenuOpen}
       />
       <HomeChromeDrawer
+        mode="tasks"
+        onModeChange={onModeChange ? (next) => {
+          pendingMenuActionRef.current = () => onModeChange(next);
+          setChromeMenuCloseInstant(false);
+          setChromeMenuOpen(false);
+        } : undefined}
         closeInstant={chromeMenuCloseInstant}
         loggingOut={loggingOut}
         onClose={() => {
