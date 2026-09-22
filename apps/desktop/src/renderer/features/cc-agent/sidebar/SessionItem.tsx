@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 /**
  * SessionItem — 单条 CCS 会话行
  * ---------------------------------------------------------------------------
@@ -1131,7 +1132,11 @@ export const SessionItem = memo(function SessionItem({
               </span>
             )}
             {canQuickArchive && archivePending && (
-              <button
+              <Button
+                variant="secondary"
+                tone="danger-surface"
+                size="xs"
+                compact
                 ref={confirmPillRef}
                 type="button"
                 onClick={(e) => {
@@ -1141,15 +1146,11 @@ export const SessionItem = memo(function SessionItem({
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
-                className={cn(
-                  'absolute right-0 top-0 flex h-6 w-14 items-center justify-center rounded-md text-xs font-medium',
-                  'bg-[color-mix(in_srgb,hsl(var(--destructive))_15%,transparent)] text-[hsl(var(--destructive))] hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_25%,transparent)]',
-                  'transition-colors focus:outline-none',
-                )}
+                className="absolute right-0 top-0 w-14"
                 aria-label={t('ccAgent.sidebar.sessionMenu.archived')}
               >
                 {t('ccAgent.sidebar.sessionMenu.archived')}
-              </button>
+              </Button>
             )}
             {/* Action 按钮组（hover/menu open 时浮现，archivePending 期间整组让位给红色 pill）。
               尺寸/视觉与 Project Header 的 ProjectAction 同套（size-5 / icon 14 /

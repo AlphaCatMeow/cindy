@@ -611,7 +611,7 @@ export function MakeDoctorReportCard({
               </Button>
               <Button
                 variant="primary"
-                className="border-[var(--border-default)] enabled:hover:border-[var(--button-primary-hover)] enabled:active:border-[var(--button-primary-pressed)]"
+                className="[--button-face-border:var(--border-default)] enabled:hover:[--button-face-border:var(--button-primary-hover)] enabled:active:[--button-face-border:var(--button-primary-pressed)]"
                 disabled={!onChoose}
                 onClick={() => onChoose?.('personal')}
               >

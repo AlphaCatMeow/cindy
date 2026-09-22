@@ -299,7 +299,8 @@ describe('PlanChangeTargetDialog product-first selection', () => {
     const submitButton = screen
       .getByText('billing.settings.subscriptionCard.changeAction')
       .closest('button')!;
-    expect(submitButton.className).toContain('bg-[var(--accent-cta-bg)]');
+    expect(submitButton.className).toContain('cindy-button');
+    expect(submitButton.className).toContain('[--button-face-bg:var(--accent-cta-bg-pure)]');
     expect(submitButton.className).toContain('text-[var(--accent-pure-cta-fg)]');
 
     fireEvent.click(secondOffer);

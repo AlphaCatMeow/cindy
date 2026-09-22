@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 /**
  * SkillhubHomeView — 技能(SkillHub)首页,/skillhub/local index。
  *
@@ -262,25 +263,20 @@ export function SkillhubHomeView({
       clearSearchLabel={t('skillhub.home.clearSearch')}
       embedded={embedded}
       onSelectTab={onSelectCatalogTab}
-      headerActions={(
-        <button
+      headerActions={
+        <Button
+          variant="secondary"
+          size="lg"
+          loading={importBusy}
           type="button"
           onClick={() => void handleImportSkill()}
           disabled={importBusy}
-          className={cn(
-            'plugin-management-action-trigger inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-[var(--border-default)]',
-            'bg-[var(--surface-elevated)] px-3.5 text-12 font-medium text-[var(--text-primary)] shadow-[var(--plugin-card-shadow)]',
-            'transition-[background-color,border-color,transform] duration-150 ease-out',
-            'hover:border-[var(--text-tertiary)] hover:bg-[var(--surface-hover-soft)] active:scale-[0.98]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-          )}
           aria-label={t('skillhub.home.importAria')}
+          className="plugin-management-action-trigger shrink-0 shadow-[var(--plugin-card-shadow)]"
         >
           <Upload size={14} strokeWidth={1.8} aria-hidden="true" />
           <span className="plugin-management-action-label">{t('skillhub.home.import')}</span>
-        </button>
-      )}
+        </Button>}
     >
       <div
         className={cn(
@@ -388,22 +384,16 @@ export function SkillhubHomeView({
                     ))}
                     {marketResponseCurrent && marketHasMore ? (
                       <div className="col-span-full flex justify-center pt-1">
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          loading={marketLoadingMore}
                           type="button"
                           disabled={marketLoadingMore}
                           onClick={() => void loadMoreMarket()}
-                          className={cn(
-                            'inline-flex min-h-9 items-center justify-center rounded-full border border-[var(--border-default)]',
-                            'bg-[var(--surface-elevated)] px-5 text-12 font-medium text-[var(--text-secondary)]',
-                            'transition-colors duration-150 hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
-                            'disabled:cursor-wait disabled:opacity-60',
-                          )}
                         >
-                          {marketLoadingMore
-                            ? t('skillhub.home.loadingMore')
-                            : t('skillhub.home.loadMore')}
-                        </button>
+                          {t('skillhub.home.loadMore')}
+                        </Button>
                       </div>
                     ) : null}
                   </div>

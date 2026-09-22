@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
@@ -220,14 +221,16 @@ export function BillingCheckoutDialog({
                   <ExternalLink size={22} />
                 </div>
                 <p className="mt-4 text-sm font-medium">{t('billing.checkout.redirectHint')}</p>
-                <button
+                <Button
+                    variant="cta"
+                    size="lg"
                   type="button"
                   onClick={openRedirect}
-                  className="mt-5 inline-flex h-9 items-center gap-2 rounded-full bg-[var(--text-primary)] px-5 text-sm font-medium text-[var(--surface)]"
+                  className="mt-5"
                 >
                   <ExternalLink size={14} />
                   {t('billing.checkout.openPayment')}
-                </button>
+                </Button>
               </>
             )}
 
@@ -272,33 +275,30 @@ export function BillingCheckoutDialog({
           <div className="flex min-h-16 items-center justify-end gap-3 border-t border-[var(--border-default)] px-6 py-3">
             <div className="flex items-center gap-2">
               {state.phase === 'AWAITING_PAYMENT' && (
-                <button
+                <Button variant="secondary" size="lg"
                   type="button"
                   onClick={onRefresh}
-                  className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--border-default)] px-4 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
                 >
                   <RotateCcw size={14} />
                   {t('billing.actions.refresh')}
-                </button>
+                </Button>
               )}
               {(state.phase === 'FAILED' || state.phase === 'EXPIRED') && canRetry && (
-                <button
+                <Button variant="cta" size="lg"
                   type="button"
                   onClick={onRetry}
-                  className="inline-flex h-9 items-center gap-2 rounded-full bg-[var(--text-primary)] px-4 text-12 font-medium text-[var(--surface)]"
                 >
                   <RotateCcw size={14} />
                   {t('billing.actions.retry')}
-                </button>
+                </Button>
               )}
               {isTerminalPhase(state.phase) && (
-                <button
+                <Button variant="secondary" size="lg"
                   type="button"
                   onClick={onClose}
-                  className="h-9 rounded-full border border-[var(--border-default)] px-4 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
                 >
                   {t('billing.actions.close')}
-                </button>
+                </Button>
               )}
             </div>
           </div>

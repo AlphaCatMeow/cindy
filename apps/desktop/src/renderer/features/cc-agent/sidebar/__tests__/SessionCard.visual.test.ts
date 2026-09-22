@@ -748,7 +748,7 @@ describe('SessionCard visual cases', () => {
       expect(confirmPill.className).toContain('min-w-14');
       expect(confirmPill.className).toContain('whitespace-nowrap');
       expect(confirmPill.className).toContain('var(--surface-elevated)');
-      expect(confirmPill.className).not.toContain('transparent');
+      expect(confirmPill.className).not.toContain('[--button-face-bg:transparent]');
       if (variant === 'list') {
         // 让位容器是 time 最近的 div 祖先(time 嵌在 SessionInfoMeta span 内)。
         expect(container.querySelector('time')?.closest('div')?.className).toContain('invisible');

@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 /**
  * SessionCard — sidebar-card-mode 下的单条会话卡片（SessionItem 的瀑布流形态）
  * ---------------------------------------------------------------------------
@@ -908,7 +909,11 @@ export const SessionCard = memo(function SessionCard({
             </div>
           )}
           {canQuickArchive && archivePending && (
-            <button
+            <Button
+              variant="secondary"
+              tone="danger-surface"
+              size="xxs"
+              compact
               ref={confirmPillRef}
               type="button"
               onClick={(e) => {
@@ -918,17 +923,11 @@ export const SessionCard = memo(function SessionCard({
               }}
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
-              className={cn(
-                'absolute right-[6px] top-[6px] z-20 flex h-[22px] w-max min-w-14 items-center justify-center rounded-full px-[9px]',
-                'whitespace-nowrap text-11 font-semibold',
-                'bg-[color-mix(in_srgb,hsl(var(--destructive))_15%,var(--surface-elevated))] text-[hsl(var(--destructive))]',
-                'hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_25%,var(--surface-elevated))]',
-                'transition-colors focus:outline-none',
-              )}
+              className="absolute right-[6px] top-[6px] z-20 w-max min-w-14 whitespace-nowrap"
               aria-label={t('ccAgent.sidebar.sessionMenu.archived')}
             >
               {t('ccAgent.sidebar.sessionMenu.archived')}
-            </button>
+            </Button>
           )}
 
           {/* 卡片标题始终保留原来的流式盒子；编辑时只把原标题隐藏，并以绝对定位的
@@ -1269,7 +1268,11 @@ function TimeActionsSlot({
           </span>
         ) : null}
         {canQuickArchive && archivePending && (
-          <button
+          <Button
+            variant="secondary"
+            tone="danger-surface"
+            size="xxs"
+            compact
             ref={confirmPillRef}
             type="button"
             onClick={(e) => {
@@ -1279,17 +1282,11 @@ function TimeActionsSlot({
             }}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className={cn(
-              'absolute right-0 top-1/2 z-20 flex h-[22px] w-max min-w-14 -translate-y-1/2 items-center justify-center rounded-full px-[9px]',
-              'whitespace-nowrap text-11 font-semibold',
-              'bg-[color-mix(in_srgb,hsl(var(--destructive))_15%,var(--surface-elevated))] text-[hsl(var(--destructive))]',
-              'hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_25%,var(--surface-elevated))]',
-              'transition-colors focus:outline-none',
-            )}
+            className="absolute right-0 top-1/2 z-20 w-max min-w-14 -translate-y-1/2 whitespace-nowrap"
             aria-label={t('ccAgent.sidebar.sessionMenu.archived')}
           >
             {t('ccAgent.sidebar.sessionMenu.archived')}
-          </button>
+          </Button>
         )}
 
         {!archivePending && (

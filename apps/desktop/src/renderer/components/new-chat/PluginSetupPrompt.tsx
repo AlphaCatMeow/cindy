@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { AlertCircle, Check, Circle, ExternalLink, LoaderCircle } from 'lucide-react';
 import { useEffect, useId, useState, type ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -325,19 +326,18 @@ function PluginSetupPromptStateful({
             )}
           />
           {showSubmit ? (
-            <button
+            <Button
+              variant="cta"
+              palette="confirmation"
+              size="lg"
+              compact
+              loading={busy}
               type="button"
               disabled={remote || busy || context.missing || context.tooLong}
               onClick={() => submitStepAction(step)}
-              className={cn(
-                'h-9 shrink-0 rounded-[9999px] px-4 text-13 font-medium transition-colors',
-                remote || busy || context.missing || context.tooLong
-                  ? 'cursor-not-allowed border border-[var(--border-default)] bg-transparent text-[var(--text-disabled-tertiary)] opacity-60'
-                  : 'border border-transparent bg-[var(--confirm-btn-primary-bg)] text-[var(--confirm-btn-primary-text)] hover:bg-[var(--confirm-btn-primary-hover)]',
-              )}
             >
               {actionLabel(step)}
-            </button>
+            </Button>
           ) : null}
         </div>
         {context.error || context.visibleDescription || (field.externalLink && !remote) ? (
@@ -395,24 +395,26 @@ function PluginSetupPromptStateful({
 
   const footer = (
     <div className="flex flex-wrap items-center gap-2">
-      {compact && pending.reopenActionId && !terminal && !remote ? <button type="button"
-        disabled={!!commandInFlight} onClick={() => onCommand(pending.requestId, 'run_action', pending.reopenActionId)}
-        className="h-9 rounded-[9999px] border border-[var(--border-default)] px-4 text-13 text-[var(--text-primary)] disabled:opacity-50">
-        {t('newChat.pluginSetup.reopen')}
-      </button> : null}
+      {compact && pending.reopenActionId && !terminal && !remote ? <Button
+                                                                     variant="secondary"
+                                                                     size="lg"
+                                                                     compact
+                                                                     type="button"
+                                                                     disabled={!!commandInFlight}
+                                                                     onClick={() => onCommand(pending.requestId, 'run_action', pending.reopenActionId)}
+                                                                   >
+                                                                     {t('newChat.pluginSetup.reopen')}
+                                                                   </Button> : null}
       {currentStep?.action && !terminal && !hasCurrentGroupAlternatives ? (
-        <button
+        <Button
+          variant="cta"
+          palette="confirmation"
+          size="lg"
+          compact
+          loading={busy}
           type="button"
-          disabled={
-            remote || busy || (!!inlineFormAction && (formValueMissing || formValueTooLong))
-          }
+          disabled={remote || busy || (!!inlineFormAction && (formValueMissing || formValueTooLong))}
           onClick={submitCurrentAction}
-          className={cn(
-            'h-9 rounded-[9999px] px-[18px] text-13 font-medium transition-colors',
-            remote || busy || (!!inlineFormAction && (formValueMissing || formValueTooLong))
-              ? 'cursor-not-allowed border border-[var(--border-default)] bg-transparent text-[var(--text-disabled-tertiary)] opacity-60'
-              : 'border border-transparent bg-[var(--confirm-btn-primary-bg)] text-[var(--confirm-btn-primary-text)] hover:bg-[var(--confirm-btn-primary-hover)]',
-          )}
         >
           <span className="flex items-center gap-[7px]">
             {busy ? (
@@ -422,22 +424,20 @@ function PluginSetupPromptStateful({
             ) : null}
             {actionLabel()}
           </span>
-        </button>
+        </Button>
       ) : null}
       {!terminal ? (
-        <button
+        <Button
+          variant="secondary"
+          palette="confirmation"
+          size="lg"
+          compact
           type="button"
           disabled={!!commandInFlight}
           onClick={cancelSetup}
-          className={cn(
-            'h-9 rounded-[9999px] border border-[var(--confirm-btn-secondary-border)] bg-transparent px-[18px] text-13 font-medium text-[var(--confirm-btn-secondary-text)] transition-colors',
-            commandInFlight
-              ? 'cursor-not-allowed opacity-50'
-              : 'hover:bg-[var(--confirm-btn-secondary-hover)]',
-          )}
         >
           {t('newChat.pluginSetup.cancel')}
-        </button>
+        </Button>
       ) : null}
     </div>
   );
@@ -588,19 +588,19 @@ function PluginSetupPromptStateful({
                         </div>
                       ) : null}
                       {directActionOption ? (
-                        <button
+                        <Button
+                          variant="cta"
+                          palette="confirmation"
+                          size="lg"
+                          compact
+                          loading={busy}
                           type="button"
                           disabled={remote || busy || terminal}
                           onClick={() => submitStepAction(step)}
-                          className={cn(
-                            'mt-2 h-9 rounded-[9999px] px-4 text-13 font-medium transition-colors',
-                            remote || busy || terminal
-                              ? 'cursor-not-allowed border border-[var(--border-default)] bg-transparent text-[var(--text-disabled-tertiary)] opacity-60'
-                              : 'border border-transparent bg-[var(--confirm-btn-primary-bg)] text-[var(--confirm-btn-primary-text)] hover:bg-[var(--confirm-btn-primary-hover)]',
-                          )}
+                          className="mt-2"
                         >
                           {actionLabel(step)}
-                        </button>
+                        </Button>
                       ) : null}
                       {errorMessage ? (
                         <p className="mt-1 text-13 leading-5 text-[var(--error-fg)]">
