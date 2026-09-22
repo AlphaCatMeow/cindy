@@ -127,8 +127,13 @@ function publishDataOwnerGeneration(
   options?: { finalizeSessions?: boolean },
 ): void {
   const previousOwnerId = getDataOwnerGeneration().dataOwnerId;
-  if (previousOwnerId !== dataOwnerId) {
+  const ownerChanged = previousOwnerId !== dataOwnerId;
+  if (ownerChanged) {
     resetTaskTagCatalogCache();
+  }
+  // The pre-commit fence may already publish null. A committed owner change
+  // must still close sessions even when that published owner stays null.
+  if (ownerChanged || options?.finalizeSessions === true) {
     if (options) cancelRemoteOptimisticSendsForDataOwnerBoundary(options);
     else cancelRemoteOptimisticSendsForDataOwnerBoundary();
   }
@@ -233,7 +238,7 @@ export function AuthProvider({
       publishDataOwnerGeneration(
         state.dataOwnerId,
         state.ownerGeneration,
-        ownerChanged ? undefined : { finalizeSessions: false },
+        { finalizeSessions: ownerChanged },
       );
       if (ownerChanged) {
         sessionsStore.reset();
