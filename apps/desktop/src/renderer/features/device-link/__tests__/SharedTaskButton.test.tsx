@@ -219,6 +219,29 @@ it('closes the shared task captured when the current-task confirmation opened', 
     vi.useRealTimers();
   }
 });
+it('removes a member from the shared task captured when the confirmation opened', async () => {
+  vi.useFakeTimers();
+  try {
+    let currentDetail: SharedTaskDetail | null = { ...detail, guests: [
+      { memberId: 'guest-1', accountId: 'guest-account', deviceIds: [], version: 1 },
+    ] };
+    const command = vi.fn(async (input: { action: string; sharedTaskId?: string; memberId?: string }) => {
+      if (input.action === 'remove') return { ok: true };
+      return { available: true, detail: currentDetail };
+    });
+    state.host.mockImplementation(command);
+    const body = await openWindow(ownerSession);
+    await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.removeShort' })));
+    currentDetail = { ...detail, sharedTaskId: 'st2', title: 'Task B', guests: [] };
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.remove' })));
+    expect(command.mock.calls.filter(([input]) => input.action === 'remove')).toEqual([
+      [{ action: 'remove', sharedTaskId: 'st1', memberId: 'guest-1' }],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 it.each(['account change', 'unmount'])('stops the confirmed batch after %s', async (invalidation) => {
   let finish!: (result: SharedTaskCloseResult) => void;
   state.account.mockImplementation((command: { action: string }) => command.action === 'owned'

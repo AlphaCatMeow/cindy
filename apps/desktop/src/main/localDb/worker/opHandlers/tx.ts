@@ -2027,6 +2027,13 @@ function imRotateSession(
       now,
       now,
     );
+    // IM rotation archives the previous task inside this transaction, so hand
+    // its shared-task authority to the journal before the old route disappears.
+    // The runtime will revoke local access and retry the server close from this
+    // durable terminal record, even when the relay is offline.
+    if (previousSessionId !== null) {
+      db.prepare(CLOSE_SHARED_TASKS_FOR_SESSION_SQL).run(now, previousSessionId);
+    }
     if (previousSessionId !== null) retirePrevious.run(now, previousSessionId);
     if (detachBinding !== null) {
       deleteBinding.run(

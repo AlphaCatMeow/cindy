@@ -19,7 +19,7 @@ import { sharedTaskErrorKey } from './sharedTaskCompatibility';
 
 type SharedTaskTab = 'current' | 'owned';
 type ConfirmState =
-  | { kind: 'remove'; memberId: string; name: string }
+  | { kind: 'remove'; memberId: string; name: string; sharedTaskId: string }
   | { kind: 'leave' }
   | { kind: 'closeCurrent'; sharedTaskId: string }
   | { kind: 'closeAll'; targets: SharedTaskOwnedItem[] };
@@ -146,7 +146,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
     switch (state.kind) {
       case 'remove':
         return { title: t('sharedTask.removeNamedTitle', { name: state.name }), body: t('sharedTask.removeBody'), keep: t('sharedTask.removeKeep'), action: t('sharedTask.remove'),
-          run: () => void run(async () => { await host({ action: 'remove', sharedTaskId: detail!.sharedTaskId, memberId: state.memberId }); setConfirm(null); }) };
+          run: () => void run(async () => { await host({ action: 'remove', sharedTaskId: state.sharedTaskId, memberId: state.memberId }); setConfirm(null); }) };
       case 'leave':
         return { title: t('sharedTask.leaveTitle'), body: t('sharedTask.leaveBody'), keep: t('sharedTask.leaveKeep'), action: t('sharedTask.leave'),
           run: () => void run(async () => {
@@ -210,7 +210,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
           <span className={avatarClass} aria-hidden>{Array.from(name)[0]}</span>
           <div className="min-w-0 flex-1"><div className="break-words text-13 font-medium">{name}</div><div className="text-11 text-[var(--text-secondary)]">{t('sharedTask.roleGuest')}</div></div>
           <Button variant="secondary" disabled={busy} className="shrink-0 px-3 text-12 text-[var(--error-fg)]"
-            onClick={() => setConfirm({ kind: 'remove', memberId: member.memberId, name })}>{t('sharedTask.removeShort')}</Button>
+            onClick={() => setConfirm({ kind: 'remove', memberId: member.memberId, name, sharedTaskId: detail.sharedTaskId })}>{t('sharedTask.removeShort')}</Button>
         </div>;
       })}
       <div className={noticeClass}><Clock size={16} className="mt-0.5 shrink-0" aria-hidden /><p>{t(session.deviceLinkDeviceId ? 'sharedTask.remoteHostOfflineNote' : 'sharedTask.hostOfflineNote')}</p></div>
