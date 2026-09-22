@@ -6,8 +6,10 @@ import { listenForOauthCallback } from '../loopbackListener.js';
 
 const state = 's'.repeat(43);
 const resources: Array<{ close(): unknown }> = [];
-afterEach(() => {
+const reservedPorts: Array<() => Promise<void>> = [];
+afterEach(async () => {
   for (const resource of resources.splice(0)) resource.close();
+  await Promise.all(reservedPorts.splice(0).map((release) => release()));
   vi.restoreAllMocks();
 });
 
@@ -28,11 +30,24 @@ async function bind(host: string, port = 0) {
 }
 
 async function unusedPort() {
-  const { server, port } = await bind('127.0.0.1');
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return port;
+  const server = http.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen({ host: '127.0.0.1', port: 0 }, () => {
+      server.removeListener('error', reject);
+      resolve();
+    });
+  });
+  let released = false;
+  const release = async () => {
+    if (released || !server.listening) return;
+    released = true;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  };
+  reservedPorts.push(release);
+  return { port: (server.address() as { port: number }).port, release };
 }
 
 function offer(port: number, hostname = 'localhost'): PluginOauthOffer {
@@ -68,7 +83,9 @@ function request(host: string, port: number, options: { path?: string; authority
 it.each(['127.0.0.1', '::1'])(
   'accepts localhost callbacks via %s and consumes once across families',
   async (first) => {
-    const port = await unusedPort();
+    const reservation = await unusedPort();
+    await reservation.release();
+    const { port } = reservation;
     const deliver = vi.fn(async () => {});
     const listener = await listenForOauthCallback(offer(port), deliver, () => {});
     resources.push(listener);
@@ -91,7 +108,9 @@ it.each(['127.0.0.1', '::1'])(
 );
 
 it('shares consumption while delivery through the other family is still pending', async () => {
-  const port = await unusedPort();
+  const reservation = await unusedPort();
+  await reservation.release();
+  const { port } = reservation;
   let finish!: () => void;
   let started!: () => void;
   const entered = new Promise<void>((resolve) => {
@@ -120,7 +139,9 @@ it.each([
   ['127.0.0.1', '127.0.0.1', '::1'],
   ['[::1]', '::1', '127.0.0.1'],
 ])('keeps a literal %s callback confined to that interface', async (hostname, host, other) => {
-  const port = await unusedPort();
+  const reservation = await unusedPort();
+  await reservation.release();
+  const { port } = reservation;
   resources.push(
     await listenForOauthCallback(
       offer(port, hostname),
@@ -145,7 +166,9 @@ it('fails the whole localhost setup on a port conflict and leaves its owner alon
 });
 
 it('releases both listeners if the card is no longer current after binding', async () => {
-  const port = await unusedPort();
+  const reservation = await unusedPort();
+  await reservation.release();
+  const { port } = reservation;
   await expect(
     listenForOauthCallback(
       offer(port),
@@ -162,7 +185,9 @@ it('releases both listeners if the card is no longer current after binding', asy
 it.each(['EAFNOSUPPORT', 'EADDRNOTAVAIL'])(
   'supports an OS with IPv6 disabled (%s), but never a port conflict fallback',
   async (code) => {
-    const port = await unusedPort();
+    const reservation = await unusedPort();
+    await reservation.release();
+    const { port } = reservation;
     const original = http.Server.prototype.listen;
     vi.spyOn(http.Server.prototype, 'listen').mockImplementation(function (
       this: http.Server,
