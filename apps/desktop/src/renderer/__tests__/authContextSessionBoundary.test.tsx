@@ -474,6 +474,44 @@ describe('AuthContext session cache boundaries', () => {
     expect(getDataOwnerGeneration().dataOwnerId).toBe('account-a');
   });
 
+  it('keeps a newer renderer pending marker when an older boundary settles first', async () => {
+    let resolveLogout!: () => void;
+    mocks.service.logout.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveLogout = resolve;
+      }),
+    );
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+    mocks.reconcileSessionsAfterDataOwnerRollback.mockClear();
+
+    let logout!: Promise<void>;
+    act(() => {
+      logout = view.result.current.logout();
+    });
+    act(() =>
+      mocks.emitAuth({ ...authState(null), ownerGeneration: 1, ownerBoundaryPending: true }),
+    );
+    act(() => mocks.emitAuth({ ...authState('account-b'), ownerGeneration: 2 }));
+    // A second window starts another boundary after the first commit but
+    // before the first window receives its own IPC promise settlement.
+    act(() =>
+      mocks.emitAuth({ ...authState(null), ownerGeneration: 2, ownerBoundaryPending: true }),
+    );
+
+    await act(async () => {
+      resolveLogout();
+      await logout;
+    });
+    act(() => mocks.emitAuth({ ...authState('account-b'), ownerGeneration: 2 }));
+
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledOnce();
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).not.toHaveBeenLastCalledWith({
+      finalizeSessions: true,
+    });
+  });
+
   it('reconciles Main runtime on IPC rejection without a rollback push', async () => {
     let rejectLogout!: (error: Error) => void;
     mocks.service.logout.mockReturnValueOnce(

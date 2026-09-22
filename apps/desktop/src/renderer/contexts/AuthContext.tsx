@@ -179,11 +179,11 @@ export function AuthProvider({
   const activeDataOwnerGenerationRef = useRef(0);
   const authStateVersionRef = useRef(0);
   const hasAppliedAuthStateRef = useRef(false);
-  // Each in-flight auth boundary owns its own rollback opportunity. Main
-  // serializes the mutations, but renderer promises may reject separately;
-  // a single boolean would let the first rejection consume the second marker.
+  // Main broadcasts pending projections to every renderer. Keep this marker
+  // tied to the authoritative owner snapshots rather than local IPC promises:
+  // another window may have started a second boundary before this renderer's
+  // first operation settles.
   const pendingOwnerProjectionRef = useRef(false);
-  const pendingOwnerBoundaryCountRef = useRef(0);
 
   // Auth mutations invalidate owner-bound in-flight reads before crossing IPC. If Main rejects
   // the transition, restore the single authoritative owner ref (which successful siblings and
@@ -192,17 +192,9 @@ export function AuthProvider({
     // Invalidate old-owner ingress before crossing IPC, but defer stopping the
     // cached turn until the new owner has committed. On failure, reconcile
     // against Main: an early rejection keeps the runtime, a late one may not.
-    pendingOwnerBoundaryCountRef.current += 1;
     publishDataOwnerGeneration(null, undefined, { finalizeSessions: false });
     try {
       const result = await operation();
-      // A successful boundary owns the marker lifecycle. A same-owner auth
-      // push during teardown must not consume a possible rollback marker.
-      pendingOwnerBoundaryCountRef.current = Math.max(
-        0,
-        pendingOwnerBoundaryCountRef.current - 1,
-      );
-      if (pendingOwnerBoundaryCountRef.current === 0) pendingOwnerProjectionRef.current = false;
       return result;
     } catch (error) {
       // Restore the exact main-owned generation. Recomputing it locally would
@@ -214,11 +206,6 @@ export function AuthProvider({
         { finalizeSessions: false },
       );
       const rollbackNeedsReconcile = pendingOwnerProjectionRef.current;
-      pendingOwnerBoundaryCountRef.current = Math.max(
-        0,
-        pendingOwnerBoundaryCountRef.current - 1,
-      );
-      if (pendingOwnerBoundaryCountRef.current === 0) pendingOwnerProjectionRef.current = false;
       if (rollbackNeedsReconcile) {
         void reconcileSessionsAfterDataOwnerRollback();
       }
