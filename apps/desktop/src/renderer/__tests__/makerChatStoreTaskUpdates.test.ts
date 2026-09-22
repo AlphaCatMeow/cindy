@@ -1001,11 +1001,21 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
       makerChatStore.__applyStatusUpdateForTest(remoteSid, statusUpdate(remoteSid, true));
       applyTask(remoteSid, { taskId: 'remote-t1', status: 'running', taskType: 'local_agent' });
+      let resolveListActive!: (value: unknown[]) => void;
+      const listActive = vi.fn(
+        () => new Promise<unknown[]>((resolve) => { resolveListActive = resolve; }),
+      );
       globalWindow.window = {
-        electronAPI: { maker: { listActive: vi.fn(async () => []) } },
+        electronAPI: { maker: { listActive } },
       } as typeof globalWindow.window;
 
-      await reconcileSessionsAfterDataOwnerRollback();
+      const reconciliation = reconcileSessionsAfterDataOwnerRollback();
+      await Promise.resolve();
+      // An unrelated renderer update replaces the state object while Main is
+      // being queried; it must not hide the still-eligible rollback candidate.
+      makerChatStore.setContextWindow(sid, 1234);
+      resolveListActive([]);
+      await reconciliation;
       expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(false);
       expect(makerChatStore.getSnapshot(sid).taskUpdates?.get('t1')?.status).toBe('stopped');
       expect(makerChatStore.getSnapshot(remoteSid).agentStatus.isRunning).toBe(true);

@@ -9779,6 +9779,37 @@ interface ActiveSessionSnapshot {
   isTurnRunning: boolean;
 }
 
+interface ActiveTurnBoundaryMarker {
+  startedAt: number | null;
+  streamingClientId: string | null;
+  continuationTurnClientId: string | null;
+  pendingTaskWakeGen: number;
+  isStreaming: boolean;
+}
+
+function captureActiveTurnBoundaryMarker(state: SessionChatState): ActiveTurnBoundaryMarker {
+  return {
+    startedAt: state.agentStatus.startedAt,
+    streamingClientId: state.streamingClientId,
+    continuationTurnClientId: state.continuationTurnClientId,
+    pendingTaskWakeGen: state.pendingTaskWakeGen,
+    isStreaming: state.isStreaming,
+  };
+}
+
+function sameActiveTurnBoundaryMarker(
+  state: SessionChatState,
+  marker: ActiveTurnBoundaryMarker,
+): boolean {
+  return (
+    state.agentStatus.startedAt === marker.startedAt &&
+    state.streamingClientId === marker.streamingClientId &&
+    state.continuationTurnClientId === marker.continuationTurnClientId &&
+    state.pendingTaskWakeGen === marker.pendingTaskWakeGen &&
+    state.isStreaming === marker.isStreaming
+  );
+}
+
 function isActiveSessionSnapshot(value: unknown): value is ActiveSessionSnapshot {
   if (!value || typeof value !== 'object') return false;
   const item = value as Record<string, unknown>;
@@ -9795,9 +9826,10 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
   if (typeof listActive !== 'function') return;
   const owner = getDataOwnerGeneration();
   if (owner.dataOwnerId === null) return;
-  const candidates = [...sessions].filter(([id, state]) =>
-    !isRemoteSessionSticky(id) && hasActiveTurnStateForOwnerBoundary(state),
-  );
+  const candidates = [...sessions].flatMap(([id, state]) => {
+    if (isRemoteSessionSticky(id) || !hasActiveTurnStateForOwnerBoundary(state)) return [];
+    return [[id, captureActiveTurnBoundaryMarker(state)] as const];
+  });
   if (candidates.length === 0) return;
   try {
     const active = await listActive();
@@ -9806,11 +9838,18 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
     if (getDataOwnerGeneration() !== owner) return;
     if (!Array.isArray(active) || !active.every(isActiveSessionSnapshot)) return;
     const liveTurns = new Map(active.map((item) => [item.sessionId, item.isTurnRunning]));
-    for (const [id, state] of candidates) {
+    for (const [id, marker] of candidates) {
       // Keep a turn that Main still reports running, and never apply a delayed
-      // absence to a new turn or changed session. A live-but-idle handle has
-      // already stopped its turn and must take the same finalizer path.
-      if (liveTurns.get(id) === true || sessions.get(id) !== state) continue;
+      // absence to a new turn or changed session. Ignore unrelated renderer
+      // updates while retaining the marker for the turn we actually queried.
+      // A live-but-idle handle has already stopped its turn and must take the
+      // same finalizer path.
+      const current = sessions.get(id);
+      if (
+        liveTurns.get(id) === true ||
+        !current ||
+        !sameActiveTurnBoundaryMarker(current, marker)
+      ) continue;
       bumpInteractionReconcileEpoch(id);
       supersedeInputProjectionRequests(id, { supersedeOperations: true });
       flushPendingTextDelta(id);
