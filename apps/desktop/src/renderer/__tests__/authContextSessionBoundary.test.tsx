@@ -250,6 +250,25 @@ describe('AuthContext session cache boundaries', () => {
     expect(view.result.current.dataOwnerId).toBe('account-a');
   });
 
+  it('preserves a pending rollback when the first snapshot has no owner stamp', async () => {
+    mocks.service.initialize.mockResolvedValue({ ...authState(null), ownerGeneration: 1 });
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBeNull());
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).not.toHaveBeenCalledWith({
+      finalizeSessions: true,
+    });
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+
+    act(() => mocks.emitAuth(authState('account-a')));
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledOnce();
+    expect(view.result.current.dataOwnerId).toBe('account-a');
+  });
+
   it('resets sessions when authentication expires', async () => {
     renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(mocks.service.initialize).toHaveBeenCalled());

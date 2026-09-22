@@ -248,15 +248,27 @@ export function AuthProvider({
       // refs until the commit or rollback arrives; otherwise the rollback is
       // mistaken for a new owner and finalizes the task that should resume.
       const rendererOwnerGeneration = getDataOwnerGeneration();
+      const signedOutProjection =
+        state.dataOwnerId === null
+        && state.mode === 'signed-out'
+        && !state.canEnterApp;
       const initialBoundaryPendingProjection =
         !hasAppliedAuthStateRef.current
         && activeDataOwnerIdRef.current === null
-        && rendererOwnerGeneration.dataOwnerId !== null
-        && state.ownerGeneration === rendererOwnerGeneration.generation;
+        && signedOutProjection
+        && (
+          (rendererOwnerGeneration.dataOwnerId !== null
+            && state.ownerGeneration === rendererOwnerGeneration.generation)
+          // A newly opened renderer has no synchronous owner stamp. Main's
+          // pending projection keeps the outgoing owner's generation, so a
+          // positive generation above the fresh renderer's zero baseline is
+          // the only boundary evidence available before the rollback push.
+          || (rendererOwnerGeneration.dataOwnerId === null
+            && rendererOwnerGeneration.generation === 0
+            && state.ownerGeneration > rendererOwnerGeneration.generation)
+        );
       const pendingSignedOutProjection =
-        state.dataOwnerId === null
-        && state.mode === 'signed-out'
-        && !state.canEnterApp
+        signedOutProjection
         && (
           (activeDataOwnerIdRef.current !== null
             && state.ownerGeneration === activeDataOwnerGenerationRef.current)
@@ -264,17 +276,32 @@ export function AuthProvider({
         );
       if (initialBoundaryPendingProjection && pendingSignedOutProjection) {
         // A newly mounted renderer may receive the transient signed-out
-        // projection before it has hydrated its refs. Seed them from the
-        // synchronous owner stamp so the following rollback remains a
-        // same-owner push and cannot finalize the running task.
-        activeDataOwnerIdRef.current = rendererOwnerGeneration.dataOwnerId;
-        activeDataOwnerGenerationRef.current = rendererOwnerGeneration.generation;
+        // projection before it has hydrated its refs. Seed the known owner
+        // and generation (or just the generation for a fresh renderer) so the
+        // following rollback cannot finalize the running task.
+        if (rendererOwnerGeneration.dataOwnerId !== null) {
+          activeDataOwnerIdRef.current = rendererOwnerGeneration.dataOwnerId;
+        }
+        activeDataOwnerGenerationRef.current = state.ownerGeneration;
       }
       const initialOwnerHydration = !hasAppliedAuthStateRef.current && !pendingSignedOutProjection;
+      const unknownOwnerRollbackProjection =
+        pendingOwnerProjectionRef.current
+        && !pendingSignedOutProjection
+        && activeDataOwnerIdRef.current === null
+        && state.dataOwnerId !== null
+        && state.ownerGeneration === activeDataOwnerGenerationRef.current;
       const ownerChanged =
-        !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
+        !pendingSignedOutProjection
+        && !unknownOwnerRollbackProjection
+        && activeDataOwnerIdRef.current !== state.dataOwnerId;
       const ownerRollbackProjection =
-        pendingOwnerProjectionRef.current && !pendingSignedOutProjection && !ownerChanged;
+        pendingOwnerProjectionRef.current
+        && !pendingSignedOutProjection
+        && (
+          unknownOwnerRollbackProjection
+          || (activeDataOwnerIdRef.current !== null && !ownerChanged)
+        );
       if (pendingSignedOutProjection) pendingOwnerProjectionRef.current = true;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
