@@ -13,6 +13,7 @@ import { getActiveMobileSessionRealm } from '@/config/env';
 import { FailedScheduleNotice } from '@/session/FailedScheduleNotice';
 import { shouldShowFailedScheduleNotice, type FailedScheduleRunSnapshot } from '@cindy/maker-shared/schedule-model';
 import { CompanionHeader } from '@/session/CompanionHeader';
+import { CompanionNavigationDrawer } from '@/session/CompanionNavigationDrawer';
 import { collectCompanionPluginInvocations } from '@/session/pluginInvocations';
 import { CompanionWorkingStatus, useCompanionWorkingLabel } from '@/session/CompanionWorkingStatus';
 import { useRemoteResourceSession } from '@/session/useRemoteResourceSession';
@@ -2247,6 +2248,12 @@ export default function SessionScreen() {
       && contentRecoveryKey !== null && contentSyncedKey === contentRecoveryKey
       && !outboxRecoverySyncHeld && !loading);
   const companionChat = companionResource?.ref.kind === 'bot';
+  const companionNavigationScope = JSON.stringify([auth.accountGeneration, deviceId, sessionId, companionResource?.ref.id, shareSelectionActive]);
+  const [companionNavigation, setCompanionNavigation] = useState({ scope: companionNavigationScope, open: false });
+  // Reused routes must not carry an open drawer (or a queued action) into another companion.
+  if (companionNavigation.scope !== companionNavigationScope) {
+    setCompanionNavigation({ scope: companionNavigationScope, open: false });
+  }
   const lastAckKeyRef = useRef<string | null>(null);
   const sessionResourceCards = useSessionResourceCards(
     deviceId, deviceName, sessionId, currentSession?.source, remoteSessionRunning,
@@ -8972,7 +8979,8 @@ export default function SessionScreen() {
       <SystemNavigationBack label={t('shared.back')} onPress={goBackToHome} />
       <CompanionHeader key={`${auth.accountGeneration}:${deviceId}:${companionResource.ref.id}`}
         resource={companionResource} deviceId={deviceId} deviceName={deviceName} online={!remoteUnavailableReason}
-        onSearch={() => setSearchOpen(true)} />
+        onSearch={() => setSearchOpen(true)}
+        onOpenNavigation={() => setCompanionNavigation({ scope: companionNavigationScope, open: true })} />
     </> : <SessionHeaderBar
               horizontalSystemHeader={horizontalSystemHeader}
               currentSession={currentSession}
@@ -9833,6 +9841,12 @@ export default function SessionScreen() {
           open={(paneLayout.persistent && !sessionListDrawerOverlayMounted) || sessionListDrawerOpen}
           width={paneLayout.persistent && !sessionListDrawerOverlayMounted ? paneLayout.sidebarWidth : sessionListDrawerWidthRef.current}
         />
+        {companionChat && companionResource && !shareSelectionActive ? (
+          <CompanionNavigationDrawer key={companionNavigationScope}
+            open={companionNavigation.scope === companionNavigationScope && companionNavigation.open}
+            onClose={() => setCompanionNavigation({ scope: companionNavigationScope, open: false })}
+            onSearch={() => setSearchOpen(true)} />
+        ) : null}
       </MessageHistoryOverlay>
     </View>
   );
