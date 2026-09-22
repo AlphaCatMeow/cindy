@@ -322,8 +322,15 @@ describe('active-catalog discovered augment', () => {
       'grok-4.3',
       'grok-4.5',
       'grok-4.6',
+      'grok-4.7',
       'grok-build-0.1',
     ]);
+    for (const agent of ['claude-code', 'codex', 'pi'] as const) {
+      const id = agent === 'pi' ? 'grok-4.7' : 'xai/grok-4.7';
+      expect(xai?.models[agent]?.find(model => model.id === id)).toMatchObject({
+        efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
+      });
+    }
     expect(xai?.models.pi).not.toEqual(xai?.models['claude-code']);
     expect(xai?.models['claude-code']?.find((model) => model.id === 'xai/grok-4.6')).toMatchObject({
       efforts: ['low', 'medium', 'high', 'xhigh'],
@@ -349,8 +356,15 @@ describe('active-catalog discovered augment', () => {
       'grok-4.3',
       'grok-4.5',
       'grok-4.6',
+      'grok-4.7',
       'grok-build-0.1',
     ]);
+    for (const agent of ['claude-code', 'codex', 'pi'] as const) {
+      const id = agent === 'pi' ? 'grok-4.7' : 'xai/grok-4.7';
+      expect(xai?.models[agent]?.find(model => model.id === id)).toMatchObject({
+        efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
+      });
+    }
     expect(xai?.models.pi?.find((model) => model.id === 'grok-4.6')).toMatchObject({
       contextWindow: 500_000,
       supportsImageInput: true,
@@ -494,8 +508,15 @@ describe('active-catalog discovered augment', () => {
       'grok-4.3',
       'grok-4.5',
       'grok-4.6',
+      'grok-4.7',
       'grok-build-0.1',
     ]);
+    for (const agent of ['claude-code', 'codex', 'pi'] as const) {
+      const id = agent === 'pi' ? 'grok-4.7' : 'xai/grok-4.7';
+      expect(xai?.models[agent]?.find(model => model.id === id)).toMatchObject({
+        efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
+      });
+    }
   });
 
   it('xAI 媒体发现按官方存在性收敛，实报资料覆盖目录默认', () => {
