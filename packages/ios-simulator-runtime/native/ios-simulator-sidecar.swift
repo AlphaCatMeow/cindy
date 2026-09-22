@@ -28,7 +28,42 @@ let productHIDRequested = CommandLine.arguments.contains(
 )
 
 @_silgen_name("cindy_simulator_kit_unmasked_surface")
-func simulatorKitUnmaskedSurface(_ screen: AnyObject) -> IOSurfaceRef?
+func callSimulatorKitUnmaskedSurface(
+    _ screen: AnyObject,
+    _ getter: UnsafeMutableRawPointer
+) -> IOSurfaceRef?
+
+// Keep the dlopen handle alive for the entire helper lifetime: ObjC classes,
+// HID functions and the Swift getter all refer into this image.
+configurePrivateMetalShaderCache()
+let selectedDeveloperDirectory = ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
+let simulatorKitHandle: UnsafeMutableRawPointer? = {
+    guard let directory = selectedDeveloperDirectory,
+          directory.hasPrefix("/"),
+          directory.hasSuffix(".app/Contents/Developer") else { return nil }
+    let developer = URL(fileURLWithPath: directory, isDirectory: true)
+    let candidates = [
+        developer.appendingPathComponent("Library/PrivateFrameworks"),
+        developer.deletingLastPathComponent().appendingPathComponent("SharedFrameworks")
+    ]
+    for root in candidates {
+        let binary = root.appendingPathComponent("SimulatorKit.framework/SimulatorKit").path
+        // Do not silently load another layout if an existing selected image
+        // fails to load. A failed probe must stay a capability fallback.
+        if FileManager.default.fileExists(atPath: binary) {
+            return dlopen(binary, RTLD_NOW | RTLD_GLOBAL)
+        }
+    }
+    return nil
+}()
+let simulatorKitSurfaceGetter = simulatorKitHandle.flatMap {
+    dlsym($0, "$s12SimulatorKit15SimDeviceScreenC15unmaskedSurfaceSo9IOSurfaceCSgvg")
+}
+
+func simulatorKitUnmaskedSurface(_ screen: AnyObject) -> IOSurfaceRef? {
+    guard let getter = simulatorKitSurfaceGetter else { return nil }
+    return callSimulatorKitUnmaskedSurface(screen, getter)
+}
 
 typealias ObjCClassTwoObjectArgs = @convention(c) (
     AnyClass,
@@ -149,8 +184,6 @@ guard !simulatorUdid.isEmpty else {
 guard let generation = Int(argument("--generation")), generation > 0 else {
     fail("generation must be a positive integer")
 }
-configurePrivateMetalShaderCache()
-
 enum FramebufferCaptureError: Error {
     case nativeSymbolsUnavailable
     case deviceUnavailable
@@ -202,26 +235,6 @@ enum H264EncodingError: Error {
             return "The H.264 encoder timed out."
         case .encodedFrameTooLarge:
             return "The H.264 access unit exceeds the protocol limit."
-        }
-    }
-}
-
-enum NativeHIDError: Error {
-    case symbolsUnavailable
-    case clientUnavailable
-    case invalidGesture
-    case messageUnavailable
-
-    var publicMessage: String {
-        switch self {
-        case .symbolsUnavailable:
-            return "Native HID symbols are unavailable."
-        case .clientUnavailable:
-            return "Native HID is unavailable for the exact simulator."
-        case .invalidGesture:
-            return "Native HID gesture parameters are invalid."
-        case .messageUnavailable:
-            return "Native HID rejected a gesture sample."
         }
     }
 }
@@ -1059,8 +1072,9 @@ func exactSimulatorDevice() throws -> AnyObject {
         sharedImplementation,
         to: ObjCClassTwoObjectArgs.self
     )
-    let developerDir = ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
-        ?? "/Applications/Xcode.app/Contents/Developer"
+    guard let developerDir = selectedDeveloperDirectory else {
+        throw FramebufferCaptureError.deviceUnavailable
+    }
     var error: NSError?
     guard let context = shared(
         serviceContextClass,
@@ -1113,9 +1127,11 @@ final class NativeHIDInjector {
     )
     private let sendMessage: ObjCSendHIDMessage
     private let mouseMessage: IndigoMouseMessage
+    private let target: UInt32
+    private let completionQueue = DispatchQueue(label: "cindy.native-hid.completion")
     private let lock = NSLock()
 
-    init(device: AnyObject) throws {
+    init(device: AnyObject, target: UInt32) throws {
         guard let mouseSymbol = dlsym(
             UnsafeMutableRawPointer(bitPattern: -2),
             "IndigoHIDMessageForMouseNSEvent"
@@ -1160,6 +1176,7 @@ final class NativeHIDInjector {
             throw NativeHIDError.clientUnavailable
         }
         self.client = client
+        self.target = target
         self.sendMessage = unsafeBitCast(
             sendImplementation,
             to: ObjCSendHIDMessage.self
@@ -1188,6 +1205,10 @@ final class NativeHIDInjector {
         if let second, second.phase != first.phase {
             throw NativeHIDError.invalidGesture
         }
+        // The Indigo message builder also maintains process-global contact
+        // state. Serialize construction and completion, not only enqueueing.
+        lock.lock()
+        defer { lock.unlock() }
         var firstPoint = CGPoint(x: first.x, y: first.y)
         let message: UnsafeMutableRawPointer?
         if var secondPoint = second.map({ CGPoint(x: $0.x, y: $0.y) }) {
@@ -1195,7 +1216,7 @@ final class NativeHIDInjector {
                 mouseMessage(
                     &firstPoint,
                     secondPointer,
-                    0x32,
+                    target,
                     eventType,
                     1,
                     1,
@@ -1206,7 +1227,7 @@ final class NativeHIDInjector {
             message = mouseMessage(
                 &firstPoint,
                 nil,
-                0x32,
+                target,
                 eventType,
                 1,
                 1,
@@ -1216,16 +1237,19 @@ final class NativeHIDInjector {
         guard let message else {
             throw NativeHIDError.messageUnavailable
         }
-        lock.lock()
+        let pending = PendingHIDDelivery()
+        let completion: @convention(block) (NSError?) -> Void = { error in
+            pending.complete(error: error)
+        }
         sendMessage(
             client,
             sendSelector,
             message,
             true,
-            nil,
-            nil
+            completionQueue,
+            completion as AnyObject
         )
-        lock.unlock()
+        try pending.wait()
     }
 
     func releaseStaleContact() throws {
@@ -1304,12 +1328,12 @@ func probeNativeFrameworks() -> FrameworkProbe {
     )
     let deviceDiscovery = serviceContextClass != nil
         && deviceSetClass != nil
-    let framebufferSymbols = screenClass.map {
+    let framebufferSymbols = simulatorKitSurfaceGetter != nil && (screenClass.map {
         class_getInstanceMethod(
             $0,
             NSSelectorFromString("initWithDevice:screenID:")
         ) != nil
-    } ?? false
+    } ?? false)
     let hidClass = NSClassFromString(
         "_TtC12SimulatorKit24SimDeviceLegacyHIDClient"
     )
@@ -1952,14 +1976,6 @@ func runH264Stream(
 
 let frameworkProbe = probeNativeFrameworks()
 let retainedExactSimulatorDevice = try? exactSimulatorDevice()
-let nativeHIDInjector: NativeHIDInjector?
-if productHIDRequested,
-   frameworkProbe.hid,
-   let device = retainedExactSimulatorDevice {
-    nativeHIDInjector = try? NativeHIDInjector(device: device)
-} else {
-    nativeHIDInjector = nil
-}
 var retainedFramebufferScreen: AnyObject?
 var retainedFramebufferScreenID: UInt32?
 var initialFramebufferSurface: IOSurfaceRef?
@@ -2014,6 +2030,21 @@ if frameworkProbe.framebufferSymbols,
         }
         retainedFramebufferScreen = nil
     }
+}
+// Bind input to the same discovered screen as the framebuffer. In particular,
+// the primary screen is not necessarily ID 0 (iOS 27 currently uses ID 1).
+let nativeHIDInjector: NativeHIDInjector?
+if productHIDRequested,
+   frameworkProbe.hid,
+   let device = retainedExactSimulatorDevice,
+   let target = try? nativeHIDTarget(
+       screenClass: NSClassFromString("_TtC12SimulatorKit15SimDeviceScreen"),
+       screen: retainedFramebufferScreen,
+       expectedScreenID: retainedFramebufferScreenID
+   ) {
+    nativeHIDInjector = try? NativeHIDInjector(device: device, target: target)
+} else {
+    nativeHIDInjector = nil
 }
 let initialCapture: CapturedFramebuffer?
 if let surface = initialFramebufferSurface,

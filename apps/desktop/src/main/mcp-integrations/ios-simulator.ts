@@ -962,8 +962,6 @@ function createDefaultDriverManager(): IOSSimulatorDriverManager {
         sandboxPolicy: createIOSSimulatorNativeSidecarSandboxPolicy({
           required: true,
           platform: process.platform,
-          developerDirectory:
-            process.env.DEVELOPER_DIR ?? '/Applications/Xcode.app/Contents/Developer',
           coreSimulatorRoot: path.join(
             app.getPath('home'),
             'Library',
