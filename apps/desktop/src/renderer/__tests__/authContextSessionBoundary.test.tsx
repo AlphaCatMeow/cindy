@@ -479,6 +479,42 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.preloadLocalCatalogSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the rollback marker for each overlapping boundary rejection', async () => {
+    let rejectFirst!: (error: Error) => void;
+    let rejectSecond!: (error: Error) => void;
+    mocks.service.logout
+      .mockReturnValueOnce(
+        new Promise<void>((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<void>((_resolve, reject) => {
+          rejectSecond = reject;
+        }),
+      );
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+    mocks.reconcileSessionsAfterDataOwnerRollback.mockClear();
+
+    const first = view.result.current.logout();
+    const second = view.result.current.logout();
+    act(() => mocks.emitAuth({ ...authState(null), ownerGeneration: 1 }));
+    act(() => mocks.emitAuth({ ...authState(null), ownerGeneration: 1 }));
+
+    await act(async () => {
+      rejectFirst(new Error('first logout failed'));
+      await expect(first).rejects.toThrow('first logout failed');
+    });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rejectSecond(new Error('second logout failed'));
+      await expect(second).rejects.toThrow('second logout failed');
+    });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(2);
+  });
+
   it('restores a locally committed owner when the next boundary fails before an auth push', async () => {
     mocks.service.initialize.mockResolvedValue(authState(null));
     mocks.service.exitLocalMode.mockRejectedValueOnce(new Error('exit failed'));
