@@ -3020,6 +3020,10 @@ interface ElectronAPI {
   cindyMakeMerge: (
     input: import('../shared/cindyMakeMerge').CindyMakeMergeRequest,
   ) => Promise<import('../shared/cindyMakeMerge').CindyMakeMergeState | undefined>;
+  getCindyMakeSettings: () => Promise<import('../shared/cindyMakeSettings').CindyMakeSettings>;
+  setCindyMakeSyncLatestBeforeBuild: (
+    enabled: boolean,
+  ) => Promise<import('../shared/cindyMakeSettings').CindyMakeSettings>;
   getCindyMakeHistory: (
     selected?: string,
   ) => Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState>;
@@ -3049,6 +3053,10 @@ interface ElectronAPI {
   openCindyMakeSourceDir: () => Promise<{ success: boolean }>;
   onCindyMakeState: (
     listener: (state: import('../shared/cindyMakeDoctor').CindyMakeGlobalState) => void,
+  ) => () => void;
+  /** A local Cindy Make build finished; Settings should refresh history and versions. */
+  onCindyMakeHistoryChanged: (
+    listener: (ownerStamp?: import('../shared/dataOwnerPush').DataOwnerPushStamp) => void,
   ) => () => void;
   /** Live global source status (Settings and the workflow share one operation). */
   onCindyMakeSourceStatus: (

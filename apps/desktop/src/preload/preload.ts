@@ -3866,6 +3866,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     input: import('../shared/cindyMakeMerge').CindyMakeMergeRequest,
   ): Promise<import('../shared/cindyMakeMerge').CindyMakeMergeState | undefined> =>
     ipcRenderer.invoke('app:cindy-make-merge', input),
+  getCindyMakeSettings: (): Promise<import('../shared/cindyMakeSettings').CindyMakeSettings> =>
+    ipcRenderer.invoke('app:get-cindy-make-settings'),
+  setCindyMakeSyncLatestBeforeBuild: (
+    enabled: boolean,
+  ): Promise<import('../shared/cindyMakeSettings').CindyMakeSettings> =>
+    ipcRenderer.invoke('app:set-cindy-make-sync-latest-before-build', enabled),
   getCindyMakeHistory: (
     selected?: string,
   ): Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState> =>
@@ -3913,6 +3919,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ) => listener(state);
     ipcRenderer.on('maker:cindy-make:state-changed', wrapped);
     return () => ipcRenderer.removeListener('maker:cindy-make:state-changed', wrapped);
+  },
+  onCindyMakeHistoryChanged: (
+    listener: (ownerStamp?: DataOwnerPushStamp) => void,
+  ): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, ownerStamp: unknown) => {
+      if (ownerStamp === undefined || isDataOwnerPushStamp(ownerStamp)) listener(ownerStamp);
+    };
+    ipcRenderer.on('cindy-make:history-changed', wrapped);
+    return () => ipcRenderer.removeListener('cindy-make:history-changed', wrapped);
   },
 
   openCindyMakeSourceDir: (): Promise<{ success: boolean }> =>
