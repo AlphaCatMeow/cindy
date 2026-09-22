@@ -38,6 +38,7 @@ import { mimeOf, uploadLocalFile } from './mediaTransfer.js';
 import { createLogger } from '../logger.js';
 import { getDeviceLinkInvokeContext } from './invoke-context.js';
 import { sharedTaskMediaId, withSharedTaskMedia } from './sharedTaskMediaContext.js';
+import { assertSharedTaskMedia } from './sharedTaskMediaAccess.js';
 
 const log = createLogger('device-link:mediaFetch');
 
@@ -319,7 +320,6 @@ export async function resolveAuthorizedMedia(arg: unknown, maximumBytes?: number
   const sharedTask = getDeviceLinkInvokeContext()?.sharedTask;
   let sharedRoot: string | undefined;
   if (sharedTask) {
-    const { assertSharedTaskMedia } = await import('./sharedTaskMediaAccess.js');
     sharedRoot = await assertSharedTaskMedia(url, sharedTask);
   }
   const isPathMedia = url.startsWith('xdt-file://') || url.startsWith('xdt-audio://');
