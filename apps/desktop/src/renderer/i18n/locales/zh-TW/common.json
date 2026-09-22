@@ -5787,6 +5787,12 @@
       },
       "description": "下方卡片會檢查本機環境，並可安裝缺少的可攜工具。原生編譯工具缺失時會顯示官方下載指引。",
       "checking": "正在檢查環境…",
+      "syncBeforeBuild": {
+        "title": "產生前同步最新原始碼",
+        "description": "開啟後，每次產生或重新產生個人版前，會先把目前管道的最新官方原始碼同步到個人版。預設關閉。",
+        "ariaLabel": "產生前同步最新原始碼",
+        "saveFailed": "未能儲存產生前同步設定，請重試。"
+      },
       "forceManaged": {
         "title": "測試安裝：忽略系統工具",
         "description": "僅開發版可用。可攜式工具只檢查 Cindy 管理的副本，並模擬 Windows 原生編譯工具缺失。切換開關只重新檢查，不會開始安裝。",
@@ -12937,7 +12943,7 @@
       "details": {
         "unknown": "尚未讀取",
         "latest": {
-          "dev": "線上 main",
+          "dev": "GitHub main",
           "beta": "最新 beta",
           "release": "最新正式版",
           "same": "與{{target}} 一致，落後 0 筆修改記錄",
@@ -12964,6 +12970,7 @@
         "waiting": "等待準備專案",
         "environment": "正在準備環境",
         "source": "正在準備個人專案原始碼",
+        "updatingSource": "正在更新個人版原始碼",
         "workspace": "正在建立任務分支和工作目錄",
         "dependencies": "正在安裝任務相依套件",
         "starting": "正在自動開始任務",
@@ -13011,13 +13018,13 @@
         "updateAvailable": "有更新",
         "unverified": "版本狀態未確認",
         "upToDateDescription": "個人版程式碼已包含{{target}}的全部更新",
-        "personalChanges": "另有 {{ahead}} 筆個人修改記錄"
+        "personalChanges": "個人版原始碼中另有 {{ahead}} 筆修改記錄"
       },
       "comparison": {
         "same": "與本機 main 的 SHA 相同",
-        "personalAhead": "已包含本機 main，另有 {{ahead}} 筆個人修改記錄",
-        "mainAhead": "尚缺本機 main 的 {{behind}} 筆修改記錄",
-        "diverged": "尚缺本機 main 的 {{behind}} 筆修改記錄，另有 {{ahead}} 筆個人修改記錄",
+        "personalAhead": "已包含本機 main，個人版原始碼中另有 {{ahead}} 筆修改記錄",
+        "mainAhead": "尚缺本機 main 中的 {{behind}} 筆修改記錄",
+        "diverged": "尚缺本機 main 中的 {{behind}} 筆修改記錄，個人版原始碼中另有 {{ahead}} 筆修改記錄",
         "different": "SHA 與本機 main 不同，差距未知",
         "unknown": "與本機 main 的差距未知"
       },
@@ -13031,6 +13038,7 @@
       "development": "開發環境",
       "current": "目前使用",
       "using": "使用中",
+      "updatePersonal": "重新啟動以更新",
       "switch": "切換並重新啟動",
       "switchPersonal": "切換至此個人版",
       "remove": "刪除版本",
@@ -13040,6 +13048,8 @@
       "unavailable": "此版本的應用程式檔案已無法使用。",
       "incompatible": "此版本與目前資料不相容，請以目前原版重新產生。",
       "readyHint": "個人版已就緒。切換後會重新啟動 Cindy，並保留目前帳號、設定和任務。",
+      "updateHint": "個人版已有新內容。重新啟動後會使用最新個人版，並保留目前帳號、設定和任務。",
+      "usingHint": "正在使用最新個人版。",
       "errors": {
         "busy": "仍有任務、測試或建置正在進行，請結束後再切換或刪除版本。",
         "incompatible": "資料結構不同，暫時無法切換至此版本。請以目前原版重新產生個人版。",
@@ -13076,6 +13086,7 @@
       },
       "status": {
         "waiting": "等待產生個人版…",
+        "syncing": "正在同步最新原始碼…",
         "merging": "正在合併修改…",
         "checking": "正在檢查個人版…",
         "packaging": "正在打包個人版…",
@@ -13090,6 +13101,7 @@
           "cleaning-merge": "清理合併檔案",
           "environment": "準備產生環境",
           "original": "檢查目前版本",
+          "syncing": "同步最新原始碼",
           "merging": "合入修改",
           "checking-dependencies": "安裝建置相依套件",
           "checking-tests": "執行自動測試",
@@ -13106,6 +13118,7 @@
         "changed": "製作目錄或程式碼已有變更，請完成修改後重新產生。",
         "environment": "建置工具尚未就緒，請檢查 Cindy Make 環境後重試。",
         "missingShell": "自動檢查需要 Git Bash，請安裝 Git for Windows 後重試。",
+        "sourceSyncFailed": "最新原始碼同步失敗，尚未開始打包。請檢查網路或處理同步衝突後重試。",
         "checksFailed": "合併後的程式碼未通過檢查，請繼續修改後重新產生。",
         "conflict": "與目前個人版的修改有衝突，請繼續修改並解決衝突。",
         "baselineChanged": "產生期間個人版已有更新，請重新產生以包含最新修改。",
@@ -13160,6 +13173,7 @@
     },
     "history": {
       "title": "製作歷史",
+      "taskCount": "{{count}} 個任務",
       "batch": {
         "make": "製作個人版",
         "selected": "製作所選 {{count}} 項",
@@ -13173,6 +13187,7 @@
         "restartTest": "重新啟動隔離版"
       },
       "build": "產生個人版",
+      "regeneratePersonal": "重新產生個人版",
       "buildDescription": "將目前的個人原始碼產生為新版本，尚未合入的歷史改動不會包含在內。",
       "building": "正在產生個人版…",
       "stop": "停止製作",
@@ -13183,6 +13198,7 @@
       "stopping": "正在停止…",
       "progress": {
         "waiting": "等待開始",
+        "syncing": "正在同步最新原始碼",
         "merging": "正在合併修改",
         "checking": "正在執行檢查",
         "packaging": "正在打包個人版",
@@ -13197,7 +13213,7 @@
         "busy": "其他製作或檢查正在進行，請稍後再試。",
         "checking": "正在核對這筆製作記錄，請稍後再試。"
       },
-      "counts": "共 {{total}} 次 · 待合入 {{pending}} 次 · 已合入 {{integrated}} 次",
+      "counts": "共 {{total}} 個製作任務 · 待合入 {{pending}} 個 · 已合入 {{integrated}} 個",
       "filterLabel": "篩選製作歷史",
       "mergeTaskTitle": "處理合入衝突",
       "revertTaskTitle": "處理撤銷合入衝突",
@@ -13230,7 +13246,7 @@
       "cleanWorkspace": "刪除仍存在的製作分支和工作目錄，其中尚未提交的改動將會遺失。",
       "cleanKeep": "保留已合入個人版的改動和已產生的應用程式版本。",
       "endConfirm": "結束這次製作並清理工作目錄？製作歷史與已儲存的改動會保留。",
-      "revertConfirm": "撤銷這次製作合入個人原始碼的改動？其他製作和已產生的應用程式會保留。",
+      "revertConfirm": "從個人版移除這次製作的改動？系統會新增一筆反向修改記錄，不會改寫歷史；其他製作和已產生的應用程式會保留。",
       "lifecycle": {
         "preparing": "準備中",
         "running": "正在修改",
@@ -13253,8 +13269,8 @@
         "continue": "繼續修改",
         "test": "啟動隔離測試版",
         "integrate": "合入個人版",
-        "revert": "撤銷合入",
-        "reapply": "重新合入",
+        "revert": "從個人版移除",
+        "reapply": "重新加入個人版",
         "resolve": "處理衝突",
         "retry": "重試",
         "build": "產生個人版",
@@ -13306,7 +13322,8 @@
       "errors": {
         "busy": "其他操作正在進行，請稍後重試。",
         "dirty": "原始碼有未提交的改動，請先儲存再重試。",
-        "localMain": "main 分支存在本機提交，請檢查後再更新。",
+        "localMain": "Cindy Make 原始碼中的本機 main 與目標版本的歷史已分歧，請檢查差異後再同步",
+        "localMainAhead": "Cindy Make 原始碼中的本機 main 已領先目標版本，無法直接回退，請檢查同步目標",
         "unavailable": "原始碼或操作記錄無法使用，請重新整理後重試。",
         "gitFailed": "Git 未能完成操作，請重試。",
         "baselineChanged": "個人原始碼已發生變化，請依最新狀態重試。",
