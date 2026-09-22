@@ -5144,9 +5144,9 @@ describe('makerChatStore text delta batching', () => {
     expect(makerChatStore.getSnapshot(SESSION_ID).queueInteractionLocks).toEqual([
       'new-owner-lock',
     ]);
-    expect(makerChatStore.getSnapshot(SESSION_ID).steeringQueueClientIds).toEqual([
-      'already-steering',
-    ]);
+    // Account teardown reuses the Stop/closed finalizer, so an in-flight steer
+    // marker cannot survive into the next owner generation.
+    expect(makerChatStore.getSnapshot(SESSION_ID).steeringQueueClientIds).toEqual([]);
     expect(input.getProjection).not.toHaveBeenCalled();
   });
 

@@ -2019,13 +2019,16 @@ function clearRemoteOptimisticSendsForSession(sessionId: string): void {
  * 恢复尚未确认受理的正文/附件，再清账本与 UI；之后任何迟到 invoke / projection
  * 都会同时被 Map identity 与 data-owner generation 挡住，不能跨账号继续投递或恢复。
  */
-export function cancelRemoteOptimisticSendsForDataOwnerBoundary(): void {
+export function cancelRemoteOptimisticSendsForDataOwnerBoundary(
+  options: { finalizeSessions?: boolean } = {},
+): void {
   invalidateLiveIngressForDataOwnerBoundary();
-  // Account teardown intentionally stops the outgoing runtime. Its closed
-  // status push carries the old owner stamp and is therefore dropped by the
-  // owner fence; apply the same finalization used by the Stop/closed path
-  // synchronously before publishing the next owner.
-  finalizeSessionsForDataOwnerBoundary();
+  // A committed account teardown intentionally stops the outgoing runtime. Its
+  // closed status push carries the old owner stamp and is therefore dropped by
+  // the owner fence; apply the same finalization used by the Stop/closed path.
+  // AuthContext passes finalizeSessions=false for the pre-commit invalidation
+  // so a failed switch can restore the still-running current owner.
+  if (options.finalizeSessions !== false) finalizeSessionsForDataOwnerBoundary();
   // Invalidate standalone projection reads/operations before restoring drafts
   // or publishing the next owner. Their promises may settle independently of
   // the optimistic outbox and must not write old-owner state into the new slice.
@@ -2155,8 +2158,14 @@ function hasActiveTurnStateForOwnerBoundary(state: SessionChatState): boolean {
     state.pendingRemoteDesktopConfirmation !== null ||
     state.pendingRemoteDesktopConfirmationQueue.length > 0 ||
     state.queueAbortPending ||
+    state.steeringQueueClientIds.length > 0 ||
     state.continuationTurnClientId !== null ||
     state.pendingTaskWake > 0 ||
+    state.messages.some(
+      (message) =>
+        message.clientId === CODEX_RECONNECT_PENDING_CLIENT_ID ||
+        message.clientId === AUTO_RESUME_PENDING_CLIENT_ID,
+    ) ||
     [...(state.taskUpdates?.values() ?? [])].some((task) => task.status === 'running')
   );
 }

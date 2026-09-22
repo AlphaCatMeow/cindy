@@ -121,11 +121,16 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const log = createLogger('AuthContext');
 
-function publishDataOwnerGeneration(dataOwnerId: string | null, ownerGeneration?: number): void {
+function publishDataOwnerGeneration(
+  dataOwnerId: string | null,
+  ownerGeneration?: number,
+  options?: { finalizeSessions?: boolean },
+): void {
   const previousOwnerId = getDataOwnerGeneration().dataOwnerId;
   if (previousOwnerId !== dataOwnerId) {
     resetTaskTagCatalogCache();
-    cancelRemoteOptimisticSendsForDataOwnerBoundary();
+    if (options) cancelRemoteOptimisticSendsForDataOwnerBoundary(options);
+    else cancelRemoteOptimisticSendsForDataOwnerBoundary();
   }
   setDataOwnerGeneration(dataOwnerId, ownerGeneration);
   recentWorkdirsStore.setDataOwner(getDataOwnerGeneration());
@@ -172,9 +177,17 @@ export function AuthProvider({
   // the transition, restore the single authoritative owner ref (which successful siblings and
   // newer pushes both update), then rebuild the cache because React state may never have changed.
   const runDataOwnerBoundary = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
-    publishDataOwnerGeneration(null);
+    // Invalidate old-owner ingress before crossing IPC, but defer stopping the
+    // cached turn until the new owner has committed. A rejected switch must
+    // leave the current account's task resumable in its original running state.
+    publishDataOwnerGeneration(null, undefined, { finalizeSessions: false });
     try {
-      return await operation();
+      const result = await operation();
+      // The boundary has committed once the auth operation resolves. Finalize
+      // here as well as on the pushed snapshot so a delayed auth event cannot
+      // leave the old owner running after a successful switch.
+      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      return result;
     } catch (error) {
       // Restore the exact main-owned generation. Recomputing it locally would
       // make every stamped push from the still-active owner look stale after a
@@ -182,6 +195,7 @@ export function AuthProvider({
       publishDataOwnerGeneration(
         activeDataOwnerIdRef.current,
         activeDataOwnerGenerationRef.current,
+        { finalizeSessions: false },
       );
       setDataOwnerGenerationState(activeDataOwnerGenerationRef.current);
       setDataOwnerRecoveryEpoch((epoch) => epoch + 1);

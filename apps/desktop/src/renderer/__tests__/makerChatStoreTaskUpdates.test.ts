@@ -85,6 +85,7 @@ import {
 } from '@/lib/makerChatStore';
 import type { SessionChatState } from '@/lib/makerChatStore';
 import type { Message } from '@/lib/ccAgent.types';
+import { setDataOwnerGeneration, __testing as dataOwnerGenerationTesting } from '@/contexts/dataOwnerGeneration';
 
 describe('makerChatStore IM source projection', () => {
   it.each(['imSource', 'hookSource'] as const)('projects %s into the common Desktop card', (field) => {
@@ -939,26 +940,43 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
   it('account teardown reuses the Stop/closed finalizer and does not revive on A→B→A', () => {
     const sid = `account-boundary-${Math.random().toString(36).slice(2, 8)}`;
     try {
+      setDataOwnerGeneration('account-a', 1);
       makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
       applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
       expect(makerChatStore.getSnapshot(sid).agentStatus.startedAt).toBeTruthy();
 
       // AuthContext invokes this synchronously when the outgoing owner enters
       // teardown; the old stamped status=closed push is no longer required.
-      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      setDataOwnerGeneration(null, 2);
+      cancelRemoteOptimisticSendsForDataOwnerBoundary({ finalizeSessions: false });
       let state = makerChatStore.getSnapshot(sid);
+      // A rejected switch restores A, so the pre-commit invalidation must not
+      // stop the task that still belongs to the active account.
+      expect(state.agentStatus.isRunning).toBe(true);
+      expect(state.agentStatus.startedAt).toBeTruthy();
+      setDataOwnerGeneration('account-a', 3);
+
+      // A successful A→B commit finalizes the old owner exactly once.
+      setDataOwnerGeneration(null, 4);
+      cancelRemoteOptimisticSendsForDataOwnerBoundary({ finalizeSessions: false });
+      setDataOwnerGeneration('account-b', 5);
+      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      state = makerChatStore.getSnapshot(sid);
       expect(state.agentStatus.isRunning).toBe(false);
       expect(state.agentStatus.startedAt).toBeNull();
       expect(state.taskUpdates?.get('t1')?.status).toBe('stopped');
 
       // Re-entering account A must observe the stopped snapshot, with no
       // automatic continuation caused by the boundary cleanup.
-      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      setDataOwnerGeneration(null, 6);
+      cancelRemoteOptimisticSendsForDataOwnerBoundary({ finalizeSessions: false });
+      setDataOwnerGeneration('account-a', 7);
       state = makerChatStore.getSnapshot(sid);
       expect(state.agentStatus.isRunning).toBe(false);
       expect(state.agentStatus.startedAt).toBeNull();
     } finally {
       makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
     }
   });
 
