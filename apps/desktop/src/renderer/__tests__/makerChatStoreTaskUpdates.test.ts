@@ -1150,4 +1150,35 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       globalWindow.window = previousWindow;
     }
   });
+
+  it('rollback reconciliation preserves non-wake background work on an idle Main session', async () => {
+    const sid = 'rollback-idle-bash-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      applyTask(sid, { taskId: 'bash-1', status: 'running', taskType: 'local_bash' });
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, false));
+
+      globalWindow.window = {
+        electronAPI: {
+          maker: {
+            listActive: vi.fn(async () => [
+              { sessionId: sid, agentKind: 'codex', isTurnRunning: false },
+            ]),
+          },
+        },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+      expect(makerChatStore.getSnapshot(sid).taskUpdates?.get('bash-1')?.status).toBe('running');
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
 });

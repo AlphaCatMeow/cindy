@@ -5212,6 +5212,17 @@ function hasBackgroundAgentWork(sessionId: string, state: SessionChatState): boo
 }
 
 /**
+ * Any task that is still live while Main retains the session handle must
+ * survive a rejected owner transition. This is deliberately broader than
+ * hasBackgroundAgentWork: local_bash and other non-wake tasks do not keep the
+ * foreground turn running, but stopping their renderer projection during a
+ * rollback would still hide work that Main never stopped.
+ */
+function hasRunningBackgroundTask(state: SessionChatState): boolean {
+  return [...(state.taskUpdates?.values() ?? [])].some((task) => task.status === 'running');
+}
+
+/**
  * 把 taskUpdates 里 running 任务标为 stopped。
  *  - scope='all'(session closed 兜底):事件流已断,所有 provider / 类型的
  *    running 残留都只会让 spinner / tasks 面板永久卡住,全部收口。
@@ -9848,11 +9859,11 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       const mainTurnRunning = liveTurns.get(id);
       if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(current, marker))
         continue;
-      // listActive keeps idle session handles that still own local wake work.
-      // isTurnRunning=false only says the foreground turn ended; do not
-      // close a live local_agent/local_workflow task while rolling back a
-      // rejected owner transition.
-      if (mainTurnRunning === false && hasBackgroundAgentWork(id, current)) continue;
+      // listActive keeps idle session handles that still own background work.
+      // isTurnRunning=false only says the foreground turn ended; do not close
+      // any task Main may still be running while rolling back a rejected owner
+      // transition (wake and non-wake tasks alike).
+      if (mainTurnRunning === false && hasRunningBackgroundTask(current)) continue;
       bumpInteractionReconcileEpoch(id);
       supersedeInputProjectionRequests(id, { supersedeOperations: true });
       flushPendingTextDelta(id);
