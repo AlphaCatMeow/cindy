@@ -2370,7 +2370,8 @@ export async function deleteBotProfileAndDetachSessionsInDb(
 ): Promise<void> {
   const ids = [...new Set(sessionIds)];
   const ownerScope = captureOwnerScope();
-  const db = getDbClient().drizzle;
+  const dbClient = getDbClient();
+  const db = dbClient.drizzle;
   const commitDeletion = () =>
     commitBotProfileDeletion({
       botId,
@@ -2381,6 +2382,15 @@ export async function deleteBotProfileAndDetachSessionsInDb(
     ids.length > 0 ? await withSessionRouteLocks(ids, commitDeletion) : await commitDeletion();
   const status = committed.status;
   const committedSessionIds = [...new Set(committed.sessionIds)];
+
+  // Bot profile deletion commits terminal task status through a dedicated
+  // transaction, so it bypasses the ordinary session patch/status writers.
+  // Close the corresponding shared task only after that durable transition;
+  // closeSharedTaskForTask journals network failures and never revives the task.
+  if (committedSessionIds.length > 0) {
+    const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
+    for (const id of committedSessionIds) await closeSharedTaskForTask(id, dbClient);
+  }
 
   for (const id of committedSessionIds) {
     notifyAgentIslandSessionPatch(id, { status });

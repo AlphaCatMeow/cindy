@@ -34,6 +34,7 @@ const h = vi.hoisted(() => ({
   })),
   closeSession: vi.fn(async (_sessionId: string) => undefined),
   closeSharedTask: vi.fn(async (_sessionId: string, _database: unknown): Promise<void> => undefined),
+  commitBotProfileDeletion: vi.fn(async (): Promise<{ status: 'archived' | 'deleted'; sessionIds: string[] }> => ({ status: 'archived', sessionIds: [] })),
   tapWindowBroadcast: vi.fn(),
   windows: [] as Array<{
     trusted?: boolean;
@@ -105,6 +106,9 @@ vi.mock('../../client/current', () => ({
   getDbClient: () => h.client,
   getCurrentDbClientUserId: () => 'test-user',
 }));
+vi.mock('../../botProfileDeletionStore.js', () => ({
+  commitBotProfileDeletion: h.commitBotProfileDeletion,
+}));
 vi.mock('../../dialogueWorkspace', () => ({ ensureDialogueWorkspaceDir: vi.fn() }));
 vi.mock('../../../git-context/prRefsStore', () => ({
   recomputePrRefsForSession: vi.fn(async () => undefined),
@@ -157,6 +161,7 @@ vi.mock('../../../cindy-brain/index.js', () => ({
 
 import {
   broadcastSessionPatched,
+  deleteBotProfileAndDetachSessionsInDb,
   patchSessionMetaInDb,
   persistSessionFields,
   registerSessionIpc,
@@ -307,6 +312,7 @@ async function invokeCreate(body: Record<string, unknown>): Promise<unknown> {
 beforeEach(() => {
   vi.clearAllMocks();
   h.relocate.mockImplementation(async () => ({ persistedSdkSessionId: null }));
+  h.commitBotProfileDeletion.mockResolvedValue({ status: 'archived', sessionIds: [] });
   h.closeSession.mockClear();
   h.routeLock.mockImplementation(async (_sessionId, task) => task());
   h.upsertRecentWorkdir.mockImplementation(async () => true);
@@ -895,6 +901,18 @@ describe('local-db:sessions:update handler wiring', () => {
     expect(order).toEqual(['runtime-cleanup', 'sharing-closed', 'lock-released']);
     expect(h.runtimeCleanup).toHaveBeenCalledOnce();
     expect(h.closeSharedTask).toHaveBeenCalledWith('codex-local', h.client);
+  });
+
+  it.each([true, false])('closes shared tasks when Bot deletion transitions sessions to terminal status (keep=%s)', async (keepTaskHistory) => {
+    h.commitBotProfileDeletion.mockResolvedValue({
+      status: keepTaskHistory ? 'archived' : 'deleted',
+      sessionIds: ['bot-local', 'bot-local'],
+    });
+
+    await deleteBotProfileAndDetachSessionsInDb('bot-1', ['bot-local'], keepTaskHistory);
+    await vi.dynamicImportSettled();
+
+    expect(h.closeSharedTask).toHaveBeenCalledExactlyOnceWith('bot-local', h.client);
   });
 
   // 竞态收敛(review on #3225):写入与查询不在同一串行区间,归档写入后、查询前
