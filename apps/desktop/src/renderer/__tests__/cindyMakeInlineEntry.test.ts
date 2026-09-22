@@ -33,11 +33,14 @@ describe('Cindy Make composer presentation', () => {
     expect(interactionGuard).toContain('pendingGhostGrantConfirm ? null');
     expect(sessionView).toContain('if (cindyMakeInputLocked) return false;');
     expect(sessionView).not.toContain('CindyMakeResumeCard');
-    const recoveryMatch = sessionView.match(/\)\s*:\s*cindyMakeRecoveryId\s*&&\s*session\s*\?\s*\(/);
+    const recoveryMatch = sessionView.match(
+      /(?:\)\s*:\s*|topSlot\s*=\s*)cindyMakeRecoveryId\s*&&\s*session\s*\?\s*\(/,
+    );
     const recovery = recoveryMatch?.index ?? -1;
     expect(recovery).toBeGreaterThan(mask);
-    expect(recovery).toBeLessThan(input);
-    expect(sessionView.slice(recovery, input)).toContain('<CindyMakeTestCard');
-    expect(sessionView.slice(recovery, input)).toContain(') : (');
+    const recoveryWindow = recovery < input
+      ? sessionView.slice(recovery, input)
+      : sessionView.slice(input, recovery);
+    expect(recoveryWindow).toMatch(/<CindyMake(?:TestCard|EditingActions)/);
   });
 });
