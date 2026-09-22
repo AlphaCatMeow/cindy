@@ -214,7 +214,16 @@ export function AuthProvider({
   const applyIncomingState = useCallback(
     (state: AuthState) => {
       const ownerChanged = activeDataOwnerIdRef.current !== state.dataOwnerId;
-      publishDataOwnerGeneration(state.dataOwnerId, state.ownerGeneration);
+      // A same-owner push can arrive while an auth boundary is still waiting
+      // for IPC. The pre-commit fence temporarily publishes null, so letting
+      // that push use the default finalizer would stop the current owner's
+      // task even when the boundary later rejects. Only a committed owner
+      // change may finalize the previous owner's sessions.
+      publishDataOwnerGeneration(
+        state.dataOwnerId,
+        state.ownerGeneration,
+        ownerChanged ? undefined : { finalizeSessions: false },
+      );
       if (ownerChanged) {
         sessionsStore.reset();
         clearWorkersCache();

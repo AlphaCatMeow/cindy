@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
   return {
     service,
     reset: vi.fn(),
+    cancelRemoteOptimisticSendsForDataOwnerBoundary: vi.fn(),
     getMe: vi.fn(async () => ({ role: 'user' })),
     clearWorkersCache: vi.fn(),
     setModelVisibilityOwner: vi.fn(),
@@ -49,6 +50,11 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/authService', () => ({
   createAuthService: () => mocks.service,
+}));
+vi.mock('@/lib/makerChatStore', () => ({
+  cancelRemoteOptimisticSendsForDataOwnerBoundary:
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary,
+  setCurrentUserName: vi.fn(),
 }));
 vi.mock('@/lib/sessionsStore', () => ({
   sessionsStore: { reset: mocks.reset },
@@ -148,6 +154,7 @@ describe('AuthContext session cache boundaries', () => {
 
   beforeEach(() => {
     mocks.reset.mockClear();
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
     mocks.getMe.mockClear();
     mocks.clearWorkersCache.mockClear();
     mocks.setModelVisibilityOwner.mockClear();
@@ -235,6 +242,36 @@ describe('AuthContext session cache boundaries', () => {
       expect(mocks.preloadLocalCatalogSnapshot).toHaveBeenCalledOnce();
     },
   );
+
+  it('does not finalize on a same-owner push while an auth boundary is pending', async () => {
+    let rejectLogout!: (error: Error) => void;
+    mocks.service.logout.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectLogout = reject;
+      }),
+    );
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+
+    let logout!: Promise<void>;
+    act(() => {
+      logout = view.result.current.logout();
+    });
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenCalledWith({
+      finalizeSessions: false,
+    });
+
+    act(() => mocks.emitAuth({ ...authState('account-a'), ownerGeneration: 2 }));
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+
+    await act(async () => {
+      rejectLogout(new Error('logout failed'));
+      await expect(logout).rejects.toThrow('logout failed');
+    });
+  });
 
   it('keeps a newer pushed owner when an older auth boundary later rejects', async () => {
     let rejectLogout!: (error: Error) => void;
