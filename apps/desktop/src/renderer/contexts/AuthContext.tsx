@@ -247,12 +247,29 @@ export function AuthProvider({
       // It keeps the old owner generation, so retain the authoritative owner
       // refs until the commit or rollback arrives; otherwise the rollback is
       // mistaken for a new owner and finalizes the task that should resume.
+      const rendererOwnerGeneration = getDataOwnerGeneration();
+      const initialBoundaryPendingProjection =
+        !hasAppliedAuthStateRef.current
+        && activeDataOwnerIdRef.current === null
+        && rendererOwnerGeneration.dataOwnerId !== null
+        && state.ownerGeneration === rendererOwnerGeneration.generation;
       const pendingSignedOutProjection =
         state.dataOwnerId === null
         && state.mode === 'signed-out'
         && !state.canEnterApp
-        && activeDataOwnerIdRef.current !== null
-        && state.ownerGeneration === activeDataOwnerGenerationRef.current;
+        && (
+          (activeDataOwnerIdRef.current !== null
+            && state.ownerGeneration === activeDataOwnerGenerationRef.current)
+          || initialBoundaryPendingProjection
+        );
+      if (initialBoundaryPendingProjection && pendingSignedOutProjection) {
+        // A newly mounted renderer may receive the transient signed-out
+        // projection before it has hydrated its refs. Seed them from the
+        // synchronous owner stamp so the following rollback remains a
+        // same-owner push and cannot finalize the running task.
+        activeDataOwnerIdRef.current = rendererOwnerGeneration.dataOwnerId;
+        activeDataOwnerGenerationRef.current = rendererOwnerGeneration.generation;
+      }
       const initialOwnerHydration = !hasAppliedAuthStateRef.current && !pendingSignedOutProjection;
       const ownerChanged =
         !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
