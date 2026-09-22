@@ -182,12 +182,7 @@ export function AuthProvider({
     // leave the current account's task resumable in its original running state.
     publishDataOwnerGeneration(null, undefined, { finalizeSessions: false });
     try {
-      const result = await operation();
-      // The boundary has committed once the auth operation resolves. Finalize
-      // here as well as on the pushed snapshot so a delayed auth event cannot
-      // leave the old owner running after a successful switch.
-      cancelRemoteOptimisticSendsForDataOwnerBoundary();
-      return result;
+      return await operation();
     } catch (error) {
       // Restore the exact main-owned generation. Recomputing it locally would
       // make every stamped push from the still-active owner look stale after a
