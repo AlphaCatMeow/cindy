@@ -213,6 +213,23 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.reset).toHaveBeenCalledTimes(4);
   });
 
+  it('does not finalize restored turns during the first owner hydration', async () => {
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenCalledWith({
+      finalizeSessions: false,
+    });
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).not.toHaveBeenCalledWith({
+      finalizeSessions: true,
+    });
+
+    act(() => mocks.emitAuth(authState('account-b')));
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: true,
+    });
+  });
+
   it('resets sessions when authentication expires', async () => {
     renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(mocks.service.initialize).toHaveBeenCalled());

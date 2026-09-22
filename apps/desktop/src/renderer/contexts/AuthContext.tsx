@@ -178,6 +178,7 @@ export function AuthProvider({
   const activeDataOwnerIdRef = useRef<string | null>(null);
   const activeDataOwnerGenerationRef = useRef(0);
   const authStateVersionRef = useRef(0);
+  const hasAppliedAuthStateRef = useRef(false);
   const pendingOwnerProjectionRef = useRef(false);
 
   // Auth mutations invalidate owner-bound in-flight reads before crossing IPC. If Main rejects
@@ -239,6 +240,7 @@ export function AuthProvider({
         && !state.canEnterApp
         && activeDataOwnerIdRef.current !== null
         && state.ownerGeneration === activeDataOwnerGenerationRef.current;
+      const initialOwnerHydration = !hasAppliedAuthStateRef.current && !pendingSignedOutProjection;
       const ownerChanged =
         !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
       if (pendingSignedOutProjection) pendingOwnerProjectionRef.current = true;
@@ -250,7 +252,7 @@ export function AuthProvider({
       publishDataOwnerGeneration(
         state.dataOwnerId,
         state.ownerGeneration,
-        { finalizeSessions: ownerChanged },
+        { finalizeSessions: ownerChanged && !initialOwnerHydration },
       );
       if (ownerChanged) {
         pendingOwnerProjectionRef.current = false;
@@ -260,6 +262,7 @@ export function AuthProvider({
       if (!pendingSignedOutProjection) {
         activeDataOwnerIdRef.current = state.dataOwnerId;
         activeDataOwnerGenerationRef.current = state.ownerGeneration;
+        hasAppliedAuthStateRef.current = true;
       }
       setDataOwnerGenerationState(state.ownerGeneration);
       setNewMakerDraftOwner(state.dataOwnerId);
