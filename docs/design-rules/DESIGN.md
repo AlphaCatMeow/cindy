@@ -1126,7 +1126,12 @@ PR #1144 的两轮 review 各捉到一个**同族**缺陷:「有下划线却点�
 | 手机文件阅读器          | http(s)                                     | ✅                                     | ✅                                          |
 | 手机文件阅读器          | 会话 chip / 图片 chip / 本地路径 / mailto   | ❌（无 bridge、只放行 http(s)）        | ❌                                          |
 
-**颜色也归这条不变量管**:可点态只多一条下划线,所以链接**不得写死颜色**,必须继承所在
+**正文文件类型图标（2026-09-22）**：桌面正文中已解析的文件链接与行内文件引用，文字前增加
+14px 共享 `FileTypeIcon`，按解析后的目标路径分类，继承文字颜色。图标只表达文件类型，
+不可独立聚焦，也不进入可访问名称；下划线仍表达可点性。保留原有文字换行、复制、点击与
+右键行为。目录、未解析路径、外链和纯图片链接不加文件类型图标。
+
+**颜色也归这条不变量管**:可点性由下划线表达,所以链接**不得写死颜色**,必须继承所在
 上下文 —— 表头(`markdownTableHeaderCell` 用 `textSecondary`)、引用块等非正文色上下文里
 写死正文色,会让链接相对周围文本除下划线之外还变色。移动端 `markdownLink` 与阅读器的
 `a` 都已去掉显式 `color`。
@@ -1464,6 +1469,14 @@ The execution rulebook for subsequent desktop / mobile UI updates. Sources: the 
 - **Cross-platform action icons must match exactly (2026-09-08 owner ruling):** the same action on desktop and mobile uses the same source glyph and stroke geometry. For Lucide icons, use the same named glyph from `lucide-react` / `lucide-react-native`; a semantically similar SF Symbol or another icon family is not an equivalent replacement. Platform-appropriate size and semantic Light/Dark colors may differ, but the icon artwork must remain identical. This applies to native menus as well as custom components. Message menu baseline: `MessageSquarePlus` (add to chat), `Link2` (copy message link), `Undo2` (rewind), `Trash2` (delete message). If a native component cannot display the shared artwork, resolve the rendering approach explicitly instead of silently substituting a system symbol.
 - **Mobile action-menu icon sizing (2026-09-08 owner ruling):** message, session, and file action menus use `iconSize.lg` (18 pt) and `iconStroke.regular` (2 in Lucide's 24-unit viewBox). Native menu assets follow the same logical size: 18 / 36 / 54 px at 1x / 2x / 3x; a 24-unit SVG viewBox does not imply a 24 pt display size. Keep the shared glyph geometry and scale the whole artwork. Existing compact filter/navigation menus may retain `iconSize.md` (16); `iconSize.action` (20) is the toolbar/lightbox tier, not the action-menu default. Preserve native menu row layout and touch targets when sizing the glyph.
 - Send semantics use the filled paper plane `Send`, colored by the neutral-inverse CTA tokens; never a red send button or icon for ordinary send.
+
+#### File identity: shared classification, two presentation sizes (2026-09-22)
+
+- File identity is classified by `packages/maker-shared/src/filePresentation.ts` on both platforms. Known file names/extensions take precedence; MIME is a fallback for unknown names. This is presentation metadata only, never a decoder or permission decision.
+- Compact file rows, search results, tabs, mentions, references and diff headers use `FileTypeIcon` / `pickFileIcon`: the same named Lucide glyph on Desktop and Mobile, regular stroke, inherited semantic foreground. At 12–18 px/pt, do not squeeze PDF/DOC/XLS text into the glyph. PDF, prose and word-processing documents may share `FileText`; the filename provides the finer distinction.
+- Large attachment and generated-file tiles keep real content previews first. Without a preview, use `FileTypeTile` and the shared type label. Desktop reuses the attachment paper/badge artwork and registered file-badge tokens; Mobile uses the shared Lucide glyph and a separate readable label. Labels must respect the platform micro-text minimum; never scale a labeled tile down into a compact icon.
+- Categories cover code/configuration, text, PDF, documents, spreadsheets, presentations, images, audio, video, archives, databases and unknown files. New entry points reuse the shared classifier and platform components instead of adding extension tables.
+- File-type decoration does not replace upload progress, errors, diff counts, rename/copy status or action icons. Folder navigation, pasted-text actions and generic “files” section icons keep their own semantics. Decorative file glyphs add no focus stop or duplicate accessible label.
 
 #### Type & layout
 
