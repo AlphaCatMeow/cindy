@@ -2901,7 +2901,14 @@ function ExpandedView({
   const closeOwnedSharedTask = useCallback(async (sharedTaskId?: string): Promise<boolean> => {
     if (!sharedTaskId) return true;
     try {
-      await window.electronAPI.sharedTask.account({ action: 'close', sharedTaskId });
+      const result = await window.electronAPI.sharedTask.account({ action: 'close', sharedTaskId }) as {
+        closed?: unknown;
+        failed?: unknown;
+      };
+      if (!Array.isArray(result?.closed) || !result.closed.includes(sharedTaskId)) {
+        toast.error(t('sharedTask.closeFailedToast', { count: 1 }));
+        return false;
+      }
       return true;
     } catch (error) {
       toast.error(t(sharedTaskErrorKey(error)));
