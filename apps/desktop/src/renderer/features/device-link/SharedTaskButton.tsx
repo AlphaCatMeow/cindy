@@ -15,7 +15,9 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { JoinSharedTaskDialog } from './JoinSharedTaskDialog';
 import { WINDOW_NO_DRAG_STYLE } from '@/components/layout/windowDrag';
 import { toast } from '@/lib/toast';
+import { resetRemoteDataOwnerPushFence } from '@/lib/remoteDataOwnerPushFence';
 import { sharedTaskErrorKey } from './sharedTaskCompatibility';
+import { remoteProjectsStore } from './remoteProjectsStore';
 
 type SharedTaskTab = 'current' | 'owned';
 type ConfirmState =
@@ -37,6 +39,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<SharedTaskTab>('current');
   const [state, setState] = useState<SharedTaskHostState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [owned, setOwned] = useState<SharedTaskOwnedItem[] | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,11 +55,20 @@ export function SharedTaskButton({ session }: { session: Session }) {
       const result: SharedTaskHostState = guestSharedTaskId
         ? { available: true, detail: await window.electronAPI.sharedTask.account({ action: 'get', sharedTaskId: guestSharedTaskId }) as SharedTaskDetail }
         : await host({ action: 'state', sessionId: session.id }) as SharedTaskHostState;
-      if (captured === epoch.current && isDataOwnerGenerationCurrent(owner)) setState(result);
+      if (captured === epoch.current && isDataOwnerGenerationCurrent(owner)) {
+        setState(result);
+        setLoadError(null);
+      }
     } catch (error) {
-      if (captured === epoch.current && isDataOwnerGenerationCurrent(owner)
-          && sharedTaskErrorKey(error) === 'sharedTask.upgrade') {
-        setState({ available: false, detail: null });
+      if (captured === epoch.current && isDataOwnerGenerationCurrent(owner)) {
+        const key = sharedTaskErrorKey(error);
+        if (key === 'sharedTask.upgrade') {
+          setState({ available: false, detail: null });
+          setLoadError(null);
+        } else {
+          setState(null);
+          setLoadError(key);
+        }
       }
     }
   }, [guestSharedTaskId, host, session.id]);
@@ -73,7 +85,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
   const tabRef = useRef<SharedTaskTab>('current');
   useEffect(() => {
     const captured = ++epoch.current;
-    setState(null); setOwned(null); setConfirm(null); setTab('current');
+    setState(null); setLoadError(null); setOwned(null); setConfirm(null); setTab('current');
     tabRef.current = 'current';
     pending.current = false; setBusy(false);
     void load(captured);
@@ -151,6 +163,13 @@ export function SharedTaskButton({ session }: { session: Session }) {
         return { title: t('sharedTask.leaveTitle'), body: t('sharedTask.leaveBody'), keep: t('sharedTask.leaveKeep'), action: t('sharedTask.leave'),
           run: () => void run(async () => {
             await window.electronAPI.sharedTask.account({ action: 'leave', sharedTaskId: guestSharedTaskId! });
+            const peerId = session.deviceLinkDeviceId;
+            if (peerId) {
+              remoteProjectsStore.removeDevice(peerId);
+              resetRemoteDataOwnerPushFence(peerId);
+              await window.electronAPI.deviceLink.closeLink(peerId).catch(() => undefined);
+            }
+            window.dispatchEvent(new Event('cindy:shared-task-owned-changed'));
             setConfirm(null); setOpen(false);
           }, false) };
       case 'closeCurrent':
@@ -165,7 +184,11 @@ export function SharedTaskButton({ session }: { session: Session }) {
   const emptyIcon = (icon: React.ReactNode) => <span className="mb-4 inline-flex size-11 items-center justify-center rounded-full border border-[var(--border-default)]">{icon}</span>;
   const noticeClass = 'my-4 flex items-start gap-2 rounded-lg bg-[var(--surface-chip)] p-3 text-12 text-[var(--text-secondary)]';
   const avatarClass = 'inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-chip)] text-11';
-  const currentTab = !state ? <p className="text-[var(--text-secondary)]">{t('sharedTask.sharing')}</p>
+  const currentTab = loadError ? <div className="px-1 py-6 text-center">
+      <p className="mb-4 text-[var(--text-secondary)]">{t(loadError)}</p>
+      <Button variant="secondary" size="lg" onClick={() => void load(epoch.current)}>{t('sharedTask.retryAction')}</Button>
+    </div>
+    : !state ? <p className="text-[var(--text-secondary)]">{t('sharedTask.sharing')}</p>
     : !state.available ? <p className="text-[var(--text-secondary)]">{t('sharedTask.upgrade')}</p>
     : !detail && !guestSharedTaskId ? <>
       <p className="mb-4 text-[var(--text-secondary)]">{t('sharedTask.startIntro')}</p>

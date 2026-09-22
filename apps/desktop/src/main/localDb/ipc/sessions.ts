@@ -342,6 +342,23 @@ async function writeSessionPatch(
   throwIpcError('PRECONDITION_FAILED', '已删除的任务不能恢复或归档');
 }
 
+async function setTerminalSessionStatus(
+  dbClient: DbClient,
+  sessionId: string,
+  status: 'archived' | 'deleted',
+): Promise<void> {
+  try {
+    await dbClient.tx('sessions.setTerminalStatus', { sessionId, status });
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    const message = error instanceof Error ? error.message : String(error);
+    if (code === 'NOT_FOUND' || code === 'INVALID_PARAMS' || code === 'PRECONDITION_FAILED') {
+      throwIpcError(code, message);
+    }
+    throw error;
+  }
+}
+
 export function captureSessionRecycleScope(
   dbClient: DbClient = getDbClient(),
 ): SessionRecycleScope {
@@ -1954,14 +1971,24 @@ export async function updateSessionInDb(
         await moveGuard?.beforeWrite?.();
         moveGuard?.assertCurrent();
         const terminal = p.status === 'archived' || p.status === 'deleted';
-        const prepared = terminal ? await prepareSharedTaskClosure(sid, dbClient) : null;
-        try {
+        if (terminal) {
+          if (typeof dbClient.tx === 'function') {
+            const { status: _status, ...nonTerminalPatch } = setObj;
+            await writeSessionPatch(db, sid, nonTerminalPatch, undefined);
+            await setTerminalSessionStatus(dbClient, sid, p.status as 'archived' | 'deleted');
+          } else {
+            const prepared = await prepareSharedTaskClosure(sid, dbClient);
+            try {
+              await writeSessionPatch(db, sid, setObj, p.status);
+            } catch (error) {
+              await rollbackSharedTaskClosure(dbClient, prepared);
+              throw error;
+            }
+            await finalizeSharedTaskClosure(dbClient, prepared);
+          }
+        } else {
           await writeSessionPatch(db, sid, setObj, p.status);
-        } catch (error) {
-          await rollbackSharedTaskClosure(dbClient, prepared);
-          throw error;
         }
-        await finalizeSharedTaskClosure(dbClient, prepared);
         cleanupSessionRuntimeForTerminalStatus(sid, p.status);
         if (terminal) {
           const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
@@ -2127,14 +2154,24 @@ export async function patchSessionMetaInDb(
   const updated = await withStatusWriteLock(db, sessionId, patch.status, async () => {
     if (patch.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sessionId);
     const terminal = patch.status === 'archived' || patch.status === 'deleted';
-    const prepared = terminal ? await prepareSharedTaskClosure(sessionId, dbClient) : null;
-    try {
+    if (terminal) {
+      if (typeof dbClient.tx === 'function') {
+        const { status: _status, ...nonTerminalPatch } = setObj;
+        await writeSessionPatch(db, sessionId, nonTerminalPatch, undefined);
+        await setTerminalSessionStatus(dbClient, sessionId, patch.status as 'archived' | 'deleted');
+      } else {
+        const prepared = await prepareSharedTaskClosure(sessionId, dbClient);
+        try {
+          await writeSessionPatch(db, sessionId, setObj, patch.status);
+        } catch (error) {
+          await rollbackSharedTaskClosure(dbClient, prepared);
+          throw error;
+        }
+        await finalizeSharedTaskClosure(dbClient, prepared);
+      }
+    } else {
       await writeSessionPatch(db, sessionId, setObj, patch.status);
-    } catch (error) {
-      await rollbackSharedTaskClosure(dbClient, prepared);
-      throw error;
     }
-    await finalizeSharedTaskClosure(dbClient, prepared);
     const row = await selectSessionWithCount(db, sessionId);
     if (!row) throwIpcError('NOT_FOUND', 'Session 不存在');
     if (patch.pinnedAt !== undefined && row.pinnedAt == null) {
@@ -2331,43 +2368,28 @@ export async function setSessionsStatusInDb(
     }
     const physicalResources = await Promise.all([...new Set(resources)].map(physicalWorktreeKey));
     return withWorktreeMutation(resources, async () => {
-      const prepared: SharedTaskClosurePreparation[] = [];
-      let committed = false;
-      try {
-        if (status === 'archived') {
-          for (const id of sessionIds) {
-            const closure = await prepareSharedTaskClosure(id, dbClient);
-            if (closure) prepared.push(closure);
-          }
-        }
-        if (status === 'archived') {
-          for (const id of sessionIds) await requestWorktreeRecycle(id, perSession.get(id));
-        }
-        const rows = await dbClient.tx('sessions.setStatus', { sessionIds, status }).catch((err) => {
+      if (status === 'archived') {
+        for (const id of sessionIds) await requestWorktreeRecycle(id, perSession.get(id));
+      }
+      const rows = await dbClient.tx('sessions.setStatus', status === 'archived'
+        ? { sessionIds, status, closeSharedTasks: true }
+        : { sessionIds, status }).catch((err) => {
           const code = (err as { code?: string }).code;
           const message = err instanceof Error ? err.message : String(err);
           if (code === 'NOT_FOUND' || code === 'INVALID_PARAMS' || code === 'PRECONDITION_FAILED') {
             throwIpcError(code, message);
           }
           throw err;
-        });
-        committed = true;
-        for (const closure of prepared) await finalizeSharedTaskClosure(dbClient, closure);
-        for (const item of rows) {
+      });
+      for (const item of rows) {
           cleanupSessionRuntimeForTerminalStatus(item.sessionId, item.status);
           if (item.status === 'archived') {
             const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
             await closeSharedTaskForTask(item.sessionId, dbClient);
           }
-        }
-        for (const resource of physicalResources) notifyWorktreeRecycleOpportunity(resource);
-        return rows;
-      } catch (error) {
-        if (!committed) {
-          for (const closure of prepared) await rollbackSharedTaskClosure(dbClient, closure);
-        }
-        throw error;
       }
+      for (const resource of physicalResources) notifyWorktreeRecycleOpportunity(resource);
+      return rows;
     });
   });
   for (const item of applied) {

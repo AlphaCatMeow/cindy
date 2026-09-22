@@ -8,10 +8,12 @@ import { SharedTaskButton } from '../SharedTaskButton';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import type { Session } from '@/lib/ccAgent.types';
 import { toast } from '@/lib/toast';
-const state = vi.hoisted(() => ({ invoke: vi.fn(), host: vi.fn(), account: vi.fn(), t: vi.fn((key: string, _options?: unknown) => key) }));
+const state = vi.hoisted(() => ({ invoke: vi.fn(), host: vi.fn(), account: vi.fn(), closeLink: vi.fn(), removeDevice: vi.fn(), resetFence: vi.fn(), t: vi.fn((key: string, _options?: unknown) => key) }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: state.t }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ dataOwnerId: 'owner' }) }));
 vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('@/lib/remoteDataOwnerPushFence', () => ({ resetRemoteDataOwnerPushFence: state.resetFence }));
+vi.mock('../remoteProjectsStore', () => ({ remoteProjectsStore: { removeDevice: state.removeDevice } }));
 let container: HTMLDivElement;
 let root: Root;
 const ownerSession = { id: 'session-1' } as Session;
@@ -29,7 +31,7 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.clearAllMocks(); setDataOwnerGeneration('owner');
   Object.assign(window, { electronAPI: {
-    deviceLink: { invoke: state.invoke },
+    deviceLink: { invoke: state.invoke, closeLink: state.closeLink },
     sharedTask: { host: state.host, account: state.account },
   } });
   state.host.mockResolvedValue({ available: true, detail });
@@ -52,8 +54,20 @@ it('renders an upgrade instruction when an old host rejects the new channel', as
 it('does not mislabel a timeout as an old host', async () => {
   state.host.mockRejectedValue(new Error('[DEVICE_LINK_TIMEOUT] timeout'));
   const body = await openWindow(ownerSession);
-  await waitFor(() => expect(body.textContent).toContain('sharedTask.sharing'));
+  await waitFor(() => expect(body.textContent).toContain('sharedTask.requestTimedOut'));
+  expect(within(body).getByRole('button', { name: 'sharedTask.retryAction' })).toBeDefined();
   expect(body.textContent).not.toContain('sharedTask.upgrade');
+});
+it('retries a disconnected host after showing a recoverable error', async () => {
+  let calls = 0;
+  state.host.mockImplementation(() => ++calls <= 2
+    ? Promise.reject(new Error('[DEVICE_LINK_NOT_CONNECTED] disconnected'))
+    : Promise.resolve({ available: true, detail }));
+  const body = await openWindow(ownerSession);
+  await waitFor(() => expect(body.textContent).toContain('sharedTask.connectionFailed'));
+  fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.retryAction' }));
+  await waitFor(() => expect(body.textContent).toContain('sharedTask.inviteBoxTitle'));
+  expect(state.host).toHaveBeenCalledTimes(3);
 });
 it('distinguishes a local clipboard failure from a shared-task request failure', async () => {
   const copy = vi.fn().mockRejectedValue(new DOMException('Document is not focused.', 'NotAllowedError'));
@@ -300,4 +314,18 @@ it('does not offer to enter a guest task that is already open', async () => {
   await waitFor(() => expect(body.textContent).toContain('sharedTask.joinedTitle'));
   expect(within(body).queryByRole('button', { name: 'sharedTask.enterTask' })).toBeNull();
   expect(within(body).getByRole('button', { name: 'sharedTask.leave' })).toBeDefined();
+});
+it('cleans up the guest peer immediately after leaving', async () => {
+  state.account.mockImplementation((command: { action: string }) => command.action === 'get'
+    ? Promise.resolve(detail)
+    : Promise.resolve([]));
+  const peer = sharedTaskHostPeer('st1', 'desktop');
+  const body = await openWindow({ id: 'session-1', deviceLinkDeviceId: peer } as Session);
+  await waitFor(() => expect(body.textContent).toContain('sharedTask.joinedTitle'));
+  fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.leave' }));
+  fireEvent.click(within(body).getByRole('alertdialog').querySelector('button:last-child')!);
+  await waitFor(() => expect(state.account).toHaveBeenCalledWith({ action: 'leave', sharedTaskId: 'st1' }));
+  expect(state.removeDevice).toHaveBeenCalledWith(peer);
+  expect(state.resetFence).toHaveBeenCalledWith(peer);
+  expect(state.closeLink).toHaveBeenCalledWith(peer);
 });
