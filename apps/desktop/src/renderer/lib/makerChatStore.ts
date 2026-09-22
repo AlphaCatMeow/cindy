@@ -9845,11 +9845,14 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // A live-but-idle handle has already stopped its turn and must take the
       // same finalizer path.
       const current = sessions.get(id);
-      if (
-        liveTurns.get(id) === true ||
-        !current ||
-        !sameActiveTurnBoundaryMarker(current, marker)
-      ) continue;
+      const mainTurnRunning = liveTurns.get(id);
+      if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(current, marker))
+        continue;
+      // listActive keeps idle session handles that still own local wake work.
+      // isTurnRunning=false only says the foreground turn ended; do not
+      // close a live local_agent/local_workflow task while rolling back a
+      // rejected owner transition.
+      if (mainTurnRunning === false && hasBackgroundAgentWork(id, current)) continue;
       bumpInteractionReconcileEpoch(id);
       supersedeInputProjectionRequests(id, { supersedeOperations: true });
       flushPendingTextDelta(id);

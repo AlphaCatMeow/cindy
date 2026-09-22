@@ -1116,4 +1116,38 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       makerChatStore.purgeSession(sid);
     }
   });
+
+  it('rollback reconciliation preserves local wake work on an idle Main session', async () => {
+    const sid = 'rollback-idle-wake-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      applyTask(sid, { taskId: 'wake-1', status: 'running', taskType: 'local_agent' });
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, false));
+      expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(false);
+
+      globalWindow.window = {
+        electronAPI: {
+          maker: {
+            listActive: vi.fn(async () => [
+              { sessionId: sid, agentKind: 'codex', isTurnRunning: false },
+            ]),
+          },
+        },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+      const state = makerChatStore.getSnapshot(sid);
+      expect(state.agentStatus.isRunning).toBe(false);
+      expect(state.taskUpdates?.get('wake-1')?.status).toBe('running');
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
 });
