@@ -342,7 +342,7 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenCalledTimes(2);
   });
 
-  it('reconciles Main runtime on a rollback push before the auth IPC rejects', async () => {
+  it('does not consume the rollback marker on a same-owner push during teardown', async () => {
     let rejectLogout!: (error: Error) => void;
     mocks.service.logout.mockReturnValueOnce(
       new Promise<void>((_resolve, reject) => {
@@ -363,12 +363,13 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
       finalizeSessions: false,
     });
-    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).not.toHaveBeenCalled();
 
     await act(async () => {
       rejectLogout(new Error('logout failed'));
       await expect(logout).rejects.toThrow('logout failed');
     });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
     expect(getDataOwnerGeneration().dataOwnerId).toBe('account-a');
   });
 

@@ -189,7 +189,11 @@ export function AuthProvider({
     // against Main: an early rejection keeps the runtime, a late one may not.
     publishDataOwnerGeneration(null, undefined, { finalizeSessions: false });
     try {
-      return await operation();
+      const result = await operation();
+      // A successful boundary owns the marker lifecycle. A same-owner auth
+      // push during teardown must not consume a possible rollback marker.
+      pendingOwnerProjectionRef.current = false;
+      return result;
     } catch (error) {
       // Restore the exact main-owned generation. Recomputing it locally would
       // make every stamped push from the still-active owner look stale after a
@@ -237,9 +241,7 @@ export function AuthProvider({
         && state.ownerGeneration === activeDataOwnerGenerationRef.current;
       const ownerChanged =
         !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
-      const ownerRolledBack =
-        pendingOwnerProjectionRef.current && !pendingSignedOutProjection && !ownerChanged;
-      pendingOwnerProjectionRef.current = pendingSignedOutProjection;
+      if (pendingSignedOutProjection) pendingOwnerProjectionRef.current = true;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
       // that push use the default finalizer would stop the current owner's
@@ -250,8 +252,8 @@ export function AuthProvider({
         state.ownerGeneration,
         { finalizeSessions: ownerChanged },
       );
-      if (ownerRolledBack) void reconcileSessionsAfterDataOwnerRollback();
       if (ownerChanged) {
+        pendingOwnerProjectionRef.current = false;
         sessionsStore.reset();
         clearWorkersCache();
       }
