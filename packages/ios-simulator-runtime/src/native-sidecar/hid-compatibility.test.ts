@@ -46,6 +46,11 @@ it.skipIf(process.platform !== "darwin")(
         "delivery error propagation",
         "bounded completion timeout",
         "late and duplicate completion",
+        "completed sends keep input available",
+        "completed failure does not poison the sequence",
+        "timeout rejects queued send before message construction",
+        "late completion cannot re-arm timed-out input",
+        "fresh helper sequence accepts recovery release",
       ]);
     } finally {
       await rm(directory, { recursive: true, force: true });

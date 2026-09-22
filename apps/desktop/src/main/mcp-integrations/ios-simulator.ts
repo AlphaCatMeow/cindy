@@ -3153,6 +3153,7 @@ export function createIOSSimulatorHost(options: IOSSimulatorHostOptions = {}): I
           environment.runtimes.find((runtime) => runtime.identifier === instance.runtimeIdentifier)
             ?.buildVersion ?? null,
         xcodeBuild: environment.xcodeVersion ?? 'unknown',
+        developerDirectory: environment.xcodeSelectPath ?? undefined,
         architecture: process.arch === 'x64' ? 'x86_64' : 'arm64',
         generation: instance.generation,
       });

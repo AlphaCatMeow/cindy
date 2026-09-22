@@ -40,13 +40,19 @@ registry version 为 2，旧 Xcode 26.4 记录保留。
   `dlopen` / `dlsym`；Swift getter 仍通过原有架构 ABI shim 调用，缺失符号返回能力不可用。
 - 沙箱 profile v2 仅增加所选 Xcode 的 `SimulatorKit.framework` 读取/映射和路径元数据权限。
   DYLD 注入变量仍被剥离；签名、摘要、Hardened Runtime 与 packaged artifact trust 门保持不变。
-- 同一实例的恢复保留绑定时的工具链；新实例启动重新解析选择。运行中的实例不混用另一
-  Xcode 的框架与原 runtime identity。
+- 环境检查解析一次 Developer 目录，并将后续版本/设备探测固定到该目录；路径与版本一起
+  传给 WDA 构建、启动、Native 沙箱及 Helper。即使启动期间全局 Xcode 选择变化，同一实例
+  及其恢复仍使用原绑定；新实例的新环境检查才读取新选择。未提供路径的旧内部调用保留
+  启动时解析行为，不修改机器级选择。
 - HID 目标根据所选 SimulatorKit 的屏幕 API 与实际屏幕属性推导，和 framebuffer 绑定
   同一 screenID，不按版本号特判。旧 API 缺少 `screen` selector 时保留 legacy target；
   新 API 存在但属性缺失/屏幕身份不匹配时关闭输入能力，不盲发 legacy target。
 - Indigo 构造器内部也维护接触状态，因此串行范围包含消息构造、提交和完成；完成等待
   最多 1 秒，回调独立队列执行，NSError 原始内容不进入 Host 协议。
+- 完成等待超时会在释放串行锁前永久隔离该 Helper 的输入注入器；排队及后续的触控、取消、
+  `releaseInput` 均在构造消息前拒绝，迟到/重复回调不重新开放输入；随后结束该 Helper，
+  由现有进程退出处理触发 WDA 回退并提供 Native 恢复入口。恢复重启 Helper 后才重新建立
+  输入状态；不自动重放失败手势，也不重启 WDA 或模拟器。
 
 ## 真实验证结果
 

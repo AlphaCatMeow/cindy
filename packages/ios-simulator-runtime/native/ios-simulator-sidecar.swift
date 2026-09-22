@@ -1129,7 +1129,7 @@ final class NativeHIDInjector {
     private let mouseMessage: IndigoMouseMessage
     private let target: UInt32
     private let completionQueue = DispatchQueue(label: "cindy.native-hid.completion")
-    private let lock = NSLock()
+    private let delivery = NativeHIDDeliverySequence()
 
     init(device: AnyObject, target: UInt32) throws {
         guard let mouseSymbol = dlsym(
@@ -1207,49 +1207,54 @@ final class NativeHIDInjector {
         }
         // The Indigo message builder also maintains process-global contact
         // state. Serialize construction and completion, not only enqueueing.
-        lock.lock()
-        defer { lock.unlock() }
-        var firstPoint = CGPoint(x: first.x, y: first.y)
-        let message: UnsafeMutableRawPointer?
-        if var secondPoint = second.map({ CGPoint(x: $0.x, y: $0.y) }) {
-            message = withUnsafePointer(to: &secondPoint) { secondPointer in
-                mouseMessage(
-                    &firstPoint,
-                    secondPointer,
-                    target,
-                    eventType,
-                    1,
-                    1,
-                    0
+        do {
+            try delivery.send { pending in
+                var firstPoint = CGPoint(x: first.x, y: first.y)
+                let message: UnsafeMutableRawPointer?
+                if var secondPoint = second.map({ CGPoint(x: $0.x, y: $0.y) }) {
+                    message = withUnsafePointer(to: &secondPoint) { secondPointer in
+                        mouseMessage(
+                            &firstPoint,
+                            secondPointer,
+                            target,
+                            eventType,
+                            1,
+                            1,
+                            0
+                        )
+                    }
+                } else {
+                    message = mouseMessage(
+                        &firstPoint,
+                        nil,
+                        target,
+                        eventType,
+                        1,
+                        1,
+                        first.edge
+                    )
+                }
+                guard let message else {
+                    throw NativeHIDError.messageUnavailable
+                }
+                let completion: @convention(block) (NSError?) -> Void = { error in
+                    pending.complete(error: error)
+                }
+                sendMessage(
+                    client,
+                    sendSelector,
+                    message,
+                    true,
+                    completionQueue,
+                    completion as AnyObject
                 )
             }
-        } else {
-            message = mouseMessage(
-                &firstPoint,
-                nil,
-                target,
-                eventType,
-                1,
-                1,
-                first.edge
-            )
+        } catch NativeHIDError.deliveryTimedOut {
+            // The sequence is already closed to queued/cancel sends. Retire
+            // this helper so the Host observes failure and exposes its existing
+            // fallback/re-arm route instead of advertising unusable HID.
+            fail(NativeHIDError.deliveryTimedOut.publicMessage)
         }
-        guard let message else {
-            throw NativeHIDError.messageUnavailable
-        }
-        let pending = PendingHIDDelivery()
-        let completion: @convention(block) (NSError?) -> Void = { error in
-            pending.complete(error: error)
-        }
-        sendMessage(
-            client,
-            sendSelector,
-            message,
-            true,
-            completionQueue,
-            completion as AnyObject
-        )
-        try pending.wait()
     }
 
     func releaseStaleContact() throws {

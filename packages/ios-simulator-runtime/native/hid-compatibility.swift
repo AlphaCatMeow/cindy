@@ -98,3 +98,29 @@ final class PendingHIDDelivery {
         if failed { throw NativeHIDError.deliveryFailed }
     }
 }
+
+/// Own construction through completion, including callers queued behind a
+/// failed send. A timeout leaves delivery/contact state unknown, so only a new
+/// helper may re-arm input; a late callback cannot make this sequence safe.
+final class NativeHIDDeliverySequence {
+    private let lock = NSLock()
+    private var timedOut = false
+
+    func send(
+        timeout: TimeInterval = 1,
+        enqueue: (PendingHIDDelivery) throws -> Void
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !timedOut else { throw NativeHIDError.deliveryTimedOut }
+        let pending = PendingHIDDelivery()
+        try enqueue(pending)
+        do {
+            try pending.wait(timeout: timeout)
+        } catch NativeHIDError.deliveryTimedOut {
+            // Latch before releasing the lock, even if completion races timeout.
+            timedOut = true
+            throw NativeHIDError.deliveryTimedOut
+        }
+    }
+}

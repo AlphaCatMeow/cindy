@@ -63,6 +63,8 @@ export interface IOSSimulatorNativeSidecarStartOptions {
     runtimeIdentifier: string;
     runtimeBuildVersion: string | null;
     xcodeBuild: string;
+    /** Host-inspected installation, retained for this binding and recovery. */
+    developerDirectory?: string;
     architecture: "arm64" | "x86_64";
   };
 }
@@ -310,6 +312,7 @@ function sameStartIdentity(
     left.runtime.runtimeIdentifier === right.runtime.runtimeIdentifier &&
     left.runtime.runtimeBuildVersion === right.runtime.runtimeBuildVersion &&
     left.runtime.xcodeBuild === right.runtime.xcodeBuild &&
+    left.runtime.developerDirectory === right.runtime.developerDirectory &&
     left.runtime.architecture === right.runtime.architecture
   );
 }
@@ -1447,15 +1450,17 @@ export class IOSSimulatorNativeSidecarProcessManager {
         required: false,
         platform: process.platform,
       });
-    // Resolve for each new instance binding, outside the sandbox. Recovery
-    // retains that binding's toolchain along with its runtime identity. The helper
+    // Prefer the inspected installation over the ambient selection. Legacy
+    // callers without a captured directory resolve once outside the sandbox.
+    // Recovery retains that binding's toolchain and runtime identity. The helper
     // cannot execute xcode-select, and its framework and device context must
     // use the same selected installation. Fake channels need no Apple tools.
     if (policy.platform === "darwin" && !this.#options.createChannel) {
       policy = {
         ...policy,
         developerDirectory: await resolveIOSSimulatorDeveloperDirectory({
-          developerDirectory: policy.developerDirectory,
+          developerDirectory:
+            input.runtime?.developerDirectory ?? policy.developerDirectory,
           environment: this.#options.environment ?? process.env,
         }),
       };
