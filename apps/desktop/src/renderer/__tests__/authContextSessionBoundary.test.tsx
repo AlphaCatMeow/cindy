@@ -380,13 +380,13 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
       finalizeSessions: false,
     });
-    expect(mocks.reconcileSessionsAfterDataOwnerRollback).not.toHaveBeenCalled();
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       rejectLogout(new Error('logout failed'));
       await expect(logout).rejects.toThrow('logout failed');
     });
-    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(2);
     expect(getDataOwnerGeneration().dataOwnerId).toBe('account-a');
   });
 

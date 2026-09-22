@@ -243,6 +243,8 @@ export function AuthProvider({
       const initialOwnerHydration = !hasAppliedAuthStateRef.current && !pendingSignedOutProjection;
       const ownerChanged =
         !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
+      const ownerRollbackProjection =
+        pendingOwnerProjectionRef.current && !pendingSignedOutProjection && !ownerChanged;
       if (pendingSignedOutProjection) pendingOwnerProjectionRef.current = true;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
@@ -259,6 +261,10 @@ export function AuthProvider({
         sessionsStore.reset();
         clearWorkersCache();
       }
+      // Any renderer may receive the rollback projection before the initiating
+      // IPC promise rejects. Reconcile without consuming the operation marker;
+      // listActive keeps a still-running old-owner turn resumable.
+      if (ownerRollbackProjection) void reconcileSessionsAfterDataOwnerRollback();
       if (!pendingSignedOutProjection) {
         activeDataOwnerIdRef.current = state.dataOwnerId;
         activeDataOwnerGenerationRef.current = state.ownerGeneration;

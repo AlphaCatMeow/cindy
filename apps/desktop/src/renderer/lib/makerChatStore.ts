@@ -9792,7 +9792,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
   const owner = getDataOwnerGeneration();
   if (owner.dataOwnerId === null) return;
   const candidates = [...sessions].filter(([id, state]) =>
-    !isRemoteSession(id) && hasActiveTurnStateForOwnerBoundary(state),
+    !isRemoteSessionSticky(id) && hasActiveTurnStateForOwnerBoundary(state),
   );
   if (candidates.length === 0) return;
   try {

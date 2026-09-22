@@ -983,6 +983,7 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
 
   it('rollback reconciliation finalizes only sessions absent from Main after teardown', async () => {
     const sid = 'rollback-reconcile-' + Math.random().toString(36).slice(2, 8);
+    const remoteSid = 'remote-rollback-reconcile-' + Math.random().toString(36).slice(2, 8);
     const globalWindow = globalThis as typeof globalThis & {
       window?: { electronAPI?: unknown };
     };
@@ -992,6 +993,8 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       setDataOwnerGeneration('account-a', 1);
       makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
       applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
+      makerChatStore.__applyStatusUpdateForTest(remoteSid, statusUpdate(remoteSid, true));
+      applyTask(remoteSid, { taskId: 'remote-t1', status: 'running', taskType: 'local_agent' });
       globalWindow.window = {
         electronAPI: { maker: { listActive: vi.fn(async () => []) } },
       } as typeof globalWindow.window;
@@ -999,8 +1002,10 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       await reconcileSessionsAfterDataOwnerRollback();
       expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(false);
       expect(makerChatStore.getSnapshot(sid).taskUpdates?.get('t1')?.status).toBe('stopped');
+      expect(makerChatStore.getSnapshot(remoteSid).agentStatus.isRunning).toBe(true);
     } finally {
       makerChatStore.purgeSession(sid);
+      makerChatStore.purgeSession(remoteSid);
       dataOwnerGenerationTesting.reset();
       globalWindow.window = previousWindow;
     }
