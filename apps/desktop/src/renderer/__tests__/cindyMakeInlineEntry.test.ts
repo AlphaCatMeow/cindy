@@ -57,7 +57,7 @@ describe('Cindy Make composer presentation', () => {
     expect(testCard).toBeGreaterThan(mask);
     expect(testCard).toBeLessThan(input);
     const recoveryMatch = sessionView.match(
-      /(?:\)\s*:\s*|topSlot\s*=\s*)cindyMakeRecoveryId\s*&&\s*session\s*\?\s*\(/,
+      /(?:\)\s*:\s*|topSlot\s*=\s*\{?\s*)cindyMakeRecoveryId\s*&&\s*session\s*\?\s*\(/,
     );
     const recovery = recoveryMatch?.index ?? -1;
     expect(recovery).toBeGreaterThan(mask);
