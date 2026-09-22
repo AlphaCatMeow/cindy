@@ -21,7 +21,7 @@ type SharedTaskTab = 'current' | 'owned';
 type ConfirmState =
   | { kind: 'remove'; memberId: string; name: string }
   | { kind: 'leave' }
-  | { kind: 'closeCurrent' }
+  | { kind: 'closeCurrent'; sharedTaskId: string }
   | { kind: 'closeAll'; targets: SharedTaskOwnedItem[] };
 
 const tabButton = (active: boolean) => `rounded-full px-3 py-1 text-12 leading-5 transition-colors ${
@@ -155,7 +155,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
           }, false) };
       case 'closeCurrent':
         return { title: t('sharedTask.closeOneTitle'), body: t('sharedTask.closeOneBody'), keep: t('sharedTask.closeAllKeep'), action: t('sharedTask.close'),
-          run: () => void run(async () => { await host({ action: 'close', sharedTaskId: detail!.sharedTaskId }); setConfirm(null); toast.success(t('sharedTask.closedToast', { count: 1 })); }) };
+          run: () => void run(async () => { await host({ action: 'close', sharedTaskId: state.sharedTaskId }); setConfirm(null); toast.success(t('sharedTask.closedToast', { count: 1 })); }) };
       case 'closeAll':
         return { title: t('sharedTask.closeAllTitle'), body: t('sharedTask.closeAllBody'), keep: t('sharedTask.closeAllKeep'),
           action: t('sharedTask.closeAllAction', { count: state.targets.length }), danger: true,
@@ -215,7 +215,7 @@ export function SharedTaskButton({ session }: { session: Session }) {
       })}
       <div className={noticeClass}><Clock size={16} className="mt-0.5 shrink-0" aria-hidden /><p>{t(session.deviceLinkDeviceId ? 'sharedTask.remoteHostOfflineNote' : 'sharedTask.hostOfflineNote')}</p></div>
       <div className="mt-5 flex justify-center"><Button variant="secondary" size="lg" disabled={busy} className="w-full px-4 text-[var(--error-fg)]"
-        onClick={() => setConfirm({ kind: 'closeCurrent' })}>{t('sharedTask.closeCurrent')}</Button></div>
+        onClick={() => setConfirm({ kind: 'closeCurrent', sharedTaskId: detail.sharedTaskId })}>{t('sharedTask.closeCurrent')}</Button></div>
     </>
     : <div className="px-1 py-6 text-center">
       {emptyIcon(<CircleStop size={18} aria-hidden />)}

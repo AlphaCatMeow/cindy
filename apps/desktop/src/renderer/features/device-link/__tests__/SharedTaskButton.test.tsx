@@ -199,6 +199,26 @@ it.each(['response', 'rejection'])('retries only failed snapshot items after a c
   ]);
   expect(within(body).queryByRole('alertdialog')).toBeNull();
 });
+it('closes the shared task captured when the current-task confirmation opened', async () => {
+  vi.useFakeTimers();
+  try {
+    let currentDetail: SharedTaskDetail = detail;
+    state.host.mockImplementation(async (command: { action: string }) => {
+      if (command.action === 'close') return { ok: true };
+      return { available: true, detail: currentDetail };
+    });
+    const body = await openWindow(ownerSession);
+    await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.closeCurrent' })));
+    currentDetail = { ...detail, sharedTaskId: 'st2', title: 'Task B' };
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    await act(async () => fireEvent.click(within(body).getByRole('button', { name: 'sharedTask.close' })));
+    expect(state.host.mock.calls.filter(([command]) => command.action === 'close')).toEqual([
+      [{ action: 'close', sharedTaskId: 'st1' }],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 it.each(['account change', 'unmount'])('stops the confirmed batch after %s', async (invalidation) => {
   let finish!: (result: SharedTaskCloseResult) => void;
   state.account.mockImplementation((command: { action: string }) => command.action === 'owned'

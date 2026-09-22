@@ -245,6 +245,18 @@ it('closes only the confirmed owned tasks and retains failures for retry', async
   expect(element.textContent).toContain('sharedTask.closeFailedToast');
   expect(element.textContent).toContain('two'); expect(element.textContent).not.toContain('one');
 });
+it('does not start the next batch close after the page account generation changes', async () => {
+  h.params = { sessionId: 'task', deviceId: 'host' };
+  h.api.list.mockResolvedValue([owned('one'), owned('two')]);
+  let finishFirst!: () => void;
+  h.api.close.mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }));
+  await render(); await click('sharedTask.tabOwned'); await click('sharedTask.closeAll');
+  await act(async () => confirmation()[1].onPress!());
+  expect(h.api.close.mock.calls.map(([id]) => id)).toEqual(['one']);
+  setMobileAuthOwner('other'); h.generation++; await render();
+  await act(async () => finishFirst());
+  expect(h.api.close.mock.calls.map(([id]) => id)).toEqual(['one']);
+});
 it('guards current-task close and member removal behind separate confirmations', async () => {
   h.params = { sessionId: 'task', deviceId: 'host' }; h.link.invoke.mockResolvedValue({ available: true, detail });
   await render(); await click('sharedTask.removeShort');

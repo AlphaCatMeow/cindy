@@ -51,6 +51,7 @@ export default function SharedSessionScreen() {
   const pending = useRef(false);
   const mounted = useRef(true);
   const epoch = useRef(0);
+  const pageGeneration = useRef(0);
   const peer = deviceId ? parseSharedTaskPeer(deviceId) : null;
   const guestId = peer?.role === 'host' ? peer.sharedTaskId : joinedId ?? sharedTaskId;
   const guestTarget = peer?.role === 'host' ? deviceId
@@ -117,7 +118,13 @@ export default function SharedSessionScreen() {
     return () => { mounted.current = false; epoch.current++; };
   }, [accountGeneration, deviceId, sessionId, sharedTaskId]);
   useFocusEffect(useCallback(() => {
-    return () => { confirmationPending.current = null; };
+    const captured = ++pageGeneration.current;
+    return () => {
+      if (pageGeneration.current === captured) pageGeneration.current++;
+      confirmationPending.current = null;
+      pending.current = false;
+      setBusy(false);
+    };
   }, []));
   useFocusEffect(useCallback(() => {
     let disposed = false;
@@ -145,7 +152,8 @@ export default function SharedSessionScreen() {
     const owner = getMobileAuthOwner();
     // A read already in flight must not restore state from before this action.
     const captured = ++epoch.current;
-    const current = () => mounted.current && captured === epoch.current && isMobileAuthOwnerCurrent(owner);
+    const page = pageGeneration.current;
+    const current = () => mounted.current && captured === epoch.current && page === pageGeneration.current && isMobileAuthOwnerCurrent(owner);
     try {
       if (link.sharedTaskAvailable !== true) { setNotice(t(link.sharedTaskAvailable === false ? 'sharedTask.upgrade' : 'sharedTask.retry')); return; }
       await work(current);
@@ -155,12 +163,13 @@ export default function SharedSessionScreen() {
         if (guestId && isSharedTaskGone(error)) endAccess();
         else setNotice(t(sharedTaskErrorKey(error, context)));
       }
-    } finally { if (captured === epoch.current) { pending.current = false; setBusy(false); } }
+    } finally { if (captured === epoch.current && page === pageGeneration.current) { pending.current = false; setBusy(false); } }
   };
   const confirm = (title: string, body: string, cancel: string, action: string, work: (current: () => boolean) => Promise<void>, reload = true, extra?: { items?: string[]; note?: string }) => {
     if (confirmationPending.current || pending.current) return;
     const owner = getMobileAuthOwner();
     const captured = epoch.current;
+    const page = pageGeneration.current;
     const request = {};
     confirmationPending.current = request;
     Keyboard.dismiss();
@@ -170,7 +179,7 @@ export default function SharedSessionScreen() {
     }).then((accepted) => {
       if (confirmationPending.current !== request) return;
       confirmationPending.current = null;
-      if (accepted && mounted.current && captured === epoch.current && isMobileAuthOwnerCurrent(owner)) void run(work, reload);
+      if (accepted && mounted.current && captured === epoch.current && page === pageGeneration.current && isMobileAuthOwnerCurrent(owner)) void run(work, reload);
     });
   };
   const openTask = async (id: string, current: () => boolean) => {
@@ -205,12 +214,23 @@ export default function SharedSessionScreen() {
     t('sharedTask.closeAllTitle'),
     t('sharedTask.closeAllBody'),
     t('sharedTask.closeAllKeep'), t('sharedTask.closeAllAction', { count: items.length }), async (current) => {
-      const results = await Promise.allSettled(items.map((item) => api.close(item.sharedTaskId)));
+      const closed = new Set<string>();
+      const failed: SharedTaskListItem[] = [];
+      for (const item of items) {
+        if (!current()) return;
+        try {
+          await api.close(item.sharedTaskId);
+          if (!current()) return;
+          closed.add(item.sharedTaskId);
+        } catch {
+          if (!current()) return;
+          failed.push(item);
+        }
+      }
       if (!current()) return;
-      const closed = new Set(items.filter((_, index) => results[index].status === 'fulfilled').map((item) => item.sharedTaskId));
       setOwned((value) => value.filter((item) => !closed.has(item.sharedTaskId)));
-      const failed = results.length - closed.size;
-      setNotice(t(failed ? 'sharedTask.closeFailedToast' : 'sharedTask.closedToast', { count: failed || closed.size }));
+      const failedCount = failed.length;
+      setNotice(t(failedCount ? 'sharedTask.closeFailedToast' : 'sharedTask.closedToast', { count: failedCount || closed.size }));
     }, true, { items: items.map((item) => item.title + ' · ' + deviceName(item.hostDeviceId)), note: t('sharedTask.closeAllScopeNote') });
   const leave = () => confirm(t('sharedTask.leaveTitle'), t('sharedTask.leaveBody'), t('sharedTask.leaveKeep'), t('sharedTask.leave'), async (current) => {
     await api.leave(guestId!);
