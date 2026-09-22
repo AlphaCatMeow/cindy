@@ -273,6 +273,35 @@ describe('AuthContext session cache boundaries', () => {
     });
   });
 
+  it('does not finalize when a failed boundary rolls back from a pending signed-out push', async () => {
+    let rejectLogout!: (error: Error) => void;
+    mocks.service.logout.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectLogout = reject;
+      }),
+    );
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+
+    let logout!: Promise<void>;
+    act(() => {
+      logout = view.result.current.logout();
+    });
+
+    act(() => mocks.emitAuth({ ...authState(null), ownerGeneration: 1 }));
+    act(() => mocks.emitAuth({ ...authState('account-a'), ownerGeneration: 1 }));
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+
+    await act(async () => {
+      rejectLogout(new Error('logout failed'));
+      await expect(logout).rejects.toThrow('logout failed');
+    });
+    expect(view.result.current.dataOwnerId).toBe('account-a');
+  });
+
   it('keeps a newer pushed owner when an older auth boundary later rejects', async () => {
     let rejectLogout!: (error: Error) => void;
     mocks.service.logout.mockReturnValueOnce(

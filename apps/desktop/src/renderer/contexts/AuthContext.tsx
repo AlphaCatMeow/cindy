@@ -213,7 +213,18 @@ export function AuthProvider({
 
   const applyIncomingState = useCallback(
     (state: AuthState) => {
-      const ownerChanged = activeDataOwnerIdRef.current !== state.dataOwnerId;
+      // Main briefly projects signed-out while an owner transition is pending.
+      // It keeps the old owner generation, so retain the authoritative owner
+      // refs until the commit or rollback arrives; otherwise the rollback is
+      // mistaken for a new owner and finalizes the task that should resume.
+      const pendingSignedOutProjection =
+        state.dataOwnerId === null
+        && state.mode === 'signed-out'
+        && !state.canEnterApp
+        && activeDataOwnerIdRef.current !== null
+        && state.ownerGeneration === activeDataOwnerGenerationRef.current;
+      const ownerChanged =
+        !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
       // that push use the default finalizer would stop the current owner's
@@ -228,8 +239,10 @@ export function AuthProvider({
         sessionsStore.reset();
         clearWorkersCache();
       }
-      activeDataOwnerIdRef.current = state.dataOwnerId;
-      activeDataOwnerGenerationRef.current = state.ownerGeneration;
+      if (!pendingSignedOutProjection) {
+        activeDataOwnerIdRef.current = state.dataOwnerId;
+        activeDataOwnerGenerationRef.current = state.ownerGeneration;
+      }
       setDataOwnerGenerationState(state.ownerGeneration);
       setNewMakerDraftOwner(state.dataOwnerId);
       setProviderModelMemoryOwner(state.dataOwnerId);
@@ -276,7 +289,7 @@ export function AuthProvider({
           applyIncomingUser(state.user);
         }
       } else {
-        activeUserIdRef.current = null;
+        if (!pendingSignedOutProjection) activeUserIdRef.current = null;
         setUser(null);
         // Both signed-out and local sessions have no Cindy user. Clear any
         // in-progress SSO/OTP step so returning to /login always starts fresh.
