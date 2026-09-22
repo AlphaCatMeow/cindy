@@ -14,15 +14,21 @@ import {
 
 const cleanups: Array<() => void> = [];
 afterEach(() => cleanups.splice(0).forEach((close) => close()));
-async function unusedPort() {
-  const server = http.createServer();
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const port = (server.address() as { port: number }).port;
-  await new Promise<void>((r) => server.close(() => r()));
-  return port;
-}
+const loopbackReservations = new WeakMap<object, () => Promise<void>>();
 async function loopback() {
-  const callbackUrl = 'http://127.0.0.1:' + (await unusedPort()) + '/cli/callback';
+  const server = http.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const port = (server.address() as { port: number }).port;
+  const release = async () => {
+    if (!server.listening) return;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  };
+  const callbackUrl = 'http://127.0.0.1:' + port + '/cli/callback';
   const state = 'cli_state_0123456789';
   const url = new URL('https://provider.example/authorize');
   url.search = new URLSearchParams({
@@ -33,7 +39,18 @@ async function loopback() {
     code_challenge: 'p'.repeat(43),
     code_challenge_method: 'S256',
   }).toString();
-  return { kind: 'loopback' as const, url: url.toString(), callbackUrl, state };
+  const request = { kind: 'loopback' as const, url: url.toString(), callbackUrl, state };
+  loopbackReservations.set(request, release);
+  cleanups.push(() => {
+    void release();
+    server.closeAllConnections();
+  });
+  return request;
+}
+async function releaseLoopbackPort(request: object) {
+  const release = loopbackReservations.get(request);
+  loopbackReservations.delete(request);
+  await release?.();
 }
 function harness(request: PluginAuthorizationRequest) {
   let current = true;
@@ -164,6 +181,7 @@ describe('generic authorization through the signed Host bridge', () => {
       const open = vi.fn(async () => {}),
         dismiss = vi.fn();
       let reopen!: () => Promise<void>;
+      if (kind === 'loopback') await releaseLoopbackPort(request);
       const handle = await openAuthorizationOffer(
         {
           kind: 'authorization',
@@ -216,6 +234,7 @@ describe('generic authorization through the signed Host bridge', () => {
   it('does not take a callback port already owned by another local process', async () => {
     const request = await loopback(),
       h = harness(request);
+    await releaseLoopbackPort(request);
     const server = http.createServer((_req, res) => res.end('existing-listener'));
     await new Promise<void>((r) =>
       server.listen(Number(new URL(request.callbackUrl).port), '127.0.0.1', r),
@@ -282,6 +301,7 @@ describe('generic authorization through the signed Host bridge', () => {
   it('delivers a real loopback callback privately with the CLI state, and consumes it once', async () => {
     const request = await loopback(),
       h = harness(request);
+    await releaseLoopbackPort(request);
     let browserDone!: () => void;
     const browser = new Promise<void>((r) => {
       browserDone = r;
@@ -316,6 +336,7 @@ describe('generic authorization through the signed Host bridge', () => {
   it('cannot turn a provider denial into a successful card even if the CLI misreports success', async () => {
     const request = await loopback(),
       h = harness(request);
+    await releaseLoopbackPort(request);
     const assisting = h.assist(async () => {
       await fetch(request.callbackUrl + '?state=' + request.state + '&error=access_denied');
     });
@@ -371,6 +392,7 @@ describe('generic authorization through the signed Host bridge', () => {
 
   it('keeps local CLI listeners in control of their own callback port', async () => {
     const request = await loopback();
+    await releaseLoopbackPort(request);
     const server = http.createServer((_req, res) => res.end('CLI callback'));
     await new Promise<void>((r) =>
       server.listen(Number(new URL(request.callbackUrl).port), '127.0.0.1', r),
