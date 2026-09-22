@@ -647,12 +647,16 @@
         "agentProxyEnvPending": "等待应用环境变量 → {{url}}（主机连接后自动生效）"
       },
       "startSession": {
+        "unsupportedCodexSource": "SSH Codex 目前仅支持默认 OpenAI 订阅模型，不会转发本机其他供应商的配置。请在新建任务页选择该来源的模型，并同步远端登录态",
         "title": "在这台远端开新 Codex 任务",
         "hint": "新建一个绑定到这台机器的 Maker。Codex 跑在远端，你在这里和它聊。工作目录支持 ~ 展开，不存在会确认后创建。",
         "start": "开始",
         "created": "已在 {{hostId}} 上创建远端任务",
         "createFailed": "创建远端任务失败",
         "errorWorkdirEmpty": "请输入远端工作目录",
+        "modelCatalogLoading": "模型目录尚未就绪，请稍后重试",
+        "modelCatalogFailed": "模型目录读取失败，请在模型设置中刷新后重试",
+        "noCompatibleModel": "没有可用于 SSH 远端的模型，请先在模型设置中连接兼容的供应商",
         "errorWorkdirIsFile": "{{path}} 已存在但不是目录，换一个路径",
         "confirmCreateTitle": "目录不存在，创建吗？",
         "confirmCreateDescription": "{{path}} 在 {{hostId}} 上不存在。点确认会在远端跑 mkdir -p 创建它，然后进入任务。",

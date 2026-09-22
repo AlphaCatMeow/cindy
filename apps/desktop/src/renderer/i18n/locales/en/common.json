@@ -647,12 +647,16 @@
         "agentProxyEnvPending": "Waiting to apply env vars → {{url}} (takes effect automatically once the host connects)"
       },
       "startSession": {
+        "unsupportedCodexSource": "SSH Codex currently supports only default OpenAI subscription models; other local provider settings are not forwarded. Select a model from that source on the new task page and sync the remote login.",
         "title": "Start a remote Codex session",
         "hint": "Create a new Maker pinned to this machine. Codex runs on the remote, you chat from here. Working directory supports ~ expansion; if it doesn't exist you'll be asked to create it.",
         "start": "Start",
         "created": "Remote session created on {{hostId}}",
         "createFailed": "Failed to create remote session",
         "errorWorkdirEmpty": "Please enter a remote working directory",
+        "modelCatalogLoading": "The model catalog is not ready yet. Try again shortly.",
+        "modelCatalogFailed": "Could not load the model catalog. Refresh it in model settings and try again.",
+        "noCompatibleModel": "No model is available for SSH. Connect a compatible provider in model settings first.",
         "errorWorkdirIsFile": "{{path}} exists but is not a directory; pick another path",
         "confirmCreateTitle": "Directory does not exist — create it?",
         "confirmCreateDescription": "{{path}} does not exist on {{hostId}}. Click confirm to run mkdir -p on the remote and then enter the session.",

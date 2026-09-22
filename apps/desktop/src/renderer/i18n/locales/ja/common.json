@@ -647,12 +647,16 @@
         "agentProxyEnvPending": "環境変数の適用待ち → {{url}}（ホスト接続後に自動で反映）"
       },
       "startSession": {
+        "unsupportedCodexSource": "SSH Codex は現在、デフォルトの OpenAI サブスクリプションモデルのみ対応しており、他のローカルプロバイダー設定は転送されません。新規タスク画面でこの接続のモデルを選択し、リモートのログイン状態を同期してください。",
         "title": "このリモートで Codex セッションを開始",
         "hint": "このマシンに固定された新しい Maker を作成。Codex はリモートで動き、こちらからチャットします。作業ディレクトリは ~ 展開に対応、存在しない場合は確認後に作成します。",
         "start": "開始",
         "created": "{{hostId}} にリモートセッションを作成しました",
         "createFailed": "リモートセッションの作成に失敗",
         "errorWorkdirEmpty": "リモートの作業ディレクトリを入力してください",
+        "modelCatalogLoading": "モデル一覧の準備ができていません。しばらくしてから再試行してください",
+        "modelCatalogFailed": "モデル一覧を読み込めませんでした。モデル設定で更新してから再試行してください",
+        "noCompatibleModel": "SSH で利用できるモデルがありません。モデル設定で対応するプロバイダーに接続してください",
         "errorWorkdirIsFile": "{{path}} は既に存在しますがディレクトリではありません、別のパスを選んでください",
         "confirmCreateTitle": "ディレクトリが存在しません、作成しますか?",
         "confirmCreateDescription": "{{path}} は {{hostId}} に存在しません。確認するとリモートで mkdir -p を実行してからセッションに入ります。",

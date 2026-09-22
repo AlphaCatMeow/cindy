@@ -647,12 +647,16 @@
         "agentProxyEnvPending": "等待應用環境變數 → {{url}}（主機連線後自動生效）"
       },
       "startSession": {
+        "unsupportedCodexSource": "SSH Codex 目前僅支援預設 OpenAI 訂閱模型，不會轉送本機其他供應商的設定。請在新增任務頁選擇該來源的模型，並同步遠端登入狀態",
         "title": "在這臺遠端開新 Codex 任務",
         "hint": "新建一個繫結到這臺機器的 Maker。Codex 跑在遠端，你在這裡和它聊。工作目錄支援 ~ 展開，不存在會確認後建立。",
         "start": "開始",
         "created": "已在 {{hostId}} 上建立遠端任務",
         "createFailed": "建立遠端任務失敗",
         "errorWorkdirEmpty": "請輸入遠端工作目錄",
+        "modelCatalogLoading": "模型目錄尚未就緒，請稍後重試",
+        "modelCatalogFailed": "模型目錄讀取失敗，請在模型設定中重新整理後重試",
+        "noCompatibleModel": "沒有可用於 SSH 遠端的模型，請先在模型設定中連接相容的供應商",
         "errorWorkdirIsFile": "{{path}} 已存在但不是目錄，換一個路徑",
         "confirmCreateTitle": "目錄不存在，建立嗎？",
         "confirmCreateDescription": "{{path}} 在 {{hostId}} 上不存在。點確認會在遠端跑 mkdir -p 建立它，然後進入任務。",
