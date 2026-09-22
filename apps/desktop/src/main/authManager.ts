@@ -288,6 +288,8 @@ export interface AuthState {
   dataOwnerId: string | null;
   /** Main-owned owner boundary generation used to fence late renderer pushes. */
   ownerGeneration: number;
+  /** True only for the transient signed-out projection published before an owner boundary commits. */
+  ownerBoundaryPending?: boolean;
   /** Local and cloud sessions may enter the main application. */
   canEnterApp: boolean;
   isAuthenticated: boolean;
@@ -3460,13 +3462,14 @@ function snapshotAuthState(): AuthState {
 }
 
 /** Logged-out projection used by stale/timeout paths that must not expose newer auth state. */
-function snapshotLoggedOutAuthState(): AuthState {
+function snapshotLoggedOutAuthState(ownerBoundaryPending = false): AuthState {
   const appSession = getActiveAppSession();
   return {
     user: null,
     mode: 'signed-out',
     dataOwnerId: null,
     ownerGeneration: appSession.generation,
+    ownerBoundaryPending,
     canEnterApp: false,
     isAuthenticated: false,
     isCanary: false,
@@ -3484,7 +3487,7 @@ function notifyRenderer(): void {
 }
 
 function notifyRendererAuthBoundaryPending(): void {
-  broadcastToRenderers('auth:state-change', snapshotLoggedOutAuthState());
+  broadcastToRenderers('auth:state-change', snapshotLoggedOutAuthState(true));
 }
 
 /**

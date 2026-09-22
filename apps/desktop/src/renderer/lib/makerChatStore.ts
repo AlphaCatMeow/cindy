@@ -2184,6 +2184,7 @@ function hasActiveTurnStateForOwnerBoundary(state: SessionChatState): boolean {
         message.clientId === AUTO_RESUME_PENDING_CLIENT_ID,
     ) ||
     [...(state.taskUpdates?.values() ?? [])].some((task) => task.status === 'running')
+    || hasSessionRecoveryPendingState(state)
   );
 }
 
@@ -9804,12 +9805,23 @@ function hasSessionTerminalError(sessionId: string): boolean {
 /** Non-creating read: recovery can outlive the one-generation stop snapshot. */
 function hasSessionRecoveryPending(sessionId: string): boolean {
   const state = sessions.get(sessionId);
-  return !!state && (
+  return !!state && hasSessionRecoveryPendingState(state);
+}
+
+/**
+ * Automatic continuation can be in its retry backoff after the foreground
+ * turn has gone idle. In that window Main keeps the session handle alive, but
+ * the renderer may only have the typed recovery marker (or a queued auto-resume
+ * item), rather than a running task snapshot.
+ */
+function hasSessionRecoveryPendingState(state: SessionChatState): boolean {
+  return (
     state.messages.some((message) =>
       message.clientId === AUTO_RESUME_PENDING_CLIENT_ID ||
       message.clientId === CODEX_RECONNECT_PENDING_CLIENT_ID,
     ) ||
-    (!state.queuePaused && state.pendingQueue.some((item) => item.autoResume === true))
+    (!state.queuePaused && state.pendingQueue.some((item) => item.autoResume === true)) ||
+    (state.inputRecovery?.kind === 'active-turn' && state.inputRecovery.item.autoResume === true)
   );
 }
 
@@ -9896,7 +9908,10 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // isTurnRunning=false only says the foreground turn ended; do not close
       // any task Main may still be running while rolling back a rejected owner
       // transition (wake and non-wake tasks alike).
-      if (mainTurnRunning === false && hasRunningBackgroundTask(current)) continue;
+      if (
+        mainTurnRunning === false &&
+        (hasRunningBackgroundTask(current) || hasSessionRecoveryPendingState(current))
+      ) continue;
       bumpInteractionReconcileEpoch(id);
       supersedeInputProjectionRequests(id, { supersedeOperations: true });
       flushPendingTextDelta(id);
@@ -16965,6 +16980,10 @@ export const makerChatStore = {
     }
     setState(sessionId, (s) => handleStatusUpdate(s, update));
     scheduleWakeBridgeReconciliation(sessionId);
+  },
+  /** Exposed for tests only: apply a main input projection without IPC wiring. */
+  __applyInputProjectionForTest: (projection: AgentInputProjection): void => {
+    applyInputProjection(projection);
   },
   /** Exposed for tests only. */
   __hydratePersistedMessageForTest: hydratePersistedMessage,

@@ -269,6 +269,33 @@ describe('AuthContext session cache boundaries', () => {
     expect(view.result.current.dataOwnerId).toBe('account-a');
   });
 
+  it('preserves a generation-zero pending rollback from a startup-local boundary', async () => {
+    // A renderer opened while a process that started in local mode is leaving
+    // that owner receives the transient signed-out projection at generation 0.
+    // The explicit pending marker disambiguates it from a stable signed-out
+    // startup snapshot.
+    mocks.service.initialize.mockResolvedValue({
+      ...authState(null),
+      ownerGeneration: 0,
+      ownerBoundaryPending: true,
+    });
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBeNull());
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).not.toHaveBeenCalledWith({
+      finalizeSessions: true,
+    });
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+
+    act(() => mocks.emitAuth({ ...localAuthState(), ownerGeneration: 0 }));
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledOnce();
+    expect(view.result.current.dataOwnerId).toBe('local-v1');
+  });
+
   it('resets sessions when authentication expires', async () => {
     renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(mocks.service.initialize).toHaveBeenCalled());

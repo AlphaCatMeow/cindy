@@ -257,6 +257,8 @@ export function AuthProvider({
         && activeDataOwnerIdRef.current === null
         && signedOutProjection
         && (
+          state.ownerBoundaryPending === true
+          ||
           (rendererOwnerGeneration.dataOwnerId !== null
             && state.ownerGeneration === rendererOwnerGeneration.generation)
           // A newly opened renderer has no synchronous owner stamp. Main's

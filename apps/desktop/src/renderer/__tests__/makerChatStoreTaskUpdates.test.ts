@@ -1181,4 +1181,63 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       globalWindow.window = previousWindow;
     }
   });
+
+  it('rollback reconciliation preserves an automatic-resume item during backoff', async () => {
+    const sid = 'rollback-auto-resume-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, false));
+      const clientId = 'auto-resume-backoff';
+      const queuedAutoResume = {
+        clientId,
+        text: '',
+        persistedContent: '',
+        model: 'model',
+        effort: 'medium',
+        permissionMode: 'default',
+        workingDir: '',
+        autoResume: true,
+        chatMessage: { clientId, role: 'user' as const, content: '' },
+        createOpts: { agentKind: 'codex' as const, workingDir: '', model: 'model' },
+      };
+      makerChatStore.__applyInputProjectionForTest({
+        sessionId: sid,
+        pendingQueue: [queuedAutoResume],
+        steeringQueueClientIds: [],
+        queuePaused: false,
+        queueExpanded: false,
+        queueInteractionLocks: [],
+        queueEditLocks: [],
+        queueAbortPending: false,
+        error: null,
+        recovery: null,
+        errorRetryText: null,
+        credentialSwitchWait: null,
+      });
+
+      globalWindow.window = {
+        electronAPI: {
+          maker: {
+            listActive: vi.fn(async () => [
+              { sessionId: sid, agentKind: 'codex', isTurnRunning: false },
+            ]),
+          },
+        },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+      const state = makerChatStore.getSnapshot(sid);
+      expect(state.pendingQueue.some((item) => item.clientId === clientId)).toBe(true);
+      expect(state.agentStatus.isRunning).toBe(false);
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
 });
