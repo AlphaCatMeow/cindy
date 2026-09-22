@@ -1240,4 +1240,83 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       globalWindow.window = previousWindow;
     }
   });
+
+  it('owner finalization clears a queued input recovery marker', async () => {
+    const sid = 'rollback-queued-recovery-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyInputProjectionForTest({
+        sessionId: sid,
+        pendingQueue: [],
+        steeringQueueClientIds: [],
+        queuePaused: true,
+        queueExpanded: false,
+        queueInteractionLocks: [],
+        queueEditLocks: [],
+        queueAbortPending: false,
+        error: null,
+        recovery: { kind: 'queue-head', clientId: 'recovery-1' },
+        errorRetryText: null,
+        credentialSwitchWait: null,
+      });
+
+      globalWindow.window = {
+        electronAPI: {
+          maker: {
+            listActive: vi.fn(async () => [
+              { sessionId: sid, agentKind: 'codex', isTurnRunning: false },
+            ]),
+          },
+        },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+      expect(makerChatStore.getSnapshot(sid).inputRecovery).toBeNull();
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
+
+  it('does not finalize a replacement session created while Main is queried', async () => {
+    const sid = 'rollback-replaced-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      let resolveListActive!: (value: unknown[]) => void;
+      globalWindow.window = {
+        electronAPI: {
+          maker: {
+            listActive: vi.fn(
+              () => new Promise<unknown[]>((resolve) => { resolveListActive = resolve; }),
+            ),
+          },
+        },
+      } as typeof globalWindow.window;
+
+      const reconciliation = reconcileSessionsAfterDataOwnerRollback();
+      await Promise.resolve();
+      makerChatStore.purgeSession(sid);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, false));
+      resolveListActive([]);
+      await reconciliation;
+
+      const replacement = makerChatStore.getSnapshot(sid);
+      expect(replacement.agentStatus.isRunning).toBe(false);
+      expect(replacement.taskUpdates?.size ?? 0).toBe(0);
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
 });

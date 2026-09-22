@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => {
     setModelVisibilityOwner: vi.fn(),
     invalidateProvidersSnapshot: vi.fn(),
     preloadLocalCatalogSnapshot: vi.fn(async () => undefined),
+    setMemorySettingsOwner: vi.fn(),
+    bootstrapMemorySettingsFromMain: vi.fn(async () => undefined),
     confirm: vi.fn(async () => true),
     emitAuth(state: unknown) {
       authStateListener?.(state);
@@ -73,6 +75,10 @@ vi.mock('@/lib/providersSnapshotStore', () => ({
 }));
 vi.mock('@/lib/localCatalogSnapshot', () => ({
   preloadLocalCatalogSnapshot: mocks.preloadLocalCatalogSnapshot,
+}));
+vi.mock('@/lib/memorySettingsStore', () => ({
+  setMemorySettingsOwner: mocks.setMemorySettingsOwner,
+  bootstrapMemorySettingsFromMain: mocks.bootstrapMemorySettingsFromMain,
 }));
 vi.mock('@/components/ui/confirm-dialog-provider', () => ({
   useConfirmDialog: () => ({ confirm: mocks.confirm }),
@@ -164,6 +170,8 @@ describe('AuthContext session cache boundaries', () => {
     mocks.setModelVisibilityOwner.mockClear();
     mocks.invalidateProvidersSnapshot.mockClear();
     mocks.preloadLocalCatalogSnapshot.mockClear();
+    mocks.setMemorySettingsOwner.mockClear();
+    mocks.bootstrapMemorySettingsFromMain.mockClear();
     dataOwnerGenerationTesting.reset();
     mocks.service.consumeAccountDeletionRestoredNotice.mockClear();
     restoredToast.mockClear();
@@ -248,6 +256,8 @@ describe('AuthContext session cache boundaries', () => {
     });
     expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledOnce();
     expect(view.result.current.dataOwnerId).toBe('account-a');
+    expect(mocks.setMemorySettingsOwner).toHaveBeenLastCalledWith('account-a');
+    expect(mocks.bootstrapMemorySettingsFromMain).toHaveBeenCalled();
   });
 
   it('preserves a pending rollback when the first snapshot has no owner stamp', async () => {
@@ -312,6 +322,28 @@ describe('AuthContext session cache boundaries', () => {
       finalizeSessions: true,
     });
     expect(view.result.current.dataOwnerId).toBe('account-b');
+  });
+
+  it('finalizes a fresh renderer when a pending projection commits to null', async () => {
+    mocks.service.initialize.mockResolvedValue({
+      ...authState(null),
+      ownerGeneration: 1,
+      ownerBoundaryPending: true,
+    });
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBeNull());
+
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+    act(() => mocks.emitAuth({ ...authState(null), ownerGeneration: 2 }));
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: true,
+    });
+    expect(mocks.reset).toHaveBeenCalled();
+    expect(mocks.clearWorkersCache).toHaveBeenCalled();
+    expect(mocks.setMemorySettingsOwner).toHaveBeenLastCalledWith(null);
+    expect(mocks.bootstrapMemorySettingsFromMain).toHaveBeenCalled();
+    expect(view.result.current.dataOwnerId).toBeNull();
   });
 
   it('resets sessions when authentication expires', async () => {

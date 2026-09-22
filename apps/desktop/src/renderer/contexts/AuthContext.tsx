@@ -294,6 +294,17 @@ export function AuthProvider({
           unknownOwnerRollbackProjection
           || (activeDataOwnerIdRef.current !== null && !ownerChanged)
         );
+      // A fresh renderer starts with a null owner. When it observes the
+      // transient signed-out projection first, the successful null-owner
+      // commit keeps the same owner id but advances the generation. Treat
+      // that generation advance as the boundary commit so the renderer still
+      // finalizes the outgoing session cache and rehydrates owner-scoped data.
+      const committedNullOwnerProjection =
+        pendingOwnerProjectionRef.current
+        && !pendingSignedOutProjection
+        && state.dataOwnerId === null
+        && state.ownerGeneration !== activeDataOwnerGenerationRef.current;
+      const ownerBoundaryCommitted = ownerChanged || committedNullOwnerProjection;
       if (pendingSignedOutProjection) pendingOwnerProjectionRef.current = true;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
@@ -303,9 +314,9 @@ export function AuthProvider({
       publishDataOwnerGeneration(
         state.dataOwnerId,
         state.ownerGeneration,
-        { finalizeSessions: ownerChanged && !initialOwnerHydration },
+        { finalizeSessions: ownerBoundaryCommitted && !initialOwnerHydration },
       );
-      if (ownerChanged) {
+      if (ownerBoundaryCommitted) {
         pendingOwnerProjectionRef.current = false;
         sessionsStore.reset();
         clearWorkersCache();
@@ -343,7 +354,7 @@ export function AuthProvider({
           && state.user?.membershipKind === 'org',
       );
       if (chatEmbeddingOwnerChanged) void refreshChatEmbeddingFromMain();
-      if (ownerChanged) {
+      if (ownerBoundaryCommitted || ownerRollbackProjection) {
         setMemorySettingsOwner(state.dataOwnerId);
         void bootstrapMemorySettingsFromMain();
       }

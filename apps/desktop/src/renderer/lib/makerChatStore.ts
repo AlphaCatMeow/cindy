@@ -2184,6 +2184,7 @@ function hasActiveTurnStateForOwnerBoundary(state: SessionChatState): boolean {
         message.clientId === AUTO_RESUME_PENDING_CLIENT_ID,
     ) ||
     [...(state.taskUpdates?.values() ?? [])].some((task) => task.status === 'running')
+    || state.inputRecovery !== null
     || hasSessionRecoveryPendingState(state)
   );
 }
@@ -3040,6 +3041,12 @@ export const EMPTY_LIGHT_STATE: SessionChatLightState = Object.freeze({
 // ---------------------------------------------------------------------------
 
 const sessions = new Map<string, SessionChatState>();
+// Keep a stable token for each cached session incarnation. A rollback query
+// may outlive a purge/recreate of the same session id; comparing this token
+// prevents an old query from finalizing the replacement while still allowing
+// ordinary state updates to proceed.
+let nextSessionIncarnation = 1;
+const sessionIncarnations = new Map<string, number>();
 const listeners = new Map<string, Set<() => void>>();
 const lightSnapshotCache = new Map<string, SessionChatLightState>();
 
@@ -4222,6 +4229,7 @@ function getOrCreateState(sessionId: string): SessionChatState {
   let state = sessions.get(sessionId);
   if (!state) {
     state = createInitialState();
+    sessionIncarnations.set(sessionId, nextSessionIncarnation++);
     sessions.set(sessionId, state);
     _touchSession(sessionId);
     _evictLruIfNeeded();
@@ -6759,6 +6767,7 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
         message.clientId === CODEX_RECONNECT_PENDING_CLIENT_ID ||
         message.clientId === AUTO_RESUME_PENDING_CLIENT_ID,
     ) &&
+    state.inputRecovery === null &&
     stoppedTasks === state.taskUpdates
   ) {
     return state;
@@ -6792,6 +6801,7 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
     activeTurnRetryText: null,
     errorRetryText: null,
     errorPersistId: null,
+    inputRecovery: null,
     pendingPermission: null,
     pendingAskUser: null,
     pendingPluginSetup: null,
@@ -9836,6 +9846,8 @@ interface ActiveSessionSnapshot {
 }
 
 interface ActiveTurnBoundaryMarker {
+  sessionIncarnation: number;
+  sdkSessionId: string | null;
   startedAt: number | null;
   streamingClientId: string | null;
   continuationTurnClientId: string | null;
@@ -9843,8 +9855,13 @@ interface ActiveTurnBoundaryMarker {
   isStreaming: boolean;
 }
 
-function captureActiveTurnBoundaryMarker(state: SessionChatState): ActiveTurnBoundaryMarker {
+function captureActiveTurnBoundaryMarker(
+  sessionId: string,
+  state: SessionChatState,
+): ActiveTurnBoundaryMarker {
   return {
+    sessionIncarnation: sessionIncarnations.get(sessionId) ?? 0,
+    sdkSessionId: state.sdkSessionId,
     startedAt: state.agentStatus.startedAt,
     streamingClientId: state.streamingClientId,
     continuationTurnClientId: state.continuationTurnClientId,
@@ -9854,10 +9871,13 @@ function captureActiveTurnBoundaryMarker(state: SessionChatState): ActiveTurnBou
 }
 
 function sameActiveTurnBoundaryMarker(
+  sessionId: string,
   state: SessionChatState,
   marker: ActiveTurnBoundaryMarker,
 ): boolean {
   return (
+    (sessionIncarnations.get(sessionId) ?? 0) === marker.sessionIncarnation &&
+    state.sdkSessionId === marker.sdkSessionId &&
     state.agentStatus.startedAt === marker.startedAt &&
     state.streamingClientId === marker.streamingClientId &&
     state.continuationTurnClientId === marker.continuationTurnClientId &&
@@ -9884,7 +9904,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
   if (owner.dataOwnerId === null) return;
   const candidates = [...sessions].flatMap(([id, state]) => {
     if (isRemoteSessionSticky(id) || !hasActiveTurnStateForOwnerBoundary(state)) return [];
-    return [[id, captureActiveTurnBoundaryMarker(state)] as const];
+    return [[id, captureActiveTurnBoundaryMarker(id, state)] as const];
   });
   if (candidates.length === 0) return;
   try {
@@ -9902,7 +9922,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // same finalizer path.
       const current = sessions.get(id);
       const mainTurnRunning = liveTurns.get(id);
-      if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(current, marker))
+      if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(id, current, marker))
         continue;
       // listActive keeps idle session handles that still own background work.
       // isTurnRunning=false only says the foreground turn ended; do not close
