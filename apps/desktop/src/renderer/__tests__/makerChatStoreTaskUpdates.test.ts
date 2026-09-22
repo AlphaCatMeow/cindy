@@ -77,6 +77,7 @@ vi.mock('@/lib/makerTransport', () => ({
 }));
 
 import {
+  cancelRemoteOptimisticSendsForDataOwnerBoundary,
   EMPTY_SESSION_STATE,
   handleStreamEvent,
   makerChatStore,
@@ -930,6 +931,32 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       const tasks = makerChatStore.getSnapshot(sid).taskUpdates;
       expect(tasks?.get('tu-b1')?.status).toBe('stopped');
       expect(tasks?.has('b1-renamed')).toBe(false);
+    } finally {
+      makerChatStore.purgeSession(sid);
+    }
+  });
+
+  it('account teardown reuses the Stop/closed finalizer and does not revive on A→B→A', () => {
+    const sid = `account-boundary-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
+      expect(makerChatStore.getSnapshot(sid).agentStatus.startedAt).toBeTruthy();
+
+      // AuthContext invokes this synchronously when the outgoing owner enters
+      // teardown; the old stamped status=closed push is no longer required.
+      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      let state = makerChatStore.getSnapshot(sid);
+      expect(state.agentStatus.isRunning).toBe(false);
+      expect(state.agentStatus.startedAt).toBeNull();
+      expect(state.taskUpdates?.get('t1')?.status).toBe('stopped');
+
+      // Re-entering account A must observe the stopped snapshot, with no
+      // automatic continuation caused by the boundary cleanup.
+      cancelRemoteOptimisticSendsForDataOwnerBoundary();
+      state = makerChatStore.getSnapshot(sid);
+      expect(state.agentStatus.isRunning).toBe(false);
+      expect(state.agentStatus.startedAt).toBeNull();
     } finally {
       makerChatStore.purgeSession(sid);
     }

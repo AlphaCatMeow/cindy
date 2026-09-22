@@ -2021,6 +2021,11 @@ function clearRemoteOptimisticSendsForSession(sessionId: string): void {
  */
 export function cancelRemoteOptimisticSendsForDataOwnerBoundary(): void {
   invalidateLiveIngressForDataOwnerBoundary();
+  // Account teardown intentionally stops the outgoing runtime. Its closed
+  // status push carries the old owner stamp and is therefore dropped by the
+  // owner fence; apply the same finalization used by the Stop/closed path
+  // synchronously before publishing the next owner.
+  finalizeSessionsForDataOwnerBoundary();
   // Invalidate standalone projection reads/operations before restoring drafts
   // or publishing the next owner. Their promises may settle independently of
   // the optimistic outbox and must not write old-owner state into the new slice.
@@ -2112,6 +2117,48 @@ export function cancelRemoteOptimisticSendsForDataOwnerBoundary(): void {
       }));
     }
   }
+}
+
+/**
+ * Finalize every cached session when its data owner is being torn down.
+ * This is the owner-boundary equivalent of accepting `status=closed`: keep
+ * the session history in memory, but stop the turn clock, streaming flags,
+ * interactions, and running background tasks so a later owner re-entry
+ * cannot revive the outgoing task snapshot.
+ */
+function finalizeSessionsForDataOwnerBoundary(): void {
+  for (const sessionId of sessions.keys()) {
+    const state = sessions.get(sessionId);
+    if (!state || !hasActiveTurnStateForOwnerBoundary(state)) continue;
+    bumpInteractionReconcileEpoch(sessionId);
+    supersedeInputProjectionRequests(sessionId, { supersedeOperations: true });
+    flushPendingTextDelta(sessionId);
+    setState(sessionId, forceFinalizeOnSessionClosed);
+  }
+}
+
+function hasActiveTurnStateForOwnerBoundary(state: SessionChatState): boolean {
+  return (
+    state.agentStatus.isRunning ||
+    state.agentStatus.startedAt !== null ||
+    state.streamingClientId !== null ||
+    state.isStreaming ||
+    state.messages.some((message) => message.isStreaming) ||
+    state.pendingPermission !== null ||
+    state.pendingAskUser !== null ||
+    state.pendingPluginSetup !== null ||
+    state.pendingPluginSetupQueue.length > 0 ||
+    state.pendingPlanReview !== null ||
+    state.pendingIssueConfirm !== null ||
+    state.pendingRenameSessionsConfirm !== null ||
+    state.pendingGhostGrantConfirm !== null ||
+    state.pendingRemoteDesktopConfirmation !== null ||
+    state.pendingRemoteDesktopConfirmationQueue.length > 0 ||
+    state.queueAbortPending ||
+    state.continuationTurnClientId !== null ||
+    state.pendingTaskWake > 0 ||
+    [...(state.taskUpdates?.values() ?? [])].some((task) => task.status === 'running')
+  );
 }
 
 /** Clear deferred live ingress work before AuthContext publishes a new owner. */
