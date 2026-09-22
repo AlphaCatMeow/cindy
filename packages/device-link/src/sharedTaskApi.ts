@@ -45,6 +45,15 @@ function label(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 128 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid sharedTask label');
   return value;
 }
+function sharedTaskTitle(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid sharedTask title');
+  // The server currently accepts at most 128 UTF-16 code units. Shared-task
+  // metadata is a bounded projection; keep the local session title untouched.
+  const title = value.trim();
+  let end = Math.min(title.length, 128);
+  if (end < title.length && /[\uD800-\uDBFF]/.test(title[end - 1] ?? '') && /[\uDC00-\uDFFF]/.test(title[end] ?? '')) end--;
+  return title.slice(0, end);
+}
 function integer(value: unknown, min = 1): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min) throw new Error('Invalid sharedTask number');
   return value;
@@ -80,7 +89,7 @@ export function createSharedTaskApi(options: SharedTaskApiOptions) {
   const route = (sharedTaskId: string) => `/${encodeURIComponent(id(sharedTaskId))}`;
   return {
     async create(sessionId: string, title: string, observeCommitted?: (sharedTaskId: string) => void) {
-      const value = await request('', 'POST', { sessionId: id(sessionId), title: label(title) }, (value) => {
+      const value = await request('', 'POST', { sessionId: id(sessionId), title: sharedTaskTitle(title) }, (value) => {
         observeCommitted?.(id(value.sharedTaskId));
       });
       return { sharedTaskId: id(value.sharedTaskId), revision: integer(value.revision) };

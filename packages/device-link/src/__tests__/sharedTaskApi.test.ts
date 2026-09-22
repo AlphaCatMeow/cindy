@@ -30,6 +30,53 @@ describe('sharedTask management client', () => {
     await expect(api.create('session', 'Task', observed)).rejects.toBeInstanceOf(SharedTaskScopeChangedError);
     expect(observed).toHaveBeenCalledExactlyOnceWith('sharedTask');
   });
+  it('bounds long shared titles without changing the local title source', async () => {
+    const { api, request } = setup();
+    const title = 'x'.repeat(128) + 'overflow';
+    request.mockResolvedValue({ sharedTaskId: 'sharedTask', revision: 1 });
+    await api.create('session', title);
+    expect(request).toHaveBeenCalledWith('/api/device-link/shared-tasks', expect.objectContaining({
+      method: 'POST',
+      body: { sessionId: 'session', title: 'x'.repeat(128) },
+    }));
+    request.mockResolvedValue({ ...snapshot(), title: 'x'.repeat(128) });
+    await expect(api.get('sharedTask')).resolves.toEqual(expect.objectContaining({ title: 'x'.repeat(128) }));
+    request.mockResolvedValue({ sharedTasks: [{ ...snapshot(), title: 'x'.repeat(128) }] });
+    await expect(api.list()).resolves.toEqual([expect.objectContaining({ title: 'x'.repeat(128) })]);
+  });
+  it('does not split a surrogate pair at the shared title boundary', async () => {
+    const { api, request } = setup();
+    const title = 'x'.repeat(127) + '😀';
+    request.mockResolvedValue({ sharedTaskId: 'sharedTask', revision: 1 });
+    await api.create('session', title);
+    expect(request.mock.calls[0][1]).toEqual(expect.objectContaining({
+      body: { sessionId: 'session', title: 'x'.repeat(127) },
+    }));
+  });
+  it.each(['Short title', '中'.repeat(128), 'x'.repeat(126) + '😀'])('preserves titles within the wire limit', async (title) => {
+    const { api, request } = setup();
+    request.mockResolvedValue({ sharedTaskId: 'sharedTask', revision: 1 });
+    await api.create('session', title);
+    expect(request.mock.calls[0][1]).toEqual(expect.objectContaining({ body: { sessionId: 'session', title } }));
+  });
+  it('trims leading whitespace before bounding the shared title', async () => {
+    const { api, request } = setup();
+    request.mockResolvedValue({ sharedTaskId: 'sharedTask', revision: 1 });
+    await api.create('session', ' '.repeat(128) + 'Task');
+    expect(request.mock.calls[0][1]).toEqual(expect.objectContaining({ body: { sessionId: 'session', title: 'Task' } }));
+  });
+  it.each(['', ' '.repeat(129), 'x'.repeat(128) + '\ninvalid'])('rejects invalid titles before truncation', async (title) => {
+    const { api, request } = setup();
+    await expect(api.create('session', title)).rejects.toThrow('title');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('does not relax member label or response validation', async () => {
+    const { api, request } = setup();
+    await expect(api.join('x'.repeat(43), 'x'.repeat(129))).rejects.toThrow('label');
+    expect(request).not.toHaveBeenCalled();
+    request.mockResolvedValue({ ...snapshot(), title: 'x'.repeat(129) });
+    await expect(api.get('sharedTask')).rejects.toThrow('label');
+  });
   it('does not pass malformed create IDs to cleanup', async () => {
     const { api, request } = setup();
     const observed = vi.fn();
