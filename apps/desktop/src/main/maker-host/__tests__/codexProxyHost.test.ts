@@ -4538,6 +4538,26 @@ describe('codex proxy host', () => {
       }
     });
 
+    it('独立 xAI 账号目录暂未包含当前模型时,按具体模型回退 first-party xai 目录,不误判成不支持 reasoning(#4892 review)', async () => {
+      const { resolveXaiCodexCatalogModel } = await import('../codex-proxy-host.js');
+      const model = (id: string, efforts: string[]) => ({ id, name: id, efforts, defaultEffort: efforts[0] ?? 'medium' });
+      const providers = [
+        { id: 'xai', models: { codex: [model('xai/grok-4.5', ['low', 'medium', 'high']), model('xai/grok-code-fast', [])] } },
+        // 账号级发现快照落后:只含 grok-4.7,没有会话正在用的 grok-4.5。
+        { id: 'grok-third', models: { codex: [model('xai/grok-4.7', ['low', 'medium', 'high', 'xhigh'])] } },
+      ] as never;
+      // 账号命中自己的模型时不回退。
+      expect(resolveXaiCodexCatalogModel(providers, 'grok-third', 'xai/grok-4.7')?.efforts).toHaveLength(4);
+      // 账号 provider 存在但该模型未命中 → 回退 first-party xai 的同名模型(保留 reasoning)。
+      expect(resolveXaiCodexCatalogModel(providers, 'grok-third', 'xai/grok-4.5')?.efforts).toHaveLength(3);
+      // 编码系模型即使回退也仍是 0 档位,不会被误放行。
+      expect(resolveXaiCodexCatalogModel(providers, 'grok-third', 'xai/grok-code-fast')?.efforts).toHaveLength(0);
+      // 两边都没有 → undefined(调用方按不支持 reasoning 处理)。
+      expect(resolveXaiCodexCatalogModel(providers, 'grok-third', 'xai/grok-unknown')).toBeUndefined();
+      // first-party xai 自身不重复回退。
+      expect(resolveXaiCodexCatalogModel(providers, 'xai', 'xai/grok-4.7')).toBeUndefined();
+    });
+
     it('请求原本没有 tools 时也补上 x_search(Grok 默认就该能搜 X)', async () => {
       const out = (await runXaiTransforms('no-tools', {
         model: 'xai/grok-4.5',

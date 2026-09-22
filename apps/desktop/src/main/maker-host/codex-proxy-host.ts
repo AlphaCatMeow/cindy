@@ -1,7 +1,7 @@
 import { createAttachmentRecovery } from './oversized-attachment-recovery.js';
 import { clearCodexTextOnlyPolicies, codexTextOnlyRequestGuard, codexTextOnlyWebSocketTransforms, isCodexTextOnly } from './codex-text-only-policy.js';
 import { resolveConversationSessionHeaders, withChatBridgeUserAgent, overrideHeadersCaseInsensitive } from '@cindy/responses-chat-bridge';
-import { providerCatalogId, providerModelRecord, type Effort } from '@cindy/model-providers';
+import { providerCatalogId, providerModelRecord, type CatalogModel, type Effort, type Provider } from '@cindy/model-providers';
 import { reconcileOutboundReasoningEffort } from './outbound-reasoning-effort.js';
 import { createPiProviderFetch, handlePiProviderRequest, invocationModelRecord, nativeBridgeApiKey, readBoundedResponseText, requiresNativeProviderAuth } from './pi-provider-transport.js';
 import { normalizeProviderRequest, normalizeMiniMaxResponsesReasoning } from '@cindy/model-compat';
@@ -1634,16 +1634,26 @@ function xaiCompatProviderId(providerId: string | null | undefined): string | nu
   return providerCatalogId(provider) === 'xai' ? providerId : null;
 }
 
+/**
+ * 按 xAI 系 provider 解析某个 codex 目录模型:先查该账号 provider,**具体模型**未命中
+ * (账号级发现快照暂未包含它)时回退 first-party `xai`,而不只在 provider 不存在时回退——
+ * 否则通用 Grok 会被误判成不支持 reasoning、现有会话的 reasoning 配置与回放项被剥掉。
+ */
+export function resolveXaiCodexCatalogModel(
+  providers: ReadonlyArray<Pick<Provider, 'id' | 'models'>>,
+  providerId: string,
+  namespacedModel: string,
+): CatalogModel | undefined {
+  const findModel = (id: string) =>
+    (providers.find((provider) => provider.id === id)?.models.codex ?? []).find(
+      (candidate) => candidate.id === namespacedModel,
+    );
+  return findModel(providerId) ?? (providerId === 'xai' ? undefined : findModel('xai'));
+}
+
 function supportsXaiReasoning(model: string | null, providerId: string = 'xai'): boolean {
   if (!model) return true;
-  const providers = getActiveCatalog().providers;
-  // 独立 xAI 账号的 codex 目录由 xai 根装配(active-catalog assembleRoot),优先按该账号查,
-  // 找不到再回落 first-party `xai`,避免账号目录尚未发现完成时把通用 Grok 误判成不支持 reasoning。
-  const xaiProvider =
-    providers.find((provider) => provider.id === providerId) ??
-    providers.find((provider) => provider.id === 'xai');
-  const namespacedModel = `xai/${model}`;
-  const catalogModel = (xaiProvider?.models.codex ?? []).find((candidate) => candidate.id === namespacedModel);
+  const catalogModel = resolveXaiCodexCatalogModel(getActiveCatalog().providers, providerId, `xai/${model}`);
   return (catalogModel?.efforts.length ?? 0) > 0;
 }
 
