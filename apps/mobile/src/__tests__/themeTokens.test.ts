@@ -87,6 +87,11 @@ describe('theme tokens', () => {
     expect(darkColors.permAutoAccent).toBe('#417CDD');
   });
 
+  it('房主皇冠使用醒目的金色语义 token并跨 light / dark 一致', () => {
+    expect(lightColors.warningFg).toBe('#F3A115');
+    expect(darkColors.warningFg).toBe('#F3A115');
+  });
+
   it('CTA 契约:中性反相(light 深底浅字 / dark 浅底深字),对比度 ≥4.5:1(用户红色新规 2026-07-17)', () => {
     // 契约第二次改写依据:用户红色新规 2026-07-17——常规按钮不用红,红只留警告/报错。
     // 取代 U3+U8 时期的全态红契约(M2 的 cta=#DF0C27 L=D 红底白字作废),CTA 回归中性反相。
