@@ -89,7 +89,13 @@ describe('Cindy Make composer presentation', () => {
     }
     const expression = topSlot.initializer.expression;
     const renderSlot = (cindyMakeRecoveryId: string | null, session: { id: string } | null) =>
-      evaluate(expression, { createElement, CindyMakeEditingActions: 'editing-actions', cindyMakeRecoveryId, session });
+      evaluate(expression, {
+        createElement,
+        CindyMakeEditingActions: 'editing-actions',
+        cindyMakeRecoveryId,
+        session,
+        remoteMakeCards: { blocked: false, handlesSession: false, supported: false },
+      });
 
     // Recovery must still reach ChatInput, never replace it with a blocking card.
     for (let child: ts.Node = input; !ts.isJsxExpression(child.parent); child = child.parent) {
@@ -104,6 +110,7 @@ describe('Cindy Make composer presentation', () => {
         sessionBinding: { attached: false }, sessionId: 'task-a', session: { id: 'task-a' },
         cindyMakeComposerPhase: null, cindyMakePendingTest: null,
         cindyMakeRecoveryId: 'continued-completion',
+        remoteMakeCards: { blocked: false, handlesSession: false, supported: false },
         worktreePreparing: false, smoothedBranchName: null, shareSelectionActive: false,
       })), parent.condition.getText(ast)).toBe(false);
     }
@@ -134,6 +141,7 @@ describe('Cindy Make composer presentation', () => {
             cindyMakeComposerPhase: phase,
             cindyMakePendingTest: pendingTest,
             cindyMakeRecoveryId: recoveryId,
+            remoteMakeCards: { blocked: false, handlesSession: false, supported: false },
           })).toBe(Boolean(phase || pendingTest));
         }
       }
