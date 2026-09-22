@@ -379,21 +379,21 @@ describe('active-catalog discovered augment', () => {
 
   it('adds a newly discovered Grok model to Pi without a bundled model or public declaration', () => {
     setActiveCatalog(BUNDLED_CATALOG);
-    // A synthetic ID keeps this discovery-only case independent of new bundled releases.
-    const discoveredId = 'grok-discovery-fixture';
+    // Keep the discovery fixture independent of future bundled model releases.
+    const modelId = 'grok-discovery-only';
     const models = () => getActiveCatalog().providers.find(p => p.id === 'xai')!.models.pi!;
-    expect(models().some(model => model.id === discoveredId)).toBe(false);
+    expect(models().some(model => model.id === modelId)).toBe(false);
     setXaiDiscoveredModels([{
-      id: `xai/${discoveredId}`, name: 'Grok discovery fixture', contextWindow: 500_000,
+      id: `xai/${modelId}`, name: 'Discovered Grok', contextWindow: 500_000,
       maxOutput: 64_000, efforts: ['xhigh', 'high', 'medium', 'low'], defaultEffort: 'high',
     }]);
-    expect(models().find(model => model.id === discoveredId)).toMatchObject({
-      name: 'Grok discovery fixture', contextWindow: 500_000, maxOutput: 64_000,
+    expect(models().find(model => model.id === modelId)).toMatchObject({
+      name: 'Discovered Grok', contextWindow: 500_000, maxOutput: 64_000,
       efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
       piApi: 'openai-responses',
     });
     setXaiDiscoveredModels(null);
-    expect(models().some(model => model.id === discoveredId)).toBe(false);
+    expect(models().some(model => model.id === modelId)).toBe(false);
   });
 
   it('keeps discovered Pi models scoped to their Grok account', () => {
