@@ -34,6 +34,9 @@ const h = vi.hoisted(() => ({
   })),
   closeSession: vi.fn(async (_sessionId: string) => undefined),
   closeSharedTask: vi.fn(async (_sessionId: string, _database: unknown): Promise<void> => undefined),
+  prepareSharedTaskClosure: vi.fn(async (_sessionId: string, _database: unknown): Promise<{ sessionId: string; marker: number; rowIds: number[] } | null> => null),
+  rollbackSharedTaskClosure: vi.fn(async (_database: unknown, _prepared: unknown) => undefined),
+  finalizeSharedTaskClosure: vi.fn(async (_database: unknown, _prepared: unknown) => undefined),
   commitBotProfileDeletion: vi.fn(async (): Promise<{ status: 'archived' | 'deleted'; sessionIds: string[] }> => ({ status: 'archived', sessionIds: [] })),
   tapWindowBroadcast: vi.fn(),
   windows: [] as Array<{
@@ -116,6 +119,9 @@ vi.mock('../../../git-context/prRefsStore', () => ({
 vi.mock('../../../imageCacheStore', () => ({ removeSession: vi.fn(async () => undefined) }));
 vi.mock('../../../device-link/sharedTaskRuntime.js', () => ({
   closeSharedTaskForTask: h.closeSharedTask,
+  prepareSharedTaskClosureForTask: h.prepareSharedTaskClosure,
+  rollbackPreparedSharedTaskClosure: h.rollbackSharedTaskClosure,
+  finalizePreparedSharedTaskClosure: h.finalizeSharedTaskClosure,
 }));
 vi.mock('../recentWorkdirs', () => ({ upsertRecentWorkdir: h.upsertRecentWorkdir }));
 vi.mock('../../../device-link/broadcast-tap.js', () => ({
@@ -869,6 +875,10 @@ describe('local-db:sessions:update handler wiring', () => {
 
   it('cleans runtime state before releasing the local terminal status lock', async () => {
     const order: string[] = [];
+    h.prepareSharedTaskClosure.mockImplementationOnce(async () => {
+      order.push('sharing-prepared');
+      return { sessionId: 'codex-local', marker: 1, rowIds: [7] };
+    });
     h.runtimeCleanup.mockImplementationOnce(() => order.push('runtime-cleanup'));
     h.closeSharedTask.mockImplementationOnce(async () => { order.push('sharing-closed'); });
     h.routeLock.mockImplementationOnce(async (_sessionId, task) => {
@@ -880,13 +890,17 @@ describe('local-db:sessions:update handler wiring', () => {
 
     await invokeUpdate('codex-local', { status: 'archived' });
 
-    expect(order).toEqual(['runtime-cleanup', 'sharing-closed', 'lock-released']);
+    expect(order).toEqual(['sharing-prepared', 'runtime-cleanup', 'sharing-closed', 'lock-released']);
     expect(h.runtimeCleanup).toHaveBeenCalledOnce();
     expect(h.closeSharedTask).toHaveBeenCalledWith('codex-local', h.client);
   });
 
   it('cleans runtime state before releasing the remote terminal status lock', async () => {
     const order: string[] = [];
+    h.prepareSharedTaskClosure.mockImplementationOnce(async () => {
+      order.push('sharing-prepared');
+      return { sessionId: 'codex-local', marker: 1, rowIds: [7] };
+    });
     h.runtimeCleanup.mockImplementationOnce(() => order.push('runtime-cleanup'));
     h.closeSharedTask.mockImplementationOnce(async () => { order.push('sharing-closed'); });
     h.routeLock.mockImplementationOnce(async (_sessionId, task) => {
@@ -898,9 +912,33 @@ describe('local-db:sessions:update handler wiring', () => {
 
     await patchSessionMetaInDb('codex-local', { status: 'archived' });
 
-    expect(order).toEqual(['runtime-cleanup', 'sharing-closed', 'lock-released']);
+    expect(order).toEqual(['sharing-prepared', 'runtime-cleanup', 'sharing-closed', 'lock-released']);
     expect(h.runtimeCleanup).toHaveBeenCalledOnce();
     expect(h.closeSharedTask).toHaveBeenCalledWith('codex-local', h.client);
+  });
+
+  it('does not commit a terminal status when the shared-task journal cannot be prepared', async () => {
+    h.prepareSharedTaskClosure.mockRejectedValueOnce(new Error('disk failed'));
+
+    await expect(invokeUpdate('codex-local', { status: 'archived' })).rejects.toThrow(
+      'Worktree is busy or its recovery record could not be saved',
+    );
+    expect(h.sqlite!.prepare('SELECT status FROM sessions WHERE id = ?').get('codex-local')).toEqual({ status: 'active' });
+    expect(h.closeSharedTask).not.toHaveBeenCalled();
+    expect(h.rollbackSharedTaskClosure).not.toHaveBeenCalled();
+  });
+
+  it('rolls back a prepared shared-task journal when the terminal status write fails', async () => {
+    h.prepareSharedTaskClosure.mockImplementationOnce(async () => {
+      h.sqlite!.prepare("UPDATE sessions SET status = 'deleted' WHERE id = ?").run('codex-local');
+      return { sessionId: 'codex-local', marker: 1, rowIds: [7] };
+    });
+
+    await expect(invokeUpdate('codex-local', { status: 'archived' })).rejects.toThrow('已删除的任务不能恢复或归档');
+    expect(h.rollbackSharedTaskClosure).toHaveBeenCalledWith(h.client, {
+      sessionId: 'codex-local', marker: 1, rowIds: [7],
+    });
+    expect(h.closeSharedTask).not.toHaveBeenCalled();
   });
 
   it.each([true, false])('closes shared tasks when Bot deletion transitions sessions to terminal status (keep=%s)', async (keepTaskHistory) => {

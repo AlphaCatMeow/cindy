@@ -9,12 +9,18 @@ type HostRecord = {
 const state = vi.hoisted(() => ({
   accountId: 'owner', region: 'global', authenticated: true,
   session: { mode: 'cloud', dataOwnerId: 'owner', generation: 1 }, boundary: false,
-  db: { client: { query: vi.fn() }, clientEpoch: 1 },
+  db: { client: { query: vi.fn(), exec: vi.fn() }, clientEpoch: 1 },
   hosts: [] as HostRecord[], dispatch: vi.fn(),
-  captureClose: vi.fn(), close: vi.fn(), journalClose: vi.fn(),
+  captureClose: vi.fn(), close: vi.fn(), journalClose: vi.fn(), journalPrepare: vi.fn(), journalRollback: vi.fn(), journalFinalize: vi.fn(),
 }));
 vi.mock('../../localDb/client/current.js', () => ({ getCurrentDbClientSnapshot: () => state.db }));
-vi.mock('../../localDb/sharedTasks.js', () => ({ createSharedTaskJournal: () => ({}), closeSharedTasksInJournalForSession: state.journalClose }));
+vi.mock('../../localDb/sharedTasks.js', () => ({
+  createSharedTaskJournal: () => ({}),
+  closeSharedTasksInJournalForSession: state.journalClose,
+  prepareSharedTasksForSession: state.journalPrepare,
+  rollbackPreparedSharedTasks: state.journalRollback,
+  finalizePreparedSharedTasks: state.journalFinalize,
+}));
 vi.mock('../../appSessionState.js', () => ({
   activeOwnerScopeKey: () => [state.session.mode, state.session.dataOwnerId, state.session.generation].join(':'),
   getActiveAppSession: () => ({ ...state.session }), isAppSessionBoundaryPending: () => state.boundary,
@@ -36,7 +42,15 @@ vi.mock('../sharedTaskHost.js', () => ({
   },
 }));
 
-import { closeSharedTaskForTask, closeSharedTasksBeforeLogout, requireSharedTaskHost, startSharedTaskRuntime, stopSharedTaskRuntime } from '../sharedTaskRuntime';
+import {
+  closeSharedTaskForTask,
+  closeSharedTasksBeforeLogout,
+  prepareSharedTaskClosureForTask,
+  requireSharedTaskHost,
+  rollbackPreparedSharedTaskClosure,
+  startSharedTaskRuntime,
+  stopSharedTaskRuntime,
+} from '../sharedTaskRuntime';
 
 function start() {
   const client = { hasServerCapability: () => true, getStatus: () => 'online', start: vi.fn(), stop: vi.fn(), revoke: vi.fn() };
@@ -49,11 +63,14 @@ beforeEach(async () => {
   vi.useFakeTimers();
   state.accountId = 'owner'; state.region = 'global'; state.authenticated = true; state.boundary = false;
   state.session = { mode: 'cloud', dataOwnerId: 'owner', generation: 1 };
-  state.db = { client: { query: vi.fn() }, clientEpoch: 1 };
+  state.db = { client: { query: vi.fn(), exec: vi.fn() }, clientEpoch: 1 };
   state.hosts.length = 0; state.dispatch.mockClear();
   state.captureClose.mockReset().mockReturnValue(state.close);
   state.close.mockReset().mockResolvedValue({ status: 'closed' });
   state.journalClose.mockReset().mockResolvedValue(['sharedTask-a']);
+  state.journalPrepare.mockReset().mockResolvedValue({ sessionId: 'session', marker: 1, rowIds: [7] });
+  state.journalRollback.mockReset().mockResolvedValue(undefined);
+  state.journalFinalize.mockReset().mockResolvedValue(undefined);
 });
 afterEach(async () => {
   await stopSharedTaskRuntime();
@@ -61,6 +78,23 @@ afterEach(async () => {
 });
 
 describe('shared runtime stable owner recommit', () => {
+  it('prepares and rolls back a terminal journal only in the captured profile database', async () => {
+    const db = state.db.client;
+    const prepared = await prepareSharedTaskClosureForTask('session', db);
+    expect(prepared).toEqual({ sessionId: 'session', marker: 1, rowIds: [7] });
+    expect(state.journalPrepare).toHaveBeenCalledWith(db, 'session');
+    await rollbackPreparedSharedTaskClosure(db, prepared);
+    expect(state.journalRollback).toHaveBeenCalledWith(db, prepared);
+    const { finalizePreparedSharedTaskClosure } = await import('../sharedTaskRuntime');
+    await finalizePreparedSharedTaskClosure(db, prepared);
+    expect(state.journalFinalize).toHaveBeenCalledWith(db, prepared);
+
+    expect(await prepareSharedTaskClosureForTask('session', {})).toBeNull();
+    await rollbackPreparedSharedTaskClosure({}, prepared);
+    expect(state.journalPrepare).toHaveBeenCalledOnce();
+    expect(state.journalRollback).toHaveBeenCalledOnce();
+  });
+
   it('persists terminal changes without a relay binding and closes using captured credentials', async () => {
     const db = state.db.client;
     let finish!: (ids: string[]) => void;
@@ -70,7 +104,7 @@ describe('shared runtime stable owner recommit', () => {
     expect(state.captureClose).toHaveBeenCalledWith('owner', 'global');
     expect(state.close).not.toHaveBeenCalled();
     state.accountId = 'new-owner'; state.region = 'cn';
-    state.db = { client: { query: vi.fn() }, clientEpoch: 2 };
+    state.db = { client: { query: vi.fn(), exec: vi.fn() }, clientEpoch: 2 };
     finish(['sharedTask-a']);
     await pending;
     expect(state.close).toHaveBeenCalledExactlyOnceWith('sharedTask-a');
@@ -100,7 +134,7 @@ describe('shared runtime stable owner recommit', () => {
     state.session.generation++;
     requireSharedTaskHost();
     expect(state.hosts[1].options.creationState).toBe(original);
-    state.db = { client: { query: vi.fn() }, clientEpoch: 2 };
+    state.db = { client: { query: vi.fn(), exec: vi.fn() }, clientEpoch: 2 };
     start();
     expect(state.hosts[2].options.creationState).not.toBe(original);
   });
@@ -175,7 +209,7 @@ describe('shared runtime stable owner recommit', () => {
       if (change === 'account') state.accountId = 'other';
       if (change === 'stable-owner') state.session.dataOwnerId = 'other';
       if (change === 'region') state.region = 'cn';
-      if (change === 'database') state.db = { ...state.db, client: { query: vi.fn() } };
+      if (change === 'database') state.db = { ...state.db, client: { query: vi.fn(), exec: vi.fn() } };
       if (change === 'database-epoch') state.db = { ...state.db, clientEpoch: state.db.clientEpoch + 1 };
       if (change === 'signed-out') state.authenticated = false;
       if (change === 'local') state.session.mode = 'local';

@@ -2,7 +2,13 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { closeSharedTasksInJournalForSession, createSharedTaskJournal } from '../sharedTasks.js';
+import {
+  closeSharedTasksInJournalForSession,
+  createSharedTaskJournal,
+  finalizePreparedSharedTasks,
+  prepareSharedTasksForSession,
+  rollbackPreparedSharedTasks,
+} from '../sharedTasks.js';
 import type { SharedTaskSnapshot } from '@cindy/device-link';
 
 const snapshot = (revision = 1): SharedTaskSnapshot => ({
@@ -24,6 +30,22 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('sharedTask authority journal', () => {
+  it('prepares a terminal fence and rolls back only that preparation', async () => {
+    await journal.recordAuthority(snapshot());
+    const writer = {
+      async exec(sql: string, params = []) { return db.prepare(sql).run(...params); },
+      async query<T>(sql: string, params: unknown[] = []) { return db.prepare(sql).all(...params) as T[]; },
+    };
+    const prepared = await prepareSharedTasksForSession(writer, 'session');
+    expect(prepared.rowIds).toHaveLength(1);
+    expect(await journal.latest()).toMatchObject([{ terminal: false }]);
+    await rollbackPreparedSharedTasks(writer, prepared);
+    expect(await journal.latest()).toMatchObject([{ terminal: false }]);
+    const committed = await prepareSharedTasksForSession(writer, 'session');
+    await finalizePreparedSharedTasks(writer, committed);
+    expect(await journal.latest()).toMatchObject([{ terminal: true }]);
+  });
+
   it('hands off all generations of only the terminal task through the shared profile journal', async () => {
     await journal.recordAuthority(snapshot());
     await journal.recordAuthority({ ...snapshot(), sharedTaskId: 'new-share' });

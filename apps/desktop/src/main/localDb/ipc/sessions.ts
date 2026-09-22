@@ -227,6 +227,38 @@ async function withStatusWriteLock<T>(
   return withSessionRouteLock(sessionId, write);
 }
 
+type SharedTaskClosurePreparation = {
+  sessionId: string;
+  marker: number;
+  rowIds: number[];
+};
+
+async function prepareSharedTaskClosure(
+  sessionId: string,
+  dbClient: DbClient,
+): Promise<SharedTaskClosurePreparation | null> {
+  const { prepareSharedTaskClosureForTask } = await import('../../device-link/sharedTaskRuntime.js');
+  return prepareSharedTaskClosureForTask(sessionId, dbClient);
+}
+
+async function rollbackSharedTaskClosure(
+  dbClient: DbClient,
+  prepared: SharedTaskClosurePreparation | null,
+): Promise<void> {
+  if (!prepared) return;
+  const { rollbackPreparedSharedTaskClosure } = await import('../../device-link/sharedTaskRuntime.js');
+  await rollbackPreparedSharedTaskClosure(dbClient, prepared);
+}
+
+async function finalizeSharedTaskClosure(
+  dbClient: DbClient,
+  prepared: SharedTaskClosurePreparation | null,
+): Promise<void> {
+  if (!prepared) return;
+  const { finalizePreparedSharedTaskClosure } = await import('../../device-link/sharedTaskRuntime.js');
+  await finalizePreparedSharedTaskClosure(dbClient, prepared);
+}
+
 async function requestWorktreeRecycle(
   sessionId: string,
   resources: readonly string[] = [],
@@ -1921,9 +1953,17 @@ export async function updateSessionInDb(
         if (p.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sid);
         await moveGuard?.beforeWrite?.();
         moveGuard?.assertCurrent();
-        await writeSessionPatch(db, sid, setObj, p.status);
+        const terminal = p.status === 'archived' || p.status === 'deleted';
+        const prepared = terminal ? await prepareSharedTaskClosure(sid, dbClient) : null;
+        try {
+          await writeSessionPatch(db, sid, setObj, p.status);
+        } catch (error) {
+          await rollbackSharedTaskClosure(dbClient, prepared);
+          throw error;
+        }
+        await finalizeSharedTaskClosure(dbClient, prepared);
         cleanupSessionRuntimeForTerminalStatus(sid, p.status);
-        if (p.status === 'archived' || p.status === 'deleted') {
+        if (terminal) {
           const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
           await closeSharedTaskForTask(sid, dbClient);
         }
@@ -2086,7 +2126,15 @@ export async function patchSessionMetaInDb(
   if (patch.title !== undefined) noteUserTitleWritten(sessionId);
   const updated = await withStatusWriteLock(db, sessionId, patch.status, async () => {
     if (patch.status !== undefined) await assertGenericSessionLifecycleAllowed(db, sessionId);
-    await writeSessionPatch(db, sessionId, setObj, patch.status);
+    const terminal = patch.status === 'archived' || patch.status === 'deleted';
+    const prepared = terminal ? await prepareSharedTaskClosure(sessionId, dbClient) : null;
+    try {
+      await writeSessionPatch(db, sessionId, setObj, patch.status);
+    } catch (error) {
+      await rollbackSharedTaskClosure(dbClient, prepared);
+      throw error;
+    }
+    await finalizeSharedTaskClosure(dbClient, prepared);
     const row = await selectSessionWithCount(db, sessionId);
     if (!row) throwIpcError('NOT_FOUND', 'Session 不存在');
     if (patch.pinnedAt !== undefined && row.pinnedAt == null) {
@@ -2094,7 +2142,7 @@ export async function patchSessionMetaInDb(
       row.summary = null;
     }
     cleanupSessionRuntimeForTerminalStatus(sessionId, patch.status);
-    if (patch.status === 'archived' || patch.status === 'deleted') {
+    if (terminal) {
       const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
       await closeSharedTaskForTask(sessionId, dbClient);
     }
@@ -2283,26 +2331,43 @@ export async function setSessionsStatusInDb(
     }
     const physicalResources = await Promise.all([...new Set(resources)].map(physicalWorktreeKey));
     return withWorktreeMutation(resources, async () => {
-      if (status === 'archived') {
-        for (const id of sessionIds) await requestWorktreeRecycle(id, perSession.get(id));
-      }
-      const rows = await dbClient.tx('sessions.setStatus', { sessionIds, status }).catch((err) => {
-        const code = (err as { code?: string }).code;
-        const message = err instanceof Error ? err.message : String(err);
-        if (code === 'NOT_FOUND' || code === 'INVALID_PARAMS' || code === 'PRECONDITION_FAILED') {
-          throwIpcError(code, message);
+      const prepared: SharedTaskClosurePreparation[] = [];
+      let committed = false;
+      try {
+        if (status === 'archived') {
+          for (const id of sessionIds) {
+            const closure = await prepareSharedTaskClosure(id, dbClient);
+            if (closure) prepared.push(closure);
+          }
         }
-        throw err;
-      });
-      for (const item of rows) {
-        cleanupSessionRuntimeForTerminalStatus(item.sessionId, item.status);
-        if (item.status === 'archived') {
-          const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
-          await closeSharedTaskForTask(item.sessionId, dbClient);
+        if (status === 'archived') {
+          for (const id of sessionIds) await requestWorktreeRecycle(id, perSession.get(id));
         }
+        const rows = await dbClient.tx('sessions.setStatus', { sessionIds, status }).catch((err) => {
+          const code = (err as { code?: string }).code;
+          const message = err instanceof Error ? err.message : String(err);
+          if (code === 'NOT_FOUND' || code === 'INVALID_PARAMS' || code === 'PRECONDITION_FAILED') {
+            throwIpcError(code, message);
+          }
+          throw err;
+        });
+        committed = true;
+        for (const closure of prepared) await finalizeSharedTaskClosure(dbClient, closure);
+        for (const item of rows) {
+          cleanupSessionRuntimeForTerminalStatus(item.sessionId, item.status);
+          if (item.status === 'archived') {
+            const { closeSharedTaskForTask } = await import('../../device-link/sharedTaskRuntime.js');
+            await closeSharedTaskForTask(item.sessionId, dbClient);
+          }
+        }
+        for (const resource of physicalResources) notifyWorktreeRecycleOpportunity(resource);
+        return rows;
+      } catch (error) {
+        if (!committed) {
+          for (const closure of prepared) await rollbackSharedTaskClosure(dbClient, closure);
+        }
+        throw error;
       }
-      for (const resource of physicalResources) notifyWorktreeRecycleOpportunity(resource);
-      return rows;
     });
   });
   for (const item of applied) {
@@ -2378,10 +2443,27 @@ export async function deleteBotProfileAndDetachSessionsInDb(
       sessionIds: ids,
       keepTaskHistory,
     });
-  const committed =
-    ids.length > 0 ? await withSessionRouteLocks(ids, commitDeletion) : await commitDeletion();
+  const prepared: SharedTaskClosurePreparation[] = [];
+  let committedStatus = false;
+  let committedResult: Awaited<ReturnType<typeof commitBotProfileDeletion>>;
+  try {
+    for (const id of ids) {
+      const closure = await prepareSharedTaskClosure(id, dbClient);
+      if (closure) prepared.push(closure);
+    }
+    committedResult = ids.length > 0 ? await withSessionRouteLocks(ids, commitDeletion) : await commitDeletion();
+    committedStatus = true;
+  } catch (error) {
+    if (!committedStatus) {
+      for (const closure of prepared) await rollbackSharedTaskClosure(dbClient, closure);
+    }
+    throw error;
+  }
+  const committed = committedResult;
   const status = committed.status;
   const committedSessionIds = [...new Set(committed.sessionIds)];
+
+  for (const closure of prepared) await finalizeSharedTaskClosure(dbClient, closure);
 
   // Bot profile deletion commits terminal task status through a dedicated
   // transaction, so it bypasses the ordinary session patch/status writers.

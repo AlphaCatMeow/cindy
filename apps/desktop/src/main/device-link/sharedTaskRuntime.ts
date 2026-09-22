@@ -1,6 +1,13 @@
 import { SHARED_TASK_CAPABILITY, type DeviceLinkClient } from '@cindy/device-link';
 import { getCurrentDbClientSnapshot } from '../localDb/client/current.js';
-import { closeSharedTasksInJournalForSession, createSharedTaskJournal } from '../localDb/sharedTasks.js';
+import {
+  closeSharedTasksInJournalForSession,
+  createSharedTaskJournal,
+  prepareSharedTasksForSession,
+  rollbackPreparedSharedTasks,
+  finalizePreparedSharedTasks,
+  type PreparedSharedTaskClosure,
+} from '../localDb/sharedTasks.js';
 import { activeOwnerScopeKey, getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { getAuthState, getCurrentUserId, getDeviceId, getActiveAuthRealm } from '../authManager.js';
 import { createLogger } from '../logger.js';
@@ -142,4 +149,35 @@ export async function closeSharedTaskForTask(sessionId: string, database: unknow
   const ids = new Set([...localIds, ...await closeSharedTasksInJournalForSession(db.client, sessionId)]);
   // Network failure is retried from the terminal journal; never undo the task archive.
   if (close) await Promise.allSettled([...ids].map((id) => close(id)));
+}
+
+/** Persist a terminal close fence before the session status is changed. */
+export async function prepareSharedTaskClosureForTask(
+  sessionId: string,
+  database: unknown,
+): Promise<PreparedSharedTaskClosure | null> {
+  const db = getCurrentDbClientSnapshot();
+  if (!db || db.client !== database) return null;
+  return prepareSharedTasksForSession(db.client, sessionId);
+}
+
+/** Compensate a prepare when the corresponding terminal status write aborts. */
+export async function rollbackPreparedSharedTaskClosure(
+  database: unknown,
+  prepared: PreparedSharedTaskClosure | null,
+): Promise<void> {
+  if (!prepared) return;
+  // Rollback must use the captured profile DB even if the account boundary
+  // advanced while the terminal status write was being rejected.
+  if (!database || typeof (database as { exec?: unknown }).exec !== 'function') return;
+  await rollbackPreparedSharedTasks(database as Parameters<typeof rollbackPreparedSharedTasks>[0], prepared);
+}
+
+/** Promote a prepared close intent only after the session status is durable. */
+export async function finalizePreparedSharedTaskClosure(
+  database: unknown,
+  prepared: PreparedSharedTaskClosure | null,
+): Promise<void> {
+  if (!prepared || !database || typeof (database as { exec?: unknown }).exec !== 'function') return;
+  await finalizePreparedSharedTasks(database as Parameters<typeof finalizePreparedSharedTasks>[0], prepared);
 }
