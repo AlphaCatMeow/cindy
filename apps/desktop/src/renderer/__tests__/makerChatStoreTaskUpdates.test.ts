@@ -940,10 +940,13 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
 
   it('account teardown reuses the Stop/closed finalizer and does not revive on A→B→A', () => {
     const sid = `account-boundary-${Math.random().toString(36).slice(2, 8)}`;
+    const remoteSid = 'remote-account-boundary-' + Math.random().toString(36).slice(2, 8);
     try {
       setDataOwnerGeneration('account-a', 1);
       makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
       applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
+      makerChatStore.__applyStatusUpdateForTest(remoteSid, statusUpdate(remoteSid, true));
+      applyTask(remoteSid, { taskId: 'remote-t1', status: 'running', taskType: 'local_agent' });
       expect(makerChatStore.getSnapshot(sid).agentStatus.startedAt).toBeTruthy();
 
       // AuthContext invokes this synchronously when the outgoing owner enters
@@ -955,6 +958,7 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       // stop the task that still belongs to the active account.
       expect(state.agentStatus.isRunning).toBe(true);
       expect(state.agentStatus.startedAt).toBeTruthy();
+      expect(makerChatStore.getSnapshot(remoteSid).agentStatus.isRunning).toBe(true);
       setDataOwnerGeneration('account-a', 3);
 
       // A successful A→B commit finalizes the old owner exactly once.
@@ -966,6 +970,7 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       expect(state.agentStatus.isRunning).toBe(false);
       expect(state.agentStatus.startedAt).toBeNull();
       expect(state.taskUpdates?.get('t1')?.status).toBe('stopped');
+      expect(makerChatStore.getSnapshot(remoteSid).agentStatus.isRunning).toBe(true);
 
       // Re-entering account A must observe the stopped snapshot, with no
       // automatic continuation caused by the boundary cleanup.
@@ -977,6 +982,7 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       expect(state.agentStatus.startedAt).toBeNull();
     } finally {
       makerChatStore.purgeSession(sid);
+      makerChatStore.purgeSession(remoteSid);
       dataOwnerGenerationTesting.reset();
     }
   });

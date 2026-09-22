@@ -2131,6 +2131,10 @@ export function cancelRemoteOptimisticSendsForDataOwnerBoundary(
  */
 function finalizeSessionsForDataOwnerBoundary(): void {
   for (const sessionId of sessions.keys()) {
+    // The local Maker teardown cannot stop a device-link session; its runtime
+    // remains authoritative on the controlled Desktop. Keep the cached remote
+    // state intact until that device reports its own terminal event.
+    if (isRemoteSessionSticky(sessionId)) continue;
     const state = sessions.get(sessionId);
     if (!state || !hasActiveTurnStateForOwnerBoundary(state)) continue;
     bumpInteractionReconcileEpoch(sessionId);
