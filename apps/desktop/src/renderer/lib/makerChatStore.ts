@@ -9785,6 +9785,38 @@ function isActiveSessionSnapshot(value: unknown): value is ActiveSessionSnapshot
   );
 }
 
+/** A rejected account change can leave the old owner with already-closed SDK sessions. */
+export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
+  const listActive = typeof window === 'undefined' ? undefined : window.electronAPI?.maker?.listActive;
+  if (typeof listActive !== 'function') return;
+  const owner = getDataOwnerGeneration();
+  if (owner.dataOwnerId === null) return;
+  const candidates = [...sessions].filter(([id, state]) =>
+    !isRemoteSession(id) && hasActiveTurnStateForOwnerBoundary(state),
+  );
+  if (candidates.length === 0) return;
+  try {
+    const active = await listActive();
+    // Compare the publication object too: A -> null -> A may reuse the same
+    // main generation on rollback, but must invalidate the older read.
+    if (getDataOwnerGeneration() !== owner) return;
+    if (!Array.isArray(active) || !active.every(isActiveSessionSnapshot)) return;
+    const liveTurns = new Map(active.map((item) => [item.sessionId, item.isTurnRunning]));
+    for (const [id, state] of candidates) {
+      // Keep a turn that Main still reports running, and never apply a delayed
+      // absence to a new turn or changed session. A live-but-idle handle has
+      // already stopped its turn and must take the same finalizer path.
+      if (liveTurns.get(id) === true || sessions.get(id) !== state) continue;
+      bumpInteractionReconcileEpoch(id);
+      supersedeInputProjectionRequests(id, { supersedeOperations: true });
+      flushPendingTextDelta(id);
+      setState(id, forceFinalizeOnSessionClosed);
+    }
+  } catch (error) {
+    log.warn('Failed to reconcile maker sessions after auth rollback:', error);
+  }
+}
+
 /**
  * Renderer reload recovery: main keeps the live SDK sessions, but this module's
  * in-memory `isStreaming` state is lost. Pull the main-side turn snapshot once

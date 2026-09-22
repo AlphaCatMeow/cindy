@@ -78,6 +78,7 @@ vi.mock('@/lib/makerTransport', () => ({
 
 import {
   cancelRemoteOptimisticSendsForDataOwnerBoundary,
+  reconcileSessionsAfterDataOwnerRollback,
   EMPTY_SESSION_STATE,
   handleStreamEvent,
   makerChatStore,
@@ -977,6 +978,31 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
     } finally {
       makerChatStore.purgeSession(sid);
       dataOwnerGenerationTesting.reset();
+    }
+  });
+
+  it('rollback reconciliation finalizes only sessions absent from Main after teardown', async () => {
+    const sid = 'rollback-reconcile-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    const previousElectronApi = previousWindow?.electronAPI;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      applyTask(sid, { taskId: 't1', status: 'running', taskType: 'local_agent' });
+      globalWindow.window = {
+        electronAPI: { maker: { listActive: vi.fn(async () => []) } },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+      expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(false);
+      expect(makerChatStore.getSnapshot(sid).taskUpdates?.get('t1')?.status).toBe('stopped');
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
     }
   });
 

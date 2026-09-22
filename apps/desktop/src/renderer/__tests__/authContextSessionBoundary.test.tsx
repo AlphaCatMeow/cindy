@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     service,
     reset: vi.fn(),
     cancelRemoteOptimisticSendsForDataOwnerBoundary: vi.fn(),
+    reconcileSessionsAfterDataOwnerRollback: vi.fn(async () => undefined),
     getMe: vi.fn(async () => ({ role: 'user' })),
     clearWorkersCache: vi.fn(),
     setModelVisibilityOwner: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('@/lib/authService', () => ({
 vi.mock('@/lib/makerChatStore', () => ({
   cancelRemoteOptimisticSendsForDataOwnerBoundary:
     mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary,
+  reconcileSessionsAfterDataOwnerRollback: mocks.reconcileSessionsAfterDataOwnerRollback,
   setCurrentUserName: vi.fn(),
 }));
 vi.mock('@/lib/sessionsStore', () => ({
@@ -155,6 +157,7 @@ describe('AuthContext session cache boundaries', () => {
   beforeEach(() => {
     mocks.reset.mockClear();
     mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+    mocks.reconcileSessionsAfterDataOwnerRollback.mockClear();
     mocks.getMe.mockClear();
     mocks.clearWorkersCache.mockClear();
     mocks.setModelVisibilityOwner.mockClear();
@@ -339,7 +342,7 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenCalledTimes(2);
   });
 
-  it('does not finalize when a failed boundary rolls back from a pending signed-out push', async () => {
+  it('reconciles Main runtime on a rollback push before the auth IPC rejects', async () => {
     let rejectLogout!: (error: Error) => void;
     mocks.service.logout.mockReturnValueOnce(
       new Promise<void>((_resolve, reject) => {
@@ -360,12 +363,45 @@ describe('AuthContext session cache boundaries', () => {
     expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
       finalizeSessions: false,
     });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       rejectLogout(new Error('logout failed'));
       await expect(logout).rejects.toThrow('logout failed');
     });
-    expect(view.result.current.dataOwnerId).toBe('account-a');
+    expect(getDataOwnerGeneration().dataOwnerId).toBe('account-a');
+  });
+
+  it('reconciles Main runtime on IPC rejection without a rollback push', async () => {
+    let rejectLogout!: (error: Error) => void;
+    mocks.service.logout.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectLogout = reject;
+      }),
+    );
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBe('account-a'));
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+
+    let logout!: Promise<void>;
+    act(() => {
+      logout = view.result.current.logout();
+    });
+    act(() => mocks.emitAuth({ ...authState(null), ownerGeneration: 1 }));
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+
+    await act(async () => {
+      rejectLogout(new Error('logout failed'));
+      await expect(logout).rejects.toThrow('logout failed');
+    });
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: false,
+    });
+    expect(mocks.reconcileSessionsAfterDataOwnerRollback).toHaveBeenCalledTimes(1);
+    expect(getDataOwnerGeneration().dataOwnerId).toBe('account-a');
   });
 
   it('keeps a newer pushed owner when an older auth boundary later rejects', async () => {

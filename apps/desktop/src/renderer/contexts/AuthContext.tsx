@@ -30,6 +30,7 @@ import {
 } from '@/lib/authService';
 import {
   cancelRemoteOptimisticSendsForDataOwnerBoundary,
+  reconcileSessionsAfterDataOwnerRollback,
   setCurrentUserName,
 } from '@/lib/makerChatStore';
 import { isSecondaryWindow } from '@/lib/secondaryWindow';
@@ -177,14 +178,15 @@ export function AuthProvider({
   const activeDataOwnerIdRef = useRef<string | null>(null);
   const activeDataOwnerGenerationRef = useRef(0);
   const authStateVersionRef = useRef(0);
+  const pendingOwnerProjectionRef = useRef(false);
 
   // Auth mutations invalidate owner-bound in-flight reads before crossing IPC. If Main rejects
   // the transition, restore the single authoritative owner ref (which successful siblings and
   // newer pushes both update), then rebuild the cache because React state may never have changed.
   const runDataOwnerBoundary = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
     // Invalidate old-owner ingress before crossing IPC, but defer stopping the
-    // cached turn until the new owner has committed. A rejected switch must
-    // leave the current account's task resumable in its original running state.
+    // cached turn until the new owner has committed. On failure, reconcile
+    // against Main: an early rejection keeps the runtime, a late one may not.
     publishDataOwnerGeneration(null, undefined, { finalizeSessions: false });
     try {
       return await operation();
@@ -197,6 +199,11 @@ export function AuthProvider({
         activeDataOwnerGenerationRef.current,
         { finalizeSessions: false },
       );
+      const rollbackNeedsReconcile = pendingOwnerProjectionRef.current;
+      pendingOwnerProjectionRef.current = false;
+      if (rollbackNeedsReconcile) {
+        void reconcileSessionsAfterDataOwnerRollback();
+      }
       setDataOwnerGenerationState(activeDataOwnerGenerationRef.current);
       setDataOwnerRecoveryEpoch((epoch) => epoch + 1);
       void preloadLocalCatalogSnapshot();
@@ -230,6 +237,9 @@ export function AuthProvider({
         && state.ownerGeneration === activeDataOwnerGenerationRef.current;
       const ownerChanged =
         !pendingSignedOutProjection && activeDataOwnerIdRef.current !== state.dataOwnerId;
+      const ownerRolledBack =
+        pendingOwnerProjectionRef.current && !pendingSignedOutProjection && !ownerChanged;
+      pendingOwnerProjectionRef.current = pendingSignedOutProjection;
       // A same-owner push can arrive while an auth boundary is still waiting
       // for IPC. The pre-commit fence temporarily publishes null, so letting
       // that push use the default finalizer would stop the current owner's
@@ -240,6 +250,7 @@ export function AuthProvider({
         state.ownerGeneration,
         { finalizeSessions: ownerChanged },
       );
+      if (ownerRolledBack) void reconcileSessionsAfterDataOwnerRollback();
       if (ownerChanged) {
         sessionsStore.reset();
         clearWorkersCache();
