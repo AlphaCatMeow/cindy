@@ -296,6 +296,24 @@ describe('AuthContext session cache boundaries', () => {
     expect(view.result.current.dataOwnerId).toBe('local-v1');
   });
 
+  it('finalizes a committed owner change after a first pending snapshot', async () => {
+    mocks.service.initialize.mockResolvedValue({
+      ...authState(null),
+      ownerGeneration: 1,
+      ownerBoundaryPending: true,
+    });
+    const view = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(view.result.current.dataOwnerId).toBeNull());
+
+    mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary.mockClear();
+    act(() => mocks.emitAuth({ ...authState('account-b'), ownerGeneration: 2 }));
+
+    expect(mocks.cancelRemoteOptimisticSendsForDataOwnerBoundary).toHaveBeenLastCalledWith({
+      finalizeSessions: true,
+    });
+    expect(view.result.current.dataOwnerId).toBe('account-b');
+  });
+
   it('resets sessions when authentication expires', async () => {
     renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(mocks.service.initialize).toHaveBeenCalled());

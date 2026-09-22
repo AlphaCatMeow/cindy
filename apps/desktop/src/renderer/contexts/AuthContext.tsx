@@ -286,7 +286,10 @@ export function AuthProvider({
         }
         activeDataOwnerGenerationRef.current = state.ownerGeneration;
       }
-      const initialOwnerHydration = !hasAppliedAuthStateRef.current && !pendingSignedOutProjection;
+      const initialOwnerHydration =
+        !hasAppliedAuthStateRef.current
+        && !pendingSignedOutProjection
+        && !pendingOwnerProjectionRef.current;
       const unknownOwnerRollbackProjection =
         pendingOwnerProjectionRef.current
         && !pendingSignedOutProjection
