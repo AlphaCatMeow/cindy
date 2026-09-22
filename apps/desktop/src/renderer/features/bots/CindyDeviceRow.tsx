@@ -94,7 +94,7 @@ export function CindyDeviceRow({
             'pointer-events-auto col-span-2 -mx-2 border-0 bg-transparent text-12 text-inherit focus-visible:ring-inset',
             'enabled:hover:bg-sidebar-item-hover enabled:active:bg-sidebar-item-hover',
             selected &&
-              'enabled:hover:bg-[color-mix(in_srgb,var(--sidebar-item-active-foreground)_10%,transparent)] enabled:active:bg-[color-mix(in_srgb,var(--sidebar-item-active-foreground)_16%,transparent)]',
+              'enabled:hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] enabled:active:bg-[color-mix(in_srgb,currentColor_16%,transparent)]',
           )}
         />
         <span

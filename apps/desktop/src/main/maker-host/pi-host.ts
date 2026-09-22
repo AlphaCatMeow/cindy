@@ -56,6 +56,7 @@ import {
 import { providerCatalogForPi, providerModelRecord } from '@cindy/model-providers';
 import type {
   Catalog,
+  ModelCost,
   CustomProviderConfig,
   PiModelApi,
   PiReasoningEffort,
@@ -505,12 +506,7 @@ export async function readPiBundledModels(
   return catalog;
 }
 
-function catalogCostForPiNative(cost: {
-  input?: number;
-  output?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-} | undefined): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
+function catalogCostForPiNative(cost: ModelCost | undefined): PiNativeModelSpec['cost'] {
   if (
     !cost ||
     (typeof cost.input !== 'number' &&
@@ -525,6 +521,13 @@ function catalogCostForPiNative(cost: {
     output: cost.output ?? 0,
     cacheRead: cost.cacheRead ?? 0,
     cacheWrite: cost.cacheWrite ?? 0,
+    ...(cost.tiers ? { tiers: cost.tiers.map(tier => ({
+      inputTokensAbove: tier.inputTokensAbove,
+      input: tier.input ?? cost.input ?? 0,
+      output: tier.output ?? cost.output ?? 0,
+      cacheRead: tier.cacheRead ?? cost.cacheRead ?? 0,
+      cacheWrite: tier.cacheWrite ?? cost.cacheWrite ?? 0,
+    })) } : {}),
   };
 }
 
