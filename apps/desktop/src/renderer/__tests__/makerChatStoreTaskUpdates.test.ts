@@ -976,6 +976,8 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
         recovery: null,
         errorRetryText: null,
         credentialSwitchWait: null,
+        continuationInFlightClientId: 'manual-continuation',
+        continuationTurnClientId: 'manual-continuation-turn',
       });
       makerChatStore.__applyStatusUpdateForTest(remoteSid, statusUpdate(remoteSid, true));
       applyTask(remoteSid, { taskId: 'remote-t1', status: 'running', taskType: 'local_agent' });
@@ -1005,6 +1007,9 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
       expect(state.pendingQueue.map((item) => item.clientId)).toEqual([
         'user-queued-owner-finalize',
       ]);
+      expect(state.continuationInFlightClientId).toBeNull();
+      expect(state.continuationTurnClientId).toBeNull();
+      expect(state.continuationInFlightProjectionCapability).toBe('unknown');
       expect(makerChatStore.getSnapshot(remoteSid).agentStatus.isRunning).toBe(true);
 
       // Re-entering account A must observe the stopped snapshot, with no
@@ -1388,6 +1393,52 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
 
       expect(listActive).toHaveBeenCalledTimes(2);
       expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(true);
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
+
+  it('preserves idle background work found by the second Main reconciliation read', async () => {
+    const sid = 'rollback-second-read-idle-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      applyTask(sid, {
+        taskId: 'second-read-background',
+        status: 'running',
+        taskType: 'local_bash',
+      });
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, false));
+      let resolveFirst!: (value: unknown[]) => void;
+      let listActiveCalls = 0;
+      const listActive = vi.fn(() => {
+        listActiveCalls += 1;
+        if (listActiveCalls === 1) {
+          return new Promise<unknown[]>((resolve) => { resolveFirst = resolve; });
+        }
+        return Promise.resolve([
+          { sessionId: sid, agentKind: 'codex', isTurnRunning: false },
+        ]);
+      });
+      globalWindow.window = {
+        electronAPI: { maker: { listActive } },
+      } as typeof globalWindow.window;
+
+      const reconciliation = reconcileSessionsAfterDataOwnerRollback();
+      await Promise.resolve();
+      resolveFirst([]);
+      await reconciliation;
+
+      expect(listActive).toHaveBeenCalledTimes(2);
+      expect(
+        makerChatStore.getSnapshot(sid).taskUpdates?.get('second-read-background')?.status,
+      ).toBe('running');
     } finally {
       makerChatStore.purgeSession(sid);
       dataOwnerGenerationTesting.reset();

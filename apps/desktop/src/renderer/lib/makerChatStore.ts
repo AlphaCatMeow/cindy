@@ -2176,6 +2176,7 @@ function hasActiveTurnStateForOwnerBoundary(state: SessionChatState): boolean {
     state.pendingRemoteDesktopConfirmationQueue.length > 0 ||
     state.queueAbortPending ||
     state.steeringQueueClientIds.length > 0 ||
+    state.continuationInFlightClientId !== null ||
     state.continuationTurnClientId !== null ||
     state.pendingTaskWake > 0 ||
     state.messages.some(
@@ -6760,6 +6761,7 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
     !state.messages.some((m) => m.isStreaming) &&
     !state.queueAbortPending &&
     state.steeringQueueClientIds.length === 0 &&
+    state.continuationInFlightClientId === null &&
     state.continuationTurnClientId === null &&
     state.pendingTaskWake === 0 &&
     !state.messages.some(
@@ -6824,7 +6826,9 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
     pendingRemoteDesktopConfirmationQueue: [],
     queueAbortPending: false,
     steeringQueueClientIds: [],
+    continuationInFlightClientId: null,
     continuationTurnClientId: null,
+    continuationInFlightProjectionCapability: 'unknown',
     // session 都关了,后台任务事件流已断:running 残留任务标 stopped、唤醒桥接
     // 清零,否则 running 快照(折算了后台任务)会让 spinner 永久转下去。
     taskUpdates: stoppedTasks,
@@ -9926,7 +9930,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // A live-but-idle handle has already stopped its turn and must take the
       // same finalizer path.
       const current = sessions.get(id);
-      const mainTurnRunning = liveTurns.get(id);
+      let mainTurnRunning = liveTurns.get(id);
       if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(id, current, marker))
         continue;
       // The first query can legitimately race a replacement turn created by
@@ -9936,7 +9940,11 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
         const latest = await listActive();
         if (getDataOwnerGeneration() !== owner) return;
         if (!Array.isArray(latest) || !latest.every(isActiveSessionSnapshot)) return;
-        if (latest.some((item) => item.sessionId === id && item.isTurnRunning === true)) {
+        const latestSession = latest.find((item) => item.sessionId === id);
+        if (latestSession) {
+          mainTurnRunning = latestSession.isTurnRunning;
+        }
+        if (mainTurnRunning === true) {
           continue;
         }
       }
