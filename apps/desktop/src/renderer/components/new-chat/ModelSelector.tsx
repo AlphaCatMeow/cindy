@@ -73,6 +73,7 @@ import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useGatewayModelPricing, useReferenceModelPricing } from '@/hooks/useModelPricing';
 import { useModelAccessStatus } from '@/hooks/useModelAccessStatus';
 import { useProviders } from '@/hooks/useProviders';
+import { LocalModelCatalogNotice } from './LocalModelCatalogNotice';
 import { providerDisplayName as sharedProviderDisplayName } from '@/lib/providerDisplayName';
 import {
   evictDeviceProviders,
@@ -2756,6 +2757,19 @@ function ModelSelectorContentView({
   if (providersOverrideState && providersOverrideState.status !== 'ready') {
     return <RemoteModelLoadNotice status={providersOverrideState.status} onRetry={providersOverrideState.refresh} />;
   }
+
+  const localCatalogNotice = !deviceId && !providersOverride && localProviders.error
+    ? <LocalModelCatalogNotice failure={localProviders.error} onRetry={localProviders.refetch} /> : null;
+  // 后续刷新失败时,快照里可能仍没有当前引擎的已连接来源。emptyState 不得盖住恢复提示;
+  // 有引导卡时叠在下方,连接入口仍可用。
+  if (localCatalogNotice && (localProviders.loading || emptyState)) {
+    return (
+      <div className="flex w-[320px] max-w-full flex-col">
+        <div className={emptyState ? 'p-2 pb-0' : 'p-2'}>{localCatalogNotice}</div>
+        {emptyState}
+      </div>
+    );
+  }
   if (emptyState) return emptyState;
 
   const hasAnyModel = sections ? sections.length > 0 : (flatModels?.length ?? 0) > 0;
@@ -2864,6 +2878,7 @@ function ModelSelectorContentView({
               aria-label={t('newChat.modelSelector.search.placeholderAll')}
             />
           </div>
+          {localCatalogNotice && <div className="shrink-0 p-2">{localCatalogNotice}</div>}
           <UnifiedModelPanel
             deviceId={deviceId}
             localProviderUsage={!deviceId && !providersOverride}
@@ -3082,6 +3097,7 @@ function ModelSelectorContentView({
         </>
       )}
       {searchField}
+      {localCatalogNotice}
 
       {/* 模型列表 —— 单栏;分段(供应商)或 flat。 */}
       <div
