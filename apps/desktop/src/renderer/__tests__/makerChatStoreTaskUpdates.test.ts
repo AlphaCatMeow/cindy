@@ -1400,6 +1400,37 @@ describe('getRunningSnapshot 后台 subagent 折算(真 store)', () => {
     }
   });
 
+  it('rechecks Main when the first snapshot is idle', async () => {
+    const sid = 'rollback-idle-replaced-' + Math.random().toString(36).slice(2, 8);
+    const globalWindow = globalThis as typeof globalThis & {
+      window?: { electronAPI?: unknown };
+    };
+    const previousWindow = globalWindow.window;
+    try {
+      setDataOwnerGeneration('account-a', 1);
+      makerChatStore.__applyStatusUpdateForTest(sid, statusUpdate(sid, true));
+      let listActiveCalls = 0;
+      const listActive = vi.fn(() => {
+        listActiveCalls += 1;
+        return listActiveCalls === 1
+          ? Promise.resolve([{ sessionId: sid, agentKind: 'codex', isTurnRunning: false }])
+          : Promise.resolve([{ sessionId: sid, agentKind: 'codex', isTurnRunning: true }]);
+      });
+      globalWindow.window = {
+        electronAPI: { maker: { listActive } },
+      } as typeof globalWindow.window;
+
+      await reconcileSessionsAfterDataOwnerRollback();
+
+      expect(listActive).toHaveBeenCalledTimes(2);
+      expect(makerChatStore.getSnapshot(sid).agentStatus.isRunning).toBe(true);
+    } finally {
+      makerChatStore.purgeSession(sid);
+      dataOwnerGenerationTesting.reset();
+      globalWindow.window = previousWindow;
+    }
+  });
+
   it('preserves idle background work found by the second Main reconciliation read', async () => {
     const sid = 'rollback-second-read-idle-' + Math.random().toString(36).slice(2, 8);
     const globalWindow = globalThis as typeof globalThis & {

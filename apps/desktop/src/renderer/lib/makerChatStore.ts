@@ -9930,13 +9930,19 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // A live-but-idle handle has already stopped its turn and must take the
       // same finalizer path.
       const current = sessions.get(id);
-      let mainTurnRunning = liveTurns.get(id);
-      if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(id, current, marker))
+      const initialMainTurnRunning = liveTurns.get(id);
+      if (
+        initialMainTurnRunning === true ||
+        !current ||
+        !sameActiveTurnBoundaryMarker(id, current, marker)
+      )
         continue;
+      let mainTurnRunning: boolean | undefined = initialMainTurnRunning;
       // The first query can legitimately race a replacement turn created by
-      // another renderer. Re-read an absent handle immediately before
-      // finalization so a stale absence cannot close that new turn.
-      if (mainTurnRunning === undefined) {
+      // another renderer. Re-read every non-running snapshot immediately
+      // before finalization so a stale idle/absence result cannot close that
+      // new turn.
+      if (initialMainTurnRunning === false || initialMainTurnRunning === undefined) {
         const latest = await listActive();
         if (getDataOwnerGeneration() !== owner) return;
         if (!Array.isArray(latest) || !latest.every(isActiveSessionSnapshot)) return;
@@ -9944,7 +9950,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
         if (latestSession) {
           mainTurnRunning = latestSession.isTurnRunning;
         }
-        if (mainTurnRunning === true) {
+        if (latestSession?.isTurnRunning === true) {
           continue;
         }
       }
