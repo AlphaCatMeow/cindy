@@ -7824,6 +7824,7 @@
     },
     "permissionRequest": "{{name}} 想请你确认一下",
     "remote": {
+      "unknown": "连接状态未知",
       "online": "在线",
       "offline": "离线",
       "thisDevice": "这台电脑",
@@ -9729,6 +9730,7 @@
       "reviewingChecks": "正在核对检查结果…",
       "replying": "正在回复…",
       "processing": "正在处理…",
+      "organizingConversation": "正在整理对话…",
       "thinking": "正在思考…",
       "generating": "正在生成…",
       "editingFiles": "正在编辑文件…",

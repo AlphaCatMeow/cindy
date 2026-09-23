@@ -4845,7 +4845,8 @@ export function CCAgentSessionView({
               {botChatIdentity ? (
                 <BotWorkingStatus
                   key={sessionId}
-                  sessionId={remoteDeviceId ? undefined : sessionId ?? undefined}
+                  sessionId={sessionId ?? undefined}
+                  remote={remoteDeviceId ? { deviceId: remoteDeviceId, botId: botChatIdentity.id } : undefined}
                   visible={composerRuntimeVisible}
                   status={
                     pendingPermission ? 'Waiting on approval'

@@ -7824,6 +7824,7 @@
     },
     "permissionRequest": "{{name}} が確認をお願いしています",
     "remote": {
+      "unknown": "接続状態不明",
       "online": "オンライン",
       "offline": "オフライン",
       "thisDevice": "このコンピュータ",
@@ -9729,6 +9730,7 @@
       "reviewingChecks": "チェック結果を確認しています…",
       "replying": "返信中…",
       "processing": "処理中…",
+      "organizingConversation": "会話を整理しています…",
       "thinking": "考え中…",
       "generating": "生成中…",
       "editingFiles": "ファイルを編集中…",

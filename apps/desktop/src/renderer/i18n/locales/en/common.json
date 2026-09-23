@@ -7826,6 +7826,7 @@
     },
     "permissionRequest": "{{name}} needs your go-ahead",
     "remote": {
+      "unknown": "Connection unknown",
       "online": "Online",
       "offline": "Offline",
       "thisDevice": "This computer",
@@ -9744,6 +9745,7 @@
       "reviewingChecks": "Reviewing check results…",
       "replying": "Replying…",
       "processing": "Working…",
+      "organizingConversation": "Organizing the conversation…",
       "thinking": "Thinking…",
       "generating": "Generating…",
       "editingFiles": "Editing files…",
