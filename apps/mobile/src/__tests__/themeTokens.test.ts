@@ -35,6 +35,13 @@ function contrastRatio(fg: string, bg: string): number {
 }
 
 describe('theme tokens', () => {
+  it('file tile micro labels meet normal-text contrast on both attachment surfaces', () => {
+    for (const colors of [lightColors, darkColors]) {
+      for (const background of [colors.surface, colors.surfaceElevated]) {
+        expect(contrastRatio(colors.textPrimary, background)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
   it('light / dark 色板 key 集合完全一致', () => {
     expect(Object.keys(lightColors).sort()).toEqual(Object.keys(darkColors).sort());
   });

@@ -2343,6 +2343,7 @@
         "endpointLabel": "{{agent}} 기본 URL",
         "noAuthNote": "이 프록시는 클라이언트 키가 필요하지 않습니다. Cindy는 전달 전에 CLI 구독 자격 증명을 제거합니다.",
         "signIn": "로그인",
+        "mimoTokenPlanNote": "MiMo Token Plan 페이지의 전용 API 키 (tp-…)를 사용하세요. 호출 시 구독 할당량이 사용됩니다. 종량제 API 키와 혼용할 수 없습니다.",
         "setupLink": {
           "apiKey": "API 키 받기",
           "account": "가입 또는 로그인",

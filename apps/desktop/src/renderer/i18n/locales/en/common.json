@@ -2344,6 +2344,7 @@
         "endpointLabel": "{{agent}} base URL",
         "noAuthNote": "This proxy needs no client key; Cindy removes CLI subscription credentials before forwarding.",
         "signIn": "Sign in",
+        "mimoTokenPlanNote": "Use the dedicated API key from your MiMo Token Plan page (tp-…). Calls use your subscription quota. Pay-as-you-go API keys cannot be used here.",
         "setupLink": {
           "apiKey": "Get an API key",
           "account": "Sign up or sign in",

@@ -1438,6 +1438,8 @@ export default function SessionScreen() {
     }
     voiceStateTransitionRef.current = next;
     setVoiceStateInternal(next);
+    // 首段音频到达时与 listening 同批交接;停止、取消和错误也在这里收回 pending。
+    setVoiceStartPending(false);
   }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -5120,8 +5122,13 @@ export default function SessionScreen() {
             if (selection) input?.rememberSelection(text, selection);
             writeVoiceDraft({ draft: text, initialDocument, initialSelection, insertionEnd: selection?.end, replacement });
           },
-          onStateChanged: setVoiceState,
+          onStateChanged: (next) => {
+            // 旧 controller 的取消可晚于新启动完成,只允许本次启动交接 UI 状态。
+            if (voiceStartupSeqRef.current !== startupSeq) return;
+            setVoiceState(next);
+          },
           onError: (message) => {
+            if (voiceStartupSeqRef.current !== startupSeq) return;
             setVoiceState('error');
             setVoiceError(message);
           },
@@ -5281,7 +5288,8 @@ export default function SessionScreen() {
       voiceDictionaryLearningTrackerRef.current?.dispose();
       // 语音结束 hold 属于上一个会话的输入现场;切会话时连同迁移基点一并复位,
       // 被 cancel 的 run 迟到的状态回调不会在新会话上误布防。
-      voiceStateTransitionRef.current = 'idle';
+      // 不依赖旧 controller 的迟到 done 回调来复位新页面。
+      setVoiceState('idle');
       setComposerVoiceHoldArmed(false);
       if (controller) void controller.cancel().catch(() => undefined);
       discardPendingPrewarm();
@@ -5387,6 +5395,9 @@ export default function SessionScreen() {
     void startVoiceRecording()
       .catch(() => undefined)
       .finally(() => {
+        // start() 可早于首段 PCM 返回。已有录音时由 setVoiceState 接续胶囊,
+        // 只有未起录的取消/失败才在这里收回,避免 pending → idle → listening 闪烁。
+        if (voiceRecordingActiveRef.current) return;
         // 只收自己世代的 pending:切会话后旧启动的收尾不能塌掉新录音的胶囊。
         if (voiceStartPendingSeqRef.current === pendingSeq) setVoiceStartPending(false);
       });
@@ -10683,6 +10694,7 @@ function SessionComposerInput({
   const composerCardActive = (canUseComposer && composerFocused)
     || modelSheetOpen
     || permissionSheetOpen
+    || voiceStartPending
     || voiceIsBusy
     || composerVoiceHoldActive;
   const recommendationPresentation = usePromptRecommendationVisibility(sessionId, draft, composerCardActive);

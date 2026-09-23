@@ -2343,6 +2343,7 @@
         "endpointLabel": "{{agent}} 基础 URL",
         "noAuthNote": "此 Proxy 无需客户端密钥；Cindy 会在转发前移除 CLI 的订阅凭证。",
         "signIn": "登录",
+        "mimoTokenPlanNote": "请使用 MiMo Token Plan 页面提供的专属 API Key (tp-…)。调用消耗订阅配额，不能与按量付费 API Key 混用。",
         "setupLink": {
           "apiKey": "获取 API Key",
           "account": "注册或登录",
