@@ -18,6 +18,7 @@ import { isCodexAccountProvider, codexAccountHome, setCodexAccountRetirement } f
 import { CodexThreadLocations } from './codex-thread-locations.js';
 import { getActiveAppSession } from '../appSessionState.js';
 import { remoteCodexProvider } from './ssh-codex-models.js';
+import { getActiveAuthRealm } from '../authManager.js';
 import { getCustomProvider, updateCustomProviderIfUnchanged } from './custom-provider-store.js';
 import { refreshCustomProvidersIntoCatalog } from './createDesktopProviderService.js';
 import { acquireWorktreeRuntimeLease, releaseWorktreeRuntimeLease, type WorktreeRuntimeLease } from '../worktree/runtimeLeases';
@@ -1950,11 +1951,25 @@ export function getMaker(): Maker {
         return storage;
       },
       createCodexAuthTokenReader: (providerId) => {
-        const ownerScope = activeOwnerScopeKey();
+        const owner = getActiveAppSession();
+        const authRealm = getActiveAuthRealm();
+        const assertOwner = () => {
+          const current = getActiveAppSession();
+          if (isAppSessionBoundaryPending() || _codexAgent !== codexAgent ||
+              getActiveAuthRealm() !== authRealm ||
+              current.mode !== owner.mode || current.dataOwnerId !== owner.dataOwnerId) {
+            throw new Error('Codex authentication owner changed');
+          }
+        };
         return async () => {
-          if (isAppSessionBoundaryPending() || activeOwnerScopeKey() !== ownerScope) throw new Error('Codex authentication owner changed');
+          // Same-owner Ghost repair advances the scope generation while retaining
+          // this Maker and its live tasks. Fence each read, not the reader's lifetime.
+          // The agent identity also rejects old readers after logout/login to the same owner.
+          assertOwner();
+          const ownerScope = activeOwnerScopeKey();
           const state = await desktopCodexAuthAdapter.getState({ credentialMode: 'oauth-bearer', providerId });
-          if (isAppSessionBoundaryPending() || activeOwnerScopeKey() !== ownerScope) throw new Error('Codex authentication owner changed');
+          assertOwner();
+          if (activeOwnerScopeKey() !== ownerScope) throw new Error('Codex authentication owner changed');
           const credentials = state.authenticated ? desktopCodexAuthAdapter.readOneShotCreds(providerId) : null;
           if (!credentials) throw new Error('Codex account credentials are unavailable');
           return { accessToken: credentials.accessToken, chatgptAccountId: credentials.accountId };

@@ -1082,7 +1082,7 @@
     },
     "about": {
       "title": "정보",
-      "description": "앱과 통합된 Agent의 런타임 버전. 모든 버전 번호는 시작 시 메인 프로세스가 자동 감지합니다.",
+      "description": "앱 및 통합된 Agent의 런타임 버전입니다.",
       "appVersionLabel": "앱 버전",
       "claudeCodeVersionLabel": "Claude Code 버전",
       "codexVersionLabel": "Codex 버전",
@@ -1275,6 +1275,33 @@
         "reconcileFailed": "진단에 실패했습니다",
         "reconcileHealthy": "장부와 디스크가 일치합니다. 이상이 없습니다.",
         "reconcileIssues": "이상 발견: 장부에 없는 파일 {{orphans}}개({{orphanSize}}), 누락된 파일 {{missing}}개, 인식할 수 없는 항목 {{stray}}개. 전체 목록은 앱 로그를 확인하세요."
+      },
+      "piKernel": {
+        "manage": "Pi 버전 관리",
+        "checking": "확인 중…",
+        "checkFailed": "확인 실패",
+        "available": "업데이트 있음",
+        "lookup": "준비 중…",
+        "download": "다운로드 중…",
+        "verify": "검증 중…",
+        "activate": "전환 중…",
+        "update": "Pi 최신 버전으로 업데이트",
+        "restore": "Cindy 정식 버전 복원",
+        "check": "업데이트 확인",
+        "releaseNotes": "Pi 릴리스 노트",
+        "checkedAt": "마지막 확인: {{time}}",
+        "updateTitle": "Pi {{version}}으로 업데이트할까요?",
+        "restoreTitle": "Pi {{version}}을 복원할까요?",
+        "updateDescription": "Pi에서 배포한 버전으로, Cindy와 호환되지 않을 수 있습니다. 언제든 Cindy 정식 버전으로 복원할 수 있습니다. 기존 세션은 현재 버전을 계속 사용합니다.",
+        "restoreDescription": "더 낮은 버전이더라도 Cindy 정식 릴리스에서 배포하는 Pi를 설치합니다. 기존 세션은 현재 버전을 계속 사용합니다.",
+        "updateConfirm": "업데이트",
+        "restoreConfirm": "복원",
+        "installed": "새 세션부터 Pi {{version}}을 사용합니다.",
+        "versionChanged": "배포 버전이 변경되었습니다. 다시 확인한 후 설치해 주세요.",
+        "busy": "다른 Pi 업데이트가 진행 중입니다.",
+        "installFailed": "Pi 설치에 실패하여 이전 버전을 계속 사용합니다. 네트워크와 디스크 여유 공간을 확인한 후 다시 시도해 주세요.",
+        "openFailed": "릴리스 노트를 열 수 없습니다.",
+        "restartRequired": "Pi {{version}}이 설치되었습니다. Cindy를 재시작하면 사용할 수 있습니다."
       }
     },
     "apiKey": {
@@ -2537,6 +2564,13 @@
         "modelCount": "모델 {{count}}개 설정됨",
         "modelsAutomatic": "모델 정보는 자동으로 가져옵니다. 개별 설정은 모델 목록에서 변경하세요.",
         "manualModel": "모델 ID (자동으로 가져올 수 없는 경우)"
+      },
+      "byok": {
+        "managed": "조직에서 연결 및 모델 관리",
+        "refresh": "조직 설정 새로고침",
+        "refreshFailed": "조직 설정을 새로고침하지 못했습니다. 나중에 다시 시도하세요.",
+        "pending": "인증 정보 준비 중",
+        "unavailable": "일시적으로 사용할 수 없음"
       }
     },
     "experimental": {
@@ -7790,6 +7824,7 @@
     },
     "permissionRequest": "{{name}} 님이 확인을 기다리고 있어요",
     "remote": {
+      "unknown": "연결 상태 알 수 없음",
       "online": "온라인",
       "offline": "오프라인",
       "thisDevice": "이 컴퓨터",
@@ -8949,6 +8984,8 @@
       "failed": "이미지를 생성하지 못했습니다. 다시 시도해 주세요"
     },
     "errorBanner": {
+      "requestFormatError": "앱이 보낸 요청 형식에 문제가 있어 답변을 완료하지 못했습니다.",
+      "replyFailed": "답변을 완료하지 못했습니다. 오류 세부 정보에서 원인을 확인하세요.",
       "retryTitle": "마지막 메시지 다시 보내기",
       "cancelTitle": "오류 알림 닫기",
       "retry": "다시 시도",
@@ -9695,6 +9732,7 @@
       "reviewingChecks": "검사 결과를 확인하고 있어요…",
       "replying": "답변 중…",
       "processing": "처리 중…",
+      "organizingConversation": "대화를 정리하는 중…",
       "thinking": "생각 중…",
       "generating": "생성 중…",
       "editingFiles": "파일 수정 중…",
@@ -10905,7 +10943,7 @@
         "intervalChip": "완료 후 대기 · {{schedule}}"
       },
       "scheduleMenu": {
-        "intervalMinutes": "Minutes (N분마다)",
+        "intervalMinutes": "분 (N분마다)",
         "interval": "Hourly (N시간마다)",
         "daily": "Daily (매일)",
         "weekdays": "Weekdays (평일)",
@@ -10926,7 +10964,10 @@
         "minuteLabel": "분",
         "scheduleHourAria": "스케줄 시간",
         "scheduleMinuteAria": "스케줄 분",
-        "openTimePickerAria": "시간 선택기 열기"
+        "intervalMinutesAria": "반복 간격(분)",
+        "openTimePickerAria": "시간 선택기 열기",
+        "minuteIntervalHint": "1시간을 나눌 수 있는 분 간격만 사용할 수 있습니다: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30분. 60분은 ‘1시간마다’를 선택하세요.",
+        "unsupportedMinuteInterval": "이 작업은 {{count}}분의 이전 Cron 설정을 사용 중입니다. 사용 가능한 간격을 선택해 수정하세요."
       },
       "model": {
         "loading": "모델 로드 중…",
@@ -13214,6 +13255,7 @@
       "usingHint": "최신 개인 버전을 사용 중입니다.",
       "errors": {
         "busy": "작업, 테스트 또는 빌드가 진행 중입니다. 완료한 후 버전을 전환하거나 삭제하세요.",
+        "building": "개인 버전을 빌드하는 중입니다. 완료될 때까지 기다리거나 빌드를 중지한 후 버전을 전환하세요.",
         "incompatible": "데이터 구조가 다릅니다. 현재 기본 버전에서 개인 버전을 다시 빌드하세요.",
         "unavailable": "이 버전을 읽을 수 없습니다. 다시 빌드한 후 시도하세요.",
         "launchFailed": "대상 버전을 시작하지 못했습니다. 현재 버전은 유지됩니다.",
@@ -13457,6 +13499,7 @@
       "getLatest": "최신 소스 동기화",
       "taskTitle": "소스 업데이트 충돌 해결",
       "updateHint": "공식 소스를 업데이트하고 개인 변경 사항을 유지합니다.",
+      "buildingHint": "개인 버전을 빌드하는 중입니다. 완료를 기다리거나 중지한 후 소스를 동기화하세요.",
       "confirmTitle": "최신 소스로 업데이트할까요?",
       "confirmDescription": "개인 변경 사항은 유지됩니다. 충돌이 발생하면 해결 세션을 시작하기 전에 확인을 요청합니다.",
       "conflictConfirm": {
