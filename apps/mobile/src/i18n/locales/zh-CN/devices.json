@@ -596,6 +596,8 @@
       },
       "boundSessionA11y": "绑定任务 {{name}}",
       "intervalPlaceholder": "留空则使用 cron",
+      "intervalHint": "分钟间隔请选择 1、2、3、4、5、6、10、12、15、20 或 30 分钟；整小时间隔请输入 60 的倍数，范围为 60–1380 分钟（1–23 小时）。",
+      "intervalPreservedHint": "当前任务的精确间隔为每 {{duration}}；未编辑或清空前会保留。",
       "workspace": {
         "project": "项目",
         "dialogue": "对话"
@@ -733,7 +735,7 @@
         "workingDir": "请输入项目目录",
         "effort": "推理强度只能是 {{values}}",
         "intervalPositiveInteger": "间隔分钟必须是正整数",
-        "intervalUnsupported": "分钟间隔只支持 1–59 分钟，或 1–23 小时的整点间隔"
+        "intervalUnsupported": "分钟间隔必须能整除 60：请选择 1、2、3、4、5、6、10、12、15、20 或 30 分钟，或 1–23 小时的整点间隔"
       },
       "schedule": {
         "paused": "已暂停",

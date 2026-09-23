@@ -90,6 +90,7 @@ import {
   type TemplateParamValidation,
 } from '@/scheduler/scheduleFormModel';
 import { useRemoteScheduleEventSnapshot } from '@/scheduler/remoteScheduleEvents';
+import { formatScheduleInterval } from '@/scheduler/scheduleIntervalLabel';
 import {
   buildMobileTemplateOverrides,
   isLocalizedBuiltinTemplate,
@@ -1080,7 +1081,7 @@ function ScheduleFormCard({
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const setField = <K extends keyof MobileScheduleDraft>(key: K, value: MobileScheduleDraft[K]) => {
     onChange({ ...draft, [key]: value });
   };
@@ -1104,6 +1105,13 @@ function ScheduleFormCard({
     : sessionMode === 'persistent'
       ? t('devices.automations.form.sessionMode.persistent')
       : t('devices.automations.form.sessionMode.fresh');
+  const preservedIntervalMs = !draft.intervalMinutes
+    && !draft.intervalMinutesTouched
+    && typeof draft.sourceIntervalMs === 'number'
+    && Number.isFinite(draft.sourceIntervalMs)
+    && draft.sourceIntervalMs > 0
+    ? draft.sourceIntervalMs
+    : undefined;
 
   return (
     <View style={styles.formCard} testID="automations.form">
@@ -1281,6 +1289,13 @@ function ScheduleFormCard({
               testID="automations.form.intervalInput"
               value={draft.intervalMinutes}
             />
+            <Text style={styles.fieldHint} testID="automations.form.intervalHint">
+              {preservedIntervalMs !== undefined
+                ? t('devices.automations.form.intervalPreservedHint', {
+                  duration: formatScheduleInterval(preservedIntervalMs, i18n.resolvedLanguage || i18n.language),
+                })
+                : t('devices.automations.form.intervalHint')}
+            </Text>
           </View>
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Cron</Text>

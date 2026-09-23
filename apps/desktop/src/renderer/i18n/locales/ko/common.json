@@ -10939,7 +10939,7 @@
         "intervalChip": "완료 후 대기 · {{schedule}}"
       },
       "scheduleMenu": {
-        "intervalMinutes": "Minutes (N분마다)",
+        "intervalMinutes": "분 (N분마다)",
         "interval": "Hourly (N시간마다)",
         "daily": "Daily (매일)",
         "weekdays": "Weekdays (평일)",
@@ -10960,7 +10960,10 @@
         "minuteLabel": "분",
         "scheduleHourAria": "스케줄 시간",
         "scheduleMinuteAria": "스케줄 분",
-        "openTimePickerAria": "시간 선택기 열기"
+        "intervalMinutesAria": "반복 간격(분)",
+        "openTimePickerAria": "시간 선택기 열기",
+        "minuteIntervalHint": "1시간을 나눌 수 있는 분 간격만 사용할 수 있습니다: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30분. 60분은 ‘1시간마다’를 선택하세요.",
+        "unsupportedMinuteInterval": "이 작업은 {{count}}분의 이전 Cron 설정을 사용 중입니다. 사용 가능한 간격을 선택해 수정하세요."
       },
       "model": {
         "loading": "모델 로드 중…",

@@ -596,6 +596,8 @@
       },
       "boundSessionA11y": "セッション {{name}} をひも付け",
       "intervalPlaceholder": "空欄の場合は cron を使用",
+      "intervalHint": "分間隔は 1、2、3、4、5、6、10、12、15、20、30 分から選択してください。整数時間の間隔は、60～1380 分（1～23 時間）の範囲で 60 の倍数を入力してください。",
+      "intervalPreservedHint": "このタスクの正確な間隔は {{duration}} です。編集または消去するまで保持されます。",
       "workspace": {
         "project": "プロジェクト",
         "dialogue": "会話"
@@ -733,7 +735,7 @@
         "workingDir": "プロジェクトディレクトリを入力してください",
         "effort": "推論強度は次のいずれかを指定してください：{{values}}",
         "intervalPositiveInteger": "間隔（分）は正の整数で入力してください",
-        "intervalUnsupported": "分間隔は 1～59 分、または 1～23 時間の正時の間隔に対応しています"
+        "intervalUnsupported": "分間隔は 1 時間を割り切れる値（1、2、3、4、5、6、10、12、15、20、30 分）、または 1～23 時間の正時で指定してください"
       },
       "schedule": {
         "paused": "一時停止中",

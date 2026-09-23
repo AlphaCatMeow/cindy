@@ -10954,7 +10954,7 @@
         "intervalChip": "After completion · {{schedule}}"
       },
       "scheduleMenu": {
-        "intervalMinutes": "Minutes (every N minutes)",
+        "intervalMinutes": "Minutes (Every N Minutes)",
         "interval": "Hourly (every N hours)",
         "daily": "Daily (every day)",
         "weekdays": "Weekdays",
@@ -10975,7 +10975,10 @@
         "minuteLabel": "Minute",
         "scheduleHourAria": "Schedule hour",
         "scheduleMinuteAria": "Schedule minute",
-        "openTimePickerAria": "Open time picker"
+        "intervalMinutesAria": "Repeat Interval (Minutes)",
+        "openTimePickerAria": "Open time picker",
+        "minuteIntervalHint": "Only minute intervals that divide an hour are available: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, or 30 minutes. For 60 minutes, choose 1 hour.",
+        "unsupportedMinuteInterval": "This task uses the legacy {{count}}-minute Cron setting. Choose an available interval to correct it."
       },
       "model": {
         "loading": "Loading models…",
