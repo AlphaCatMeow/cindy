@@ -7521,10 +7521,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // holder 供各 turn 收口路径调用。远端 CC 走 holder 的 detach 补偿
   // (bridge 重建 / 端口重绑已让 fresh 失效时重建 query)。
   refreshRemoteCodexMcpOnTurnSettledHolder = (sessionId: string): void => {
-    const ownerGeneration = getActiveAppSession().generation;
     // Shutdown closes sessions while the dynamic Maker facade rejects access.
     // No remote reconfiguration belongs to the departing owner's boundary.
     if (isAppSessionBoundaryPending()) return;
+    const ownerGeneration = getActiveAppSession().generation;
     const session = maker.getSession(sessionId);
     const remoteHostId = session?.remoteHostId;
     if (!remoteHostId) return;
