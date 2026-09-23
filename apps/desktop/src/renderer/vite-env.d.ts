@@ -4131,6 +4131,7 @@ interface ElectronAPI {
     }>;
     ccMgrDismissPendingUpgrade: (hostId: string, agent?: 'cc' | 'pi') => Promise<{ ok: true }>;
     // Codex credential sync
+    listCodexModels: (id: string) => Promise<import('@cindy/model-providers').ProviderView[]>;
     checkCodexAuth: (id: string) => Promise<{
       localExists: boolean;
       remoteExists: boolean;
