@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { ListenOptions } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { PluginOauthOffer } from '@cindy/device-link';
+import type { PluginOauthCallback, PluginOauthOffer } from '@cindy/device-link';
 import { listenForOauthCallback } from '../loopbackListener.js';
 
 const state = 's'.repeat(43);
@@ -50,6 +50,27 @@ async function unusedPort() {
   return { port: (server.address() as { port: number }).port, release };
 }
 
+async function listenOnUnusedPort(
+  hostname: string,
+  deliver: (value: PluginOauthCallback) => Promise<void>,
+  assertCurrent: () => void,
+) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const reservation = await unusedPort();
+    await reservation.release();
+    try {
+      const listener = await listenForOauthCallback(
+        offer(reservation.port, hostname),
+        deliver,
+        assertCurrent,
+      );
+      return { listener, port: reservation.port };
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'OAUTH_BRIDGE_UNAVAILABLE') throw error;
+    }
+  }
+  throw new Error('unable to reserve a loopback OAuth port after retries');
+}
 function offer(port: number, hostname = 'localhost'): PluginOauthOffer {
   return {
     authorizeUrl: 'https://provider.example/authorize',
@@ -83,11 +104,8 @@ function request(host: string, port: number, options: { path?: string; authority
 it.each(['127.0.0.1', '::1'])(
   'accepts localhost callbacks via %s and consumes once across families',
   async (first) => {
-    const reservation = await unusedPort();
-    await reservation.release();
-    const { port } = reservation;
     const deliver = vi.fn(async () => {});
-    const listener = await listenForOauthCallback(offer(port), deliver, () => {});
+    const { listener, port } = await listenOnUnusedPort('localhost', deliver, () => {});
     resources.push(listener);
     for (const host of ['127.0.0.1', '::1']) {
       expect(await request(host, port, { authority: `evil.example:${port}` })).toBe(400);
@@ -108,9 +126,6 @@ it.each(['127.0.0.1', '::1'])(
 );
 
 it('shares consumption while delivery through the other family is still pending', async () => {
-  const reservation = await unusedPort();
-  await reservation.release();
-  const { port } = reservation;
   let finish!: () => void;
   let started!: () => void;
   const entered = new Promise<void>((resolve) => {
@@ -123,7 +138,8 @@ it('shares consumption while delivery through the other family is still pending'
     started();
     return delivered;
   });
-  resources.push(await listenForOauthCallback(offer(port), deliver, () => {}));
+  const { listener, port } = await listenOnUnusedPort('localhost', deliver, () => {});
+  resources.push(listener);
   const first = request('::1', port);
   try {
     await entered;
@@ -139,16 +155,8 @@ it.each([
   ['127.0.0.1', '127.0.0.1', '::1'],
   ['[::1]', '::1', '127.0.0.1'],
 ])('keeps a literal %s callback confined to that interface', async (hostname, host, other) => {
-  const reservation = await unusedPort();
-  await reservation.release();
-  const { port } = reservation;
-  resources.push(
-    await listenForOauthCallback(
-      offer(port, hostname),
-      async () => {},
-      () => {},
-    ),
-  );
+  const { listener, port } = await listenOnUnusedPort(hostname, async () => {}, () => {});
+  resources.push(listener);
   expect(await request(host, port, { authority: `${hostname}:${port}` })).toBe(200);
   await bind(other, port);
 });
