@@ -2615,6 +2615,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isCustomized?: boolean;
   }> => ipcRenderer.invoke('update-channel-settings-reset'),
   relaunchForChannelChange: (): Promise<void> => ipcRenderer.invoke('update-channel-relaunch'),
+  /** Restart once; the next startup refreshes only the confirmed managed harness first. */
+  relaunchForHarnessUpdate: (kind: 'claude-code' | 'codex'): Promise<{ accepted: true }> =>
+    ipcRenderer.invoke('update-harness-relaunch', kind),
   probeBetaChannel: (): Promise<{ available: boolean }> =>
     ipcRenderer.invoke('update-channel-probe-beta'),
   setUpdateRelaunchTheme: (theme: 'light' | 'dark'): void => {
@@ -7326,12 +7329,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       /** spawn 当前应用使用的 binary `--version`, 进程内缓存。About 面板用。 */
       getBinaryVersion: (
         agentKind: 'claude-code' | 'codex' | 'pi',
+        options?: { checkLatest?: boolean },
       ): Promise<{
         kind: 'claude-code' | 'codex' | 'pi';
         binaryPath: string | null;
         version: string | null;
+        latestVersion: string | null;
+        updateAvailable: boolean;
         error?: string;
-      }> => ipcRenderer.invoke('maker:agent:binary-version', agentKind),
+      }> => ipcRenderer.invoke('maker:agent:binary-version', agentKind, options),
     },
 
     // ── Agent 今日累计 (取代老 electronAPI.codex.usage.* + electronAPI.onUsageTodaySpendChanged) ─
