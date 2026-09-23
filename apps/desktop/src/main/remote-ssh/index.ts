@@ -550,6 +550,7 @@ export async function ensureRemoteAgentInstalledOrInstall(
     // 只保留最后 6 条避免 message 太长 (toast 现已支持 whitespace-pre-wrap 多行)。
     const TAIL_LIMIT = 6;
     const logTail: string[] = [];
+    let failureNotified = false;
     try {
       const result = await installRemoteAgent(host, agentKind, (progress) => {
         // 维护尾部 log 串 — 只收 install-log 行做诊断补充。error event 不收:
@@ -589,6 +590,7 @@ export async function ensureRemoteAgentInstalledOrInstall(
           : baseMsg;
         log.warn('silent-install: failed (not ready)', { hostId, agentKind, error: composedMsg });
         broadcastSilentInstallStatus({ hostId, agentKind, phase: 'failed', message: composedMsg });
+        failureNotified = true;
         throwIpcError('SSH_INSTALL_FAILED', composedMsg);
       }
       // 装好后标 cache, 后续 ensureRemoteAgentInstalled 短路返回。
@@ -610,12 +612,15 @@ export async function ensureRemoteAgentInstalledOrInstall(
       // 不是安装失败;改写成 SSH_INSTALL_FAILED 会误导调用方走安装重试分支。
       const msg = err instanceof Error ? err.message : String(err);
       const code = (err as { code?: string }).code;
+      // Every started attempt needs a terminal event, including preflight IPC errors.
+      if (!failureNotified) {
+        broadcastSilentInstallStatus({ hostId, agentKind, phase: 'failed', message: msg });
+      }
       if (!code || !isIpcErrorCode(code)) {
         log.error('silent-install: unexpected error', { hostId, agentKind, error: msg });
-        broadcastSilentInstallStatus({ hostId, agentKind, phase: 'failed', message: msg });
         throwIpcError('INTERNAL', msg);
       }
-      // 已有白名单 code (比如上面手动 throwIpcError 走到这) — broadcast 已发, 直接 rethrow
+      // Preserve recognized IPC codes after closing the installation status.
       throw err;
     }
   })();
