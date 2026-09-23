@@ -267,7 +267,7 @@ export function SkillhubHomeView({
       clearSearchLabel={t('skillhub.home.clearSearch')}
       embedded={embedded}
       onSelectTab={onSelectCatalogTab}
-      headerActions={
+      headerActions={(
         <Button
           variant="secondary"
           size="lg"
@@ -280,7 +280,8 @@ export function SkillhubHomeView({
         >
           <Upload size={14} strokeWidth={1.8} aria-hidden="true" />
           <span className="plugin-management-action-label">{t('skillhub.home.import')}</span>
-        </Button>}
+        </Button>
+      )}
     >
       <div
         className={cn(

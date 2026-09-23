@@ -1,3 +1,4 @@
+import { FileTypeIcon } from '@/components/ui/file-type-icon';
 import { Button } from '@/components/ui/button';
 import { shouldShowOpenPathError } from '../../../shared/openPathResult';
 /**
@@ -22,7 +23,7 @@ import { shouldShowOpenPathError } from '../../../shared/openPathResult';
 import { CHAT_LIGHTBOX_ICON_BUTTON_CLASS, CHAT_FOCUS_CLASS } from './chatChrome';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink, FileText, Folder, TriangleAlert, X } from 'lucide-react';
+import { Copy, ExternalLink, Folder, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn, basename } from '@/lib/utils';
@@ -444,7 +445,7 @@ export function TextLightbox({ filePath, fileName, initialLine, triggerRef, onCl
                   'text-left cursor-pointer',
                 )}
               >
-                <FileText size={16} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
+                <FileTypeIcon name={filePath} size={16} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
                 <span
                   className={cn(
                     'font-semibold text-14',
