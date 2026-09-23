@@ -193,6 +193,7 @@ set -u
 AGENT_KIND="${'$'}{1:-}"
 SERVER_VER="${'$'}{2:-v1}"
 CLAUDE_RELEASE="${'$'}{3:-}"
+CODEX_RELEASE="${'$'}{4:-}"
 case "$AGENT_KIND" in
   claude-code) BIN_NAME="claude" ;;
   codex)       BIN_NAME="codex"  ;;
@@ -224,7 +225,8 @@ if [ -f "$SENTINEL" ] && { [ -x "$BIN_PATH" ] || [ -f "$BIN_PATH" ]; }; then
   fi
   V="$("$BIN_PATH" --version 2>/dev/null | head -1 || true)"
   if [ -n "$V" ]; then
-    if [ "$AGENT_KIND" != "claude-code" ] || [ "${'$'}{V%% *}" = "$CLAUDE_RELEASE" ]; then
+    if { [ "$AGENT_KIND" != "claude-code" ] || [ "${'$'}{V%% *}" = "$CLAUDE_RELEASE" ]; } &&
+       { [ "$AGENT_KIND" != "codex" ] || [ "${'$'}{V##* }" = "$CODEX_RELEASE" ]; }; then
       printf 'READY %s\n' "$V"
       exit 0
     fi
@@ -240,6 +242,7 @@ printf 'NOT_INSTALLED\n'; exit 0
     agentKind,
     REMOTE_SERVER_SCHEMA_VERSION,
     PINNED_CLAUDE_CODE_VERSION,
+    PINNED_CODEX_RELEASE_VERSION,
   ].map(shellQuoteArg).join(' ');
   const result = await host.exec(`bash -l -s -- ${args}`, {
     input: probeScript,

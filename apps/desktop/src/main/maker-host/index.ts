@@ -2851,7 +2851,9 @@ export async function listSshCodexProviders(hostId: string) {
   const remote = getRemoteSshPool().get(hostId);
   if (!remote || remote.getStatus() !== 'ready') throw new Error('SSH host is not connected');
   let changed = false;
-  const stop = remote.onStatus(() => { changed = true; });
+  const stop = remote.onStatus((snapshot) => {
+    if (snapshot.status !== 'ready') changed = true;
+  });
   const assertCurrent = () => {
     if (changed || getActiveAppSession().generation !== owner ||
         getRemoteSshPool().get(hostId) !== remote || remote.getStatus() !== 'ready') {

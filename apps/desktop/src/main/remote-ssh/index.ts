@@ -396,8 +396,8 @@ function isAgentCacheHit(
  * 能正确 toast 的 SSH_AGENT_NOT_INSTALLED IPC error, 引导用户去 Settings 安装。
  *
  * Claude Code 首次检查走完整 probeRemoteAgent,确保 Cindy 管理的远端 runtime
- * 与当前 pin 一致；否则客户端升级后旧 binary 会永久命中 `test -x`。Codex 仍
- * 只做存在性检查。两者命中内存 cache 后续都是 ~0ms。
+ * 与当前 pin 一致；Codex 同样探测版本及完整包布局，旧 standalone 触发升级。
+ * 各引擎命中内存 cache 后续都是 ~0ms。
  */
 export async function ensureRemoteAgentInstalled(
   hostId: string,
@@ -412,20 +412,9 @@ export async function ensureRemoteAgentInstalled(
     throwIpcError('SSH_NOT_CONNECTED', `ssh host ${hostId} not connected`);
   }
 
-  let ok: boolean;
-  let installedVersion: string | null = null;
-  if (agentKind === 'claude-code' || agentKind === 'pi') {
-    const probe = await probeRemoteAgent(host, agentKind);
-    ok = probe.installed;
-    installedVersion = probe.installedVersion;
-  } else {
-    const binPath = '$HOME/.xdt-server/v1/codex-home/packages/standalone/current/codex';
-    const result = await host.exec(`test -x ${binPath} && echo OK || echo MISSING`, {
-      timeoutMs: 5_000,
-      label: 'check-agent-installed',
-    });
-    ok = result.stdout.trim() === 'OK';
-  }
+  const probe = await probeRemoteAgent(host, agentKind);
+  const ok = probe.installed;
+  const installedVersion = probe.installedVersion;
   if (!ok) {
     const friendlyKind = agentKind === 'codex' ? 'Codex' : agentKind === 'pi' ? 'Pi' : 'Claude Code';
     throwIpcError(

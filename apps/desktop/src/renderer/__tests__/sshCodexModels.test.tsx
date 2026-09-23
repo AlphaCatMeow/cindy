@@ -20,6 +20,23 @@ afterEach(cleanup);
 const providers = (model: string) => [sshNativeCodexProvider([sshModel(model)])];
 
 describe('SSH Codex model discovery', () => {
+  it('keeps the catalog on repeated ready snapshots and reloads once on reconnect', async () => {
+    list.mockResolvedValue(providers('remote-model'));
+    const view = renderHook(() => useSshCodexProviders('a'));
+    const status = (value: string) => statusChanged({ config: { id: 'a' }, status: value } as RemoteHostSnapshot);
+    act(() => { status('ready'); status('ready'); });
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    const catalog = view.result.current.providers;
+    act(() => { status('ready'); status('ready'); });
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(view.result.current.providers).toBe(catalog);
+    expect(view.result.current.status).toBe('ready');
+    act(() => { status('disconnected'); status('connecting'); status('ready'); status('ready'); });
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    expect(list).toHaveBeenCalledTimes(2);
+    act(() => view.result.current.refresh());
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
+  });
   it('ignores late results from a previous host and invalidates on disconnect', async () => {
     let finish!: (value: ReturnType<typeof providers>) => void;
     list.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))

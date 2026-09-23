@@ -58,7 +58,7 @@ describe('remote agent installer', () => {
   });
 
   it.each([
-    { name: 'legacy standalone', os: 'Darwin', legacy: true, missing: '', ok: true },
+    { name: 'legacy standalone requires upgrade', os: 'Darwin', legacy: true, missing: '', ok: false },
     { name: 'complete macOS package', os: 'Darwin', legacy: false, missing: 'codex-resources/bwrap', ok: true },
     { name: 'complete Linux package', os: 'Linux', legacy: false, missing: '', ok: true },
     { name: 'missing code-mode host', os: 'Darwin', legacy: false, missing: 'bin/codex-code-mode-host', ok: false },
@@ -121,8 +121,52 @@ describe('remote agent installer', () => {
       'NPM_PKG="@anthropic-ai/claude-code@$CLAUDE_RELEASE"',
     );
     expect(calls[1].input).toContain(
-      'Claude Code version ${V%% *} != managed pin $CLAUDE_RELEASE',
+      '$AGENT_KIND version $V does not match managed pin',
     );
+  });
+
+  it.each([
+    { name: 'legacy standalone', complete: false, version: PINNED_CODEX_RELEASE_VERSION, ready: false },
+    { name: 'old full package', complete: true, version: '0.0.1', ready: false },
+    { name: 'current full package', complete: true, version: PINNED_CODEX_RELEASE_VERSION, ready: true },
+  ])('probe and bootstrap agree on $name readiness', async ({ complete, version, ready }) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'cindy-codex-readiness-'));
+    try {
+      // Simulate the POSIX remote home, never the developer home. All downloads
+      // are stubbed so an upgrade request cannot reach the network in this test.
+      const install = path.join(root, '.xdt-server', 'v1');
+      const current = path.join(install, 'codex-home', 'packages', 'standalone', 'current');
+      const files = complete
+        ? ['codex', 'bin/codex', 'bin/codex-code-mode-host', 'codex-path/rg', 'codex-resources/bwrap', 'codex-package.json']
+        : ['codex'];
+      for (const file of files) {
+        const target = path.join(current, file);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, '#!/bin/sh\nprintf "codex-cli ' + version + '\\n"\n');
+        chmodSync(target, 0o755);
+      }
+      writeFileSync(path.join(install, '.installed-codex'), '');
+      const outputs: string[] = [];
+      const host = {
+        exec: async (command: string, opts: { input?: string }) => {
+          const args = [...command.matchAll(/'([^']*)'/g)].map((match) => match[1]);
+          expect(args).toContain(PINNED_CODEX_RELEASE_VERSION);
+          const result = spawnSync('bash', ['-s', '--', ...args], {
+            cwd: root, encoding: 'utf8',
+            input: 'export HOME="$PWD"\ncurl() { return 1; }\nwget() { return 1; }\n' + opts.input,
+          });
+          expect(result.error).toBeUndefined();
+          outputs.push(result.stdout);
+          return { exitCode: result.status, stdout: result.stdout, stderr: result.stderr };
+        },
+      } as Pick<RemoteHost, 'exec'> as RemoteHost;
+      expect((await probeRemoteAgent(host, 'codex')).installed).toBe(ready);
+      expect((await installRemoteAgent(host, 'codex')).ready).toBe(ready);
+      if (!ready) expect(outputs[1]).toContain('INSTALL_START codex-package');
+      else expect(outputs[1]).not.toContain('INSTALL_START');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('probes pi binary presence + version match', async () => {

@@ -131,21 +131,19 @@ export const NODE_DIST_BASE_URL_DEFAULT = 'https://nodejs.org/dist';
 export const CODEX_RELEASE_INSTALLER_URL_BASE = 'https://github.com/openai/codex/releases/download';
 export const CODEX_LATEST_INSTALLER_URL = 'https://chatgpt.com/codex/install.sh';
 
-/** Shared by probe and bootstrap. Keep legacy standalone installs usable, but
- * never accept a partially installed full package just because --version runs.
- * The official installer preserves current/codex -> bin/codex for old callers. */
+/** Shared by probe and bootstrap. Legacy standalone and incomplete packages
+ * need an upgrade, even when --version runs. The official installer preserves
+ * current/codex -> bin/codex for existing callers. */
 export const VERIFY_CODEX_LAYOUT_SH = String.raw`verify_codex_layout() {
   local root
   root="$(dirname "$BIN_PATH")"
-  if [ -e "$root/codex-package.json" ] || [ -d "$root/bin" ]; then
-    [ -f "$root/codex-package.json" ] &&
-      [ -x "$root/bin/codex" ] &&
-      [ -x "$root/bin/codex-code-mode-host" ] &&
-      [ -x "$root/codex-path/rg" ] &&
-      [ -d "$root/codex-resources" ] || return 1
-    if [ "$(uname -s)" = "Linux" ]; then
-      [ -x "$root/codex-resources/bwrap" ] || return 1
-    fi
+  [ -f "$root/codex-package.json" ] &&
+    [ -x "$root/bin/codex" ] &&
+    [ -x "$root/bin/codex-code-mode-host" ] &&
+    [ -x "$root/codex-path/rg" ] &&
+    [ -d "$root/codex-resources" ] || return 1
+  if [ "$(uname -s)" = "Linux" ]; then
+    [ -x "$root/codex-resources/bwrap" ] || return 1
   fi
 }
 `;
@@ -347,13 +345,14 @@ verify_binary() {
   fi
 
   if [ -n "$V" ] &&
-     { [ "$AGENT_KIND" != "claude-code" ] || [ "${'$'}{V%% *}" = "$CLAUDE_RELEASE" ]; }; then
+     { [ "$AGENT_KIND" != "claude-code" ] || [ "${'$'}{V%% *}" = "$CLAUDE_RELEASE" ]; } &&
+     { [ "$AGENT_KIND" != "codex" ] || [ "${'$'}{V##* }" = "$CODEX_RELEASE" ]; }; then
     emit "READY $V"
     rm -f "$_STDERR_LOG"
     return 0
   fi
   if [ -n "$V" ]; then
-    emit "INSTALL_LOG [verify-fail] Claude Code version ${'$'}{V%% *} != managed pin $CLAUDE_RELEASE"
+    emit "INSTALL_LOG [verify-fail] $AGENT_KIND version $V does not match managed pin"
   fi
   # Diagnostics on failure — these go to INSTALL_LOG so the desktop main process
   # logs them (silent install pipeline forwards INSTALL_LOG lines verbatim).

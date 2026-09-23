@@ -28,10 +28,17 @@ export function useSshCodexProviders(hostId?: string | null) {
   useEffect(() => {
     if (!hostId) return;
     refresh();
+    // Initial discovery already covers an existing ready connection. Status
+    // snapshots also carry preference/proxy changes; only reconnects reload it.
+    let wasReady = true;
     const stop = window.electronAPI.remoteSsh.onStatusChanged((snapshot) => {
       if (snapshot.config.id !== hostId) return;
-      if (snapshot.status === 'ready') refresh();
+      if (snapshot.status === 'ready') {
+        if (!wasReady) refresh();
+        wasReady = true;
+      }
       else {
+        wasReady = false;
         ++sequence.current;
         setState({ key, providers: EMPTY, status: 'error' });
       }

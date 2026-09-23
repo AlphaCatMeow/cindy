@@ -112,8 +112,10 @@ app-server 的完整 `model/list`，不使用控制端 OpenAI 登录或网关目
 结果只用于该主机，断连、换主机或换账号后的迟到结果丢弃，不发布到本机公共目录。
 
 新任务从远端清单解析默认模型及推理强度／Fast；已有任务保留原模型和历史，由用户改选。
-`model/list` 不提供的真实窗口保持未知；普通 SSH Codex 切换交给 main 现有窗口保护和回合中延后规则，
-不能因前端尚无用量报告而静默丢弃点击。目录成员资格不等于认证、网络和实际推理已验证。
+`model/list` 不提供的真实窗口保持未知；普通 SSH Codex 切换沿用 main 的窗口策略：
+未知窗口允许切换且不主动重建，已核实的高风险缩窗在远端拒绝，回合中延期。
+不能因前端尚无用量报告而静默丢弃点击。未知窗口不代表已证明切换安全，后续上下文处理仍由原生 Codex 决定。
+目录成员资格不等于认证、网络和实际推理已验证。
 
 实现：`maker-host/ssh-codex-models.ts`、`remote-ssh/codex-model-list.ts`、
 `useSshCodexProviders.ts`；回归：`codex-model-list.test.ts`、`sshCodexModels.test.tsx`、
