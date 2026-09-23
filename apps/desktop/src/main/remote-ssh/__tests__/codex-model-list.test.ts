@@ -2,9 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CodexModelListItem } from '@cindy/maker-core';
 vi.mock('electron', () => ({ app: {} }));
 import { remoteCodexProvider } from '../../maker-host/ssh-codex-models.js';
-import { readSshCodexModelList, assertSshCodexModel } from '../codex-model-list.js';
+import { readSshCodexModelList, assertSshCodexModel, isVerifiedSshCodexResume } from '../codex-model-list.js';
 
 describe('SSH Codex model projection and admission', () => {
+  it('allows the persisted remote route to resume without requiring current catalog membership', () => {
+    const request = { model: 'hidden-old-model', providerId: 'openai', remoteHostId: 'builder', resumeSessionId: 'thread' };
+    const stored = { ...request, sdkSessionId: 'thread', agentKind: 'codex' };
+    expect(isVerifiedSshCodexResume(request, stored)).toBe(true);
+    expect(isVerifiedSshCodexResume({ ...request, resumeSessionId: undefined }, stored)).toBe(false);
+    expect(isVerifiedSshCodexResume(request, undefined)).toBe(false);
+    for (const patch of [{ model: 'changed' }, { providerId: 'xd' }, { remoteHostId: 'another' }, { resumeSessionId: 'another' }]) {
+      expect(isVerifiedSshCodexResume({ ...request, ...patch }, stored)).toBe(false);
+    }
+    expect(isVerifiedSshCodexResume(request, { ...stored, agentKind: 'claude-code' })).toBe(false);
+  });
   const native = (model: string, patch: Partial<CodexModelListItem> = {}) => ({
     id: model, model, displayName: model, description: '', hidden: false, isDefault: false,
     supportedReasoningEfforts: [{ reasoningEffort: 'low', description: '' }],

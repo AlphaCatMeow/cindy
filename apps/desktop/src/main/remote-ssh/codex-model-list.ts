@@ -1,6 +1,18 @@
 import type { ProviderView } from '@cindy/model-providers';
 import { requireObject, requireString, throwIpcError } from '../utils/ipcValidate.js';
 
+/** Only an unchanged persisted native SSH route may bypass new-model discovery. */
+export function isVerifiedSshCodexResume(
+  request: { model?: string; providerId?: string | null; remoteHostId?: string | null; resumeSessionId?: string },
+  stored: { model: string; providerId: string | null; remoteHostId: string | null; sdkSessionId: string | null; agentKind: string } | undefined,
+): boolean {
+  return !!stored && stored.agentKind === 'codex' && !!request.remoteHostId &&
+    stored.remoteHostId === request.remoteHostId && !!request.resumeSessionId &&
+    stored.sdkSessionId === request.resumeSessionId && stored.model === request.model &&
+    (stored.providerId ?? null) === (request.providerId ?? null) &&
+    (!request.providerId || request.providerId === 'openai');
+}
+
 export async function readSshCodexModelList(
   input: unknown,
   read: (hostId: string) => Promise<ProviderView[]>,

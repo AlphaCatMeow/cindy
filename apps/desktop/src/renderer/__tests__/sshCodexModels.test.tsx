@@ -20,6 +20,21 @@ afterEach(cleanup);
 const providers = (model: string) => [sshNativeCodexProvider([sshModel(model)])];
 
 describe('SSH Codex model discovery', () => {
+  it.each([false, true])('retries initial discovery on first ready even when rejection is late (%s)', async (late) => {
+    let reject!: (error: Error) => void;
+    list.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }))
+      .mockResolvedValue(providers('connected-model'));
+    const view = renderHook(() => useSshCodexProviders('a'));
+    if (!late) await act(async () => reject(new Error('connecting')));
+    act(() => {
+      statusChanged({ config: { id: 'a' }, status: 'ready' } as RemoteHostSnapshot);
+      statusChanged({ config: { id: 'a' }, status: 'ready' } as RemoteHostSnapshot);
+    });
+    if (late) await act(async () => reject(new Error('connecting')));
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    expect(view.result.current.providers[0]?.models.codex?.[0].id).toBe('connected-model');
+    expect(list).toHaveBeenCalledTimes(2);
+  });
   it('keeps the catalog on repeated ready snapshots and reloads once on reconnect', async () => {
     list.mockResolvedValue(providers('remote-model'));
     const view = renderHook(() => useSshCodexProviders('a'));

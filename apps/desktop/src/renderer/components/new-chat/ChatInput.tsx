@@ -2016,9 +2016,10 @@ export function ChatInput({
   //   - device-link 必须使用被控端镜像 override;旧被控端拿不到镜像时宁可无记忆,也不掺控制端本机。
   useProviderModelMemoryVersion();
   const modelMemory = useMemo<ModelMemoryAccessors | undefined>(() => {
+    if (sshCodexHostId) return undefined;
     // device-link 远程草稿 / 会话:用纯显示镜像 override(读被控端全局预设、写穿被控端)。
     if (modelMemoryOverride) return modelMemoryOverride;
-    if (deviceLinkDeviceId || sshCodexHostId) return undefined;
+    if (deviceLinkDeviceId) return undefined;
     return {
       getEffort: getProviderModelEffort,
       setEffort: setProviderModelEffort,
@@ -2038,6 +2039,7 @@ export function ChatInput({
   // 模型切换恢复。agent / 来源缺失(未知模型 / 0 已连接来源)/ device-link 无镜像时静默跳过。
   const rememberProviderChoice = useCallback(
     (modelId: string, eff: Effort) => {
+      if (sshCodexHostId) return;
       const kind = currentModelAgentKind;
       if (kind && effectiveSourceId && modelId) {
         if (modelMemory?.setChoice) {
@@ -2047,7 +2049,7 @@ export function ChatInput({
         }
       }
     },
-    [currentModelAgentKind, effectiveSourceId, modelMemory, deviceLinkDeviceId],
+    [currentModelAgentKind, effectiveSourceId, modelMemory, deviceLinkDeviceId, sshCodexHostId],
   );
 
   const folderOpen = folderPickerOpen ?? internalFolderOpen;
@@ -6131,7 +6133,7 @@ export function ChatInput({
       } = {},
     ) => {
       const agentKind = opts.agentKind ?? currentModelAgentKind;
-      if (!sessionId || !agentKind || !modelId) return;
+      if (!sessionId || !agentKind || !modelId || sshCodexHostId) return;
       const activeProviderId =
         opts.activeProviderId !== undefined ? opts.activeProviderId : selectedProviderId;
       const memoryProviderId =
@@ -6178,7 +6180,7 @@ export function ChatInput({
           log.warn('session draft model preference sync failed:', err);
         });
     },
-    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, effectiveSourceId],
+    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, effectiveSourceId, sshCodexHostId],
   );
 
   const persistFastModeChange = useCallback(
@@ -8834,7 +8836,7 @@ export function ChatInput({
                             activeModel,
                             enabled,
                           );
-                        } else if (!deviceLinkDeviceId) {
+                        } else if (!deviceLinkDeviceId && !sshCodexHostId) {
                           setProviderModelThinking(
                             currentModelAgentKind,
                             effectiveSourceId,

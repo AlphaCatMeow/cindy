@@ -6,6 +6,8 @@ import type { Editor } from '@tiptap/react';
 import type { ProviderView } from '@cindy/model-providers';
 import { sshNativeCodexProvider, sshModel } from '@/features/cc-agent/__tests__/sshModelFixtures';
 import { ChatInput } from '../ChatInput';
+import * as providerMemory from '@/state/providerModelMemory';
+import * as draftMemory from '@/state/newMakerDraft';
 
 const h = vi.hoisted(() => ({ t: (key: string) => key, confirm: vi.fn(), editor: null as Editor | null, listening: false, stop: vi.fn().mockResolvedValue(undefined),
   setModel: vi.fn(), selectModel: undefined as undefined | ((id: string) => Promise<void | boolean>), remoteProviders: [] as ProviderView[],
@@ -73,6 +75,9 @@ const props = {
 };
 
 it('lets a new SSH task with no window report reach main on model selection and retry', async () => {
+  const remember = vi.spyOn(providerMemory, 'setProviderModelChoice');
+  const draft = vi.spyOn(draftMemory, 'patchVendorPrefs');
+  const effortPrefs = vi.spyOn(draftMemory, 'setEffortForModel');
   h.remoteProviders = [sshNativeCodexProvider([sshModel('old'), sshModel('remote-new')])];
   h.setModel.mockRejectedValueOnce(new Error('test host rejected selection')).mockResolvedValue({ deferred: false });
   render(<ChatInput {...props} sessionId="ssh-empty" deviceLinkDeviceId={null} remoteHostId="builder"
@@ -86,6 +91,9 @@ it('lets a new SSH task with no window report reach main on model selection and 
   await act(async () => { await h.selectModel!('remote-new'); });
   expect(h.setModel).toHaveBeenCalledTimes(3);
   expect(h.setModel.mock.calls[2].slice(0, 2)).toEqual(['ssh-empty', 'remote-new']);
+  expect(remember).not.toHaveBeenCalled();
+  expect(draft).not.toHaveBeenCalled();
+  expect(effortPrefs).not.toHaveBeenCalled();
 });
 
 it('sends a remote-only Codex model when the controller has no connected providers', async () => {

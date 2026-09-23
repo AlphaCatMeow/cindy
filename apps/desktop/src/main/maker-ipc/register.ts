@@ -33,7 +33,7 @@ import { projectRemoteBotDelegations } from './remoteBotDelegations.js';
  */
 
 import { readCodexContextWindowInfo } from '../maker-host/codex-context-window.js';
-import { readSshCodexModelList, assertSshCodexModel } from '../remote-ssh/codex-model-list.js';
+import { readSshCodexModelList, assertSshCodexModel, isVerifiedSshCodexResume } from '../remote-ssh/codex-model-list.js';
 import { prepareCodexCustomContextCatalog } from '../maker-host/codex-custom-context-catalog.js';
 import { inferProviderIdForModel } from '../maker-host/provider-route.js';
 import { resolveConfiguredContextWindow, resolveDesktopModelContextProviderId } from '../maker-host/model-context-settings.js';
@@ -859,7 +859,7 @@ import {
   refreshActiveCatalogFromSource,
   refreshCustomProvidersIntoCatalog,
 } from '../maker-host/createDesktopProviderService.js';
-import { readOrcaWorkerProviderRoutingContext } from './orcaProviderRoutingContext.js';
+import { readOrcaWorkerProviderRoutingContext, sshCodexWorkerRoutingContext } from './orcaProviderRoutingContext.js';
 import {
   clearSessionProvider,
   getSessionProvider,
@@ -6792,22 +6792,26 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (o.resumeSessionId && typeof o.id === 'string' && o.id) {
         try {
           const [row] = await getDbClient()
-            .drizzle.select({ model: sessions.model, providerId: sessions.providerId })
+            .drizzle.select({ model: sessions.model, providerId: sessions.providerId,
+              remoteHostId: sessions.remoteHostId, sdkSessionId: sessions.sdkSessionId, agentKind: sessions.agentKind })
             .from(sessions)
             .where(eq(sessions.id, o.id))
             .limit(1);
           verifiedResume =
             !!row && row.model === o.model && (row.providerId ?? null) === (o.providerId ?? null);
+          if (o.agentKind === 'codex' && o.remoteHostId) {
+            verifiedResume = isVerifiedSshCodexResume(o, row ? { ...row, agentKind: dbToMakerAgentKind(row.agentKind) } : undefined);
+          }
         } catch {
           verifiedResume = false;
         }
       }
-      if (!verifiedResume || (o.agentKind === 'codex' && o.remoteHostId)) {
+      if (!verifiedResume) {
         const reroute = await assertModelRouteUsable(o.agentKind, o.model, o.providerId ?? null, o.remoteHostId);
         if (reroute && shouldApplyExclusiveProviderRerouteLive(o.providerId)) {
           o.providerId = reroute;
         }
-      } else if (shouldApplyExclusiveProviderRerouteLive(o.providerId)) {
+      } else if (!(o.agentKind === 'codex' && o.remoteHostId) && shouldApplyExclusiveProviderRerouteLive(o.providerId)) {
         const pin = await pinExclusiveSessionProvider(o.agentKind, o.model, o.providerId ?? null);
         if (pin) o.providerId = pin;
       }
@@ -10969,7 +10973,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       return resolved;
     },
     getAvailableModels: (agent) => maker.getCapabilities(agent).availableModels,
-    getProviderRoutingContext,
+    getProviderRoutingContext: async (agent, remoteHostId) => agent === 'codex' && remoteHostId
+      ? sshCodexWorkerRoutingContext(await readSshCodexModelList({ id: remoteHostId }, listSshCodexProviders))
+      : getProviderRoutingContext(),
     readClaudeApiKey,
     reserveWorkerCreation,
     renewWorkerCreationReservation,

@@ -31,7 +31,7 @@ import {
   readSshConfigDetailed,
   removeManagedHost,
   updateManagedHostFields,
-  installRemoteAgent,
+  installRemoteAgent as installRemoteAgentPackage,
   PINNED_PI_VERSION,
   probeRemoteAgent,
   uninstallRemoteAgent,
@@ -125,12 +125,26 @@ import {
 import { ensureDaemonRunning } from '../maker-host/cc-manager-client.js';
 import { getMakerIfReady, softCloseCcSessionsForHost, listSshCodexProviders } from '../maker-host/index.js';
 import { readSshCodexModelList } from './codex-model-list.js';
+import { prepareRemoteAgentInstall } from './codex-install-lifecycle.js';
+import { getRemoteCodexLiveTurnChecker } from '../maker-host/remote-session-start-ensure.js';
 import { withRehydrateCloseSuppressed } from '../maker-host/rehydrateCloseSuppression.js';
 import { RemoteHostHydrationQueue } from './hydration-queue.js';
 
 export { redactSshSensitiveText };
 
 const log = createLogger('remote-ssh/ipc');
+
+// Shared by manual and silent installation inside their existing per-host install lock.
+async function installRemoteAgent(
+  host: RemoteHost, agentKind: RemoteAgentKind, onProgress: (event: InstallProgressEvent) => void,
+): Promise<InstallResult> {
+  await prepareRemoteAgentInstall(agentKind, {
+    isInstalled: async () => (await probeRemoteAgent(host, 'codex')).installed,
+    hasLiveTurn: () => getRemoteCodexLiveTurnChecker()?.(host.id) ?? true,
+    stopDaemon: () => killRemoteCodexDaemon(host),
+  });
+  return installRemoteAgentPackage(host, agentKind, onProgress);
+}
 /**
  * pi-manager daemon 的空闲回收阈值(与 packages/maker-pi-manager 的
  * PiSessionRegistry 默认 idleTimeoutMs 对齐, 1_800_000 = 30min)。
