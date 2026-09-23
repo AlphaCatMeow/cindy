@@ -6768,6 +6768,7 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
         message.clientId === AUTO_RESUME_PENDING_CLIENT_ID,
     ) &&
     state.inputRecovery === null &&
+    !state.pendingQueue.some((item) => item.autoResume === true) &&
     stoppedTasks === state.taskUpdates
   ) {
     return state;
@@ -6802,6 +6803,10 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
     errorRetryText: null,
     errorPersistId: null,
     inputRecovery: null,
+    // A successful owner commit closes the outgoing session. Automatic
+    // continuation entries belong to that owner and must not survive the
+    // boundary; user queued input remains available for the next owner.
+    pendingQueue: finalized.pendingQueue.filter((item) => item.autoResume !== true),
     pendingPermission: null,
     pendingAskUser: null,
     pendingPluginSetup: null,
@@ -9924,6 +9929,17 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       const mainTurnRunning = liveTurns.get(id);
       if (mainTurnRunning === true || !current || !sameActiveTurnBoundaryMarker(id, current, marker))
         continue;
+      // The first query can legitimately race a replacement turn created by
+      // another renderer. Re-read an absent handle immediately before
+      // finalization so a stale absence cannot close that new turn.
+      if (mainTurnRunning === undefined) {
+        const latest = await listActive();
+        if (getDataOwnerGeneration() !== owner) return;
+        if (!Array.isArray(latest) || !latest.every(isActiveSessionSnapshot)) return;
+        if (latest.some((item) => item.sessionId === id && item.isTurnRunning === true)) {
+          continue;
+        }
+      }
       // listActive keeps idle session handles that still own background work.
       // isTurnRunning=false only says the foreground turn ended; do not close
       // any task Main may still be running while rolling back a rejected owner
