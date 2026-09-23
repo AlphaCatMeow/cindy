@@ -89,6 +89,27 @@ describe('SSH Codex model discovery', () => {
     expect(list).toHaveBeenCalledWith('builder');
     expect(selection).toEqual({ ok: true, model: 'remote-native', providerId: 'openai', effort: 'high', fastMode: false });
   });
+  it.each([
+    [null, 'remote-default'], [null, 'also-available'],
+    ['openai', 'remote-default'], ['openai', 'also-available'],
+  ] as const)('ignores controller preferences for native source %s and model %s', async (providerId, model) => {
+    list.mockResolvedValue([sshNativeCodexProvider([
+      sshModel('remote-default', { supportsFastMode: true }),
+      sshModel('also-available', { supportsFastMode: true }),
+    ])]);
+    const getPresetEffort = vi.fn(() => 'low' as const);
+    const getPresetFast = vi.fn(() => true);
+    const selection = await loadSshSessionModelSelection('builder', {
+      providers: [], loading: false, loadFailed: false, agentKind: 'codex',
+      preferred: { model, providerId, effort: 'low', fastMode: true },
+      getPresetEffort, getPresetFast,
+    });
+    expect(selection).toEqual({
+      ok: true, model: 'remote-default', providerId: 'openai', effort: 'high', fastMode: false,
+    });
+    expect(getPresetEffort).not.toHaveBeenCalled();
+    expect(getPresetFast).not.toHaveBeenCalled();
+  });
   it('fails creation without falling back to local models', async () => {
     list.mockRejectedValue(new Error('remote unavailable'));
     expect(await loadSshSessionModelSelection('builder', {

@@ -28,12 +28,6 @@ import * as sessionService from '@/lib/sessionService';
 import { buildCodexSyncWarning } from '@/utils/codexAuthSync';
 import { remoteSshHostsStore } from '@/lib/remoteSshHostsStore';
 import {
-  getCachedProvidersSnapshot,
-  hasProvidersSnapshotLoadFailed,
-} from '@/lib/providersSnapshotStore';
-import { getDraft, getFastModeForModel } from '@/state/newMakerDraft';
-import { getProviderModelEffort, getProviderModelFast } from '@/state/providerModelMemory';
-import {
   loadSshSessionModelSelection,
   sshModelSelectionErrorKeys,
 } from '@/features/cc-agent/sshSessionModelSelection';
@@ -393,19 +387,7 @@ export function StartRemoteSessionPanel({ hostId }: StartRemoteSessionPanelProps
     setBusy(true);
     try {
       const owner = getDataOwnerGeneration();
-      const resolveSelection = () => {
-        const snapshot = getCachedProvidersSnapshot();
-        const prefs = getDraft().lastByVendor.codex;
-        return loadSshSessionModelSelection(hostId, {
-          providers: snapshot?.providers ?? [],
-          loading: !snapshot,
-          loadFailed: hasProvidersSnapshotLoadFailed(),
-          agentKind: 'codex',
-          preferred: { ...prefs, fastMode: getFastModeForModel(prefs.model) },
-          getPresetEffort: getProviderModelEffort,
-          getPresetFast: getProviderModelFast,
-        });
-      };
+      const resolveSelection = () => loadSshSessionModelSelection(hostId);
       const initialSelection = await resolveSelection();
       if (!isDataOwnerGenerationCurrent(owner)) return;
       if (!initialSelection.ok) {
@@ -446,7 +428,7 @@ export function StartRemoteSessionPanel({ hostId }: StartRemoteSessionPanelProps
       //                    IPC fires on first user prompt, threading
       //                    remoteHostId + workingDir into agent.startSession.
       // Directory validation/confirmation may take time. Re-read the catalog and
-      // preferences before inserting; never persist a stale or another owner's route.
+      // remote defaults before inserting; never persist a stale or another owner's route.
       if (!isDataOwnerGenerationCurrent(owner)) return;
       const selection = await resolveSelection();
       if (!isDataOwnerGenerationCurrent(owner)) return;

@@ -156,17 +156,18 @@ describe('settings remote Codex creation', () => {
     });
   });
 
-  it('keeps valid saved preferences', async () => {
-    publish([sshModel('first'), sshModel('chosen', { supportsFastMode: true })]);
+  it('uses remote defaults even when the local native preference is available remotely', async () => {
+    publish([sshModel('first', { supportsFastMode: true }), sshModel('chosen', { supportsFastMode: true })]);
     mocks.prefs.mockReturnValue({ model: 'chosen', providerId: 'openai', effort: 'low' });
     start();
     await waitFor(() => expect(mocks.create).toHaveBeenCalled());
     expect(mocks.create.mock.calls[0][0]).toMatchObject({
-      model: 'chosen',
+      model: 'first',
       providerId: 'openai',
-      effort: 'low',
-      fastMode: true,
+      effort: 'high',
+      fastMode: false,
     });
+    expect(mocks.prefs).not.toHaveBeenCalled();
   });
 
   it.each(['failed', 'empty', 'bridge'] as const)(

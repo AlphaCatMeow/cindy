@@ -18,7 +18,7 @@ describe('remote Orca Worker creation context', () => {
     expect(selection).toContain('if (!selection.ok)');
     // Behavioral filtering and source pinning are covered in sshSessionModelSelection.test.ts.
     expect(selection).toContain('target.hostId');
-    expect(read('components/settings/RemoteHostDetail.tsx')).toContain('loadSshSessionModelSelection(hostId,');
+    expect(read('components/settings/RemoteHostDetail.tsx')).toContain('loadSshSessionModelSelection(hostId)');
   });
   it('scopes capabilities, providers, and the nested model selector to the controlled device', () => {
     const popover = read('features/cc-agent/CreateWorkerPopover.tsx');
