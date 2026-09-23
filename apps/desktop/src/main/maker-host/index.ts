@@ -17,6 +17,7 @@ import { createMediaDownloadContext } from '../cindy-media/mediaDownloadApproval
 import { isCodexAccountProvider, codexAccountHome, setCodexAccountRetirement } from './codex-account-auth.js';
 import { CodexThreadLocations } from './codex-thread-locations.js';
 import { getActiveAppSession } from '../appSessionState.js';
+import { remoteCodexProvider } from './ssh-codex-models.js';
 import { getCustomProvider, updateCustomProviderIfUnchanged } from './custom-provider-store.js';
 import { refreshCustomProvidersIntoCatalog } from './createDesktopProviderService.js';
 import { acquireWorktreeRuntimeLease, releaseWorktreeRuntimeLease, type WorktreeRuntimeLease } from '../worktree/runtimeLeases';
@@ -139,7 +140,7 @@ import { resetProviderModelAutoRefreshCooldowns } from './provider-model-auto-re
 import { getThinkingEnabledFromMemory } from './newMakerDefaultsCache.js';
 import { getSessionFastMode } from './session-effort-store.js';
 import { createSshDaemonTransport } from './codex-remote-transport.js';
-import { getRemoteSshPool, broadcastSilentInstallStatus } from '../remote-ssh/index.js';
+import { getRemoteSshPool, broadcastSilentInstallStatus, ensureRemoteAgentInstalledOrInstall } from '../remote-ssh/index.js';
 import {
   getRemoteAgentProxyEnv,
   reconcileCodexAgentProxyEnv,
@@ -2843,6 +2844,33 @@ export function resetCodexModelBackfillState(): void {
  */
 export function getMakerIfReady(): Maker | null {
   return _maker;
+}
+
+export async function listSshCodexProviders(hostId: string) {
+  const owner = getActiveAppSession().generation;
+  const remote = getRemoteSshPool().get(hostId);
+  if (!remote || remote.getStatus() !== 'ready') throw new Error('SSH host is not connected');
+  let changed = false;
+  const stop = remote.onStatus(() => { changed = true; });
+  const assertCurrent = () => {
+    if (changed || getActiveAppSession().generation !== owner ||
+        getRemoteSshPool().get(hostId) !== remote || remote.getStatus() !== 'ready') {
+      throw new Error('SSH model request is stale');
+    }
+  };
+  try {
+    await ensureRemoteAgentInstalledOrInstall(hostId, 'codex');
+    assertCurrent();
+    getMaker();
+    const agent = _codexAgent;
+    if (!agent) throw new Error('Codex is not ready');
+    const models = await agent.listRemoteModels(hostId);
+    assertCurrent();
+    if (_codexAgent !== agent) throw new Error('Codex runtime changed');
+    return [remoteCodexProvider(models)];
+  } finally {
+    stop();
+  }
 }
 
 /** Register Pi after a managed runtime retry and notify local renderers. */

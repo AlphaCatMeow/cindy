@@ -4254,6 +4254,31 @@ describe('CodexAgent.listCustomizations', () => {
 });
 
 describe('CodexAgent.refreshLocalModels', () => {
+  it('reads SSH models on the named remote host without publishing them to local discovery', async () => {
+    const publish = vi.fn();
+    const agent = new CodexAgent(createDeps({}, { onCodexLocalModelsListed: publish }));
+    const host = installFakeHost(agent, (method, params) => {
+      if (method !== Method.ModelList) return undefined;
+      return (params as { cursor: string | null }).cursor === null
+        ? { data: [{ model: 'remote-a' }], nextCursor: 'last' }
+        : { data: [{ model: 'remote-b' }], nextCursor: null };
+    });
+    expect(await agent.listRemoteModels('builder')).toEqual([{ model: 'remote-a' }, { model: 'remote-b' }]);
+    expect((agent as any).getHost).toHaveBeenCalledWith('builder');
+    expect(host.ensureStartedWithTimeout).toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect((agent as any).hosts.has('local')).toBe(false);
+  });
+
+  it('drops remote models when the host is retired during discovery', async () => {
+    const agent = new CodexAgent(createDeps());
+    installFakeHost(agent, (method) => {
+      if (method !== Method.ModelList) return undefined;
+      (agent as any).hosts.delete('remote:builder');
+      return { data: [{ model: 'old-account' }], nextCursor: null };
+    });
+    await expect(agent.listRemoteModels('builder')).rejects.toThrow('connection changed');
+  });
   it('uses an isolated OpenAI control-plane host without closing provider-oauth sessions', async () => {
     const onCodexLocalModelsListed = vi.fn().mockResolvedValue(undefined);
     const prepareCodexLocalCredentialModeSwitch = vi.fn(async () => {});

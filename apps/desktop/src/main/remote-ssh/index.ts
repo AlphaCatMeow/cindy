@@ -123,7 +123,8 @@ import {
   removeRemoteMcpForwardPref,
 } from './codex-remote-mcp.js';
 import { ensureDaemonRunning } from '../maker-host/cc-manager-client.js';
-import { getMakerIfReady, softCloseCcSessionsForHost } from '../maker-host/index.js';
+import { getMakerIfReady, softCloseCcSessionsForHost, listSshCodexProviders } from '../maker-host/index.js';
+import { readSshCodexModelList } from './codex-model-list.js';
 import { withRehydrateCloseSuppressed } from '../maker-host/rehydrateCloseSuppression.js';
 import { RemoteHostHydrationQueue } from './hydration-queue.js';
 
@@ -153,6 +154,7 @@ export const REMOTE_SSH_INVOKE = {
   RUN_AGENT_ONE_SHOT: 'maker:remote-ssh:run-agent-one-shot',
   // Phase B+ — Codex credential sync
   CHECK_CODEX_AUTH: 'maker:remote-ssh:check-codex-auth',
+  LIST_CODEX_MODELS: 'maker:remote-ssh:list-codex-models',
   SYNC_CODEX_AUTH: 'maker:remote-ssh:sync-codex-auth',
   // Phase B++ — SSH key setup wizard
   LIST_LOCAL_KEYS: 'maker:remote-ssh:list-local-keys',
@@ -1703,6 +1705,10 @@ export function registerRemoteSshIpc(): void {
   });
 
   // ── Codex auth sync (Phase B+) ───────────────────────────────────────────
+  ipcMain.handle(REMOTE_SSH_INVOKE.LIST_CODEX_MODELS, async (event, args: unknown) => {
+    assertTrustedAppRendererEvent(event);
+    return readSshCodexModelList(args, listSshCodexProviders);
+  });
 
   ipcMain.handle(REMOTE_SSH_INVOKE.CHECK_CODEX_AUTH, async (_event, args: unknown) => {
     const obj = requireObject(args);

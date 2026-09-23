@@ -3,13 +3,21 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { Editor } from '@tiptap/react';
+import type { ProviderView } from '@cindy/model-providers';
+import { sshNativeCodexProvider, sshModel } from '@/features/cc-agent/__tests__/sshModelFixtures';
 import { ChatInput } from '../ChatInput';
 
-const h = vi.hoisted(() => ({ t: (key: string) => key, confirm: vi.fn(), editor: null as Editor | null, listening: false, stop: vi.fn().mockResolvedValue(undefined) }));
+const h = vi.hoisted(() => ({ t: (key: string) => key, confirm: vi.fn(), editor: null as Editor | null, listening: false, stop: vi.fn().mockResolvedValue(undefined),
+  setModel: vi.fn(), selectModel: undefined as undefined | ((id: string) => Promise<void | boolean>), remoteProviders: [] as ProviderView[],
+}));
 vi.mock('react-i18next', async (original) => ({ ...await original<typeof import('react-i18next')>(), useTranslation: () => ({ t: h.t }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('@/components/ui/confirm-dialog-provider', () => ({ useConfirmDialog: () => ({ confirm: h.confirm }) }));
-vi.mock('../ModelSelector', async (original) => ({ ...await original<typeof import('../ModelSelector')>(), ModelSelector: ({ modelId }: { modelId: string }) => <span data-testid="model-selector">{modelId}</span> }));
+vi.mock('../ModelSelector', async (original) => ({ ...await original<typeof import('../ModelSelector')>(), ModelSelector: ({ modelId, onModelChange }: { modelId: string; onModelChange: typeof h.selectModel }) => {
+  h.selectModel = onModelChange;
+  return <span data-testid="model-selector">{modelId}</span>;
+} }));
+vi.mock('@/hooks/useSshCodexProviders', () => ({ useSshCodexProviders: () => ({ providers: h.remoteProviders, status: 'ready', refresh: () => {} }) }));
 vi.mock('../ExtraDirsButton', () => ({ ExtraDirsButton: () => null }));
 vi.mock('../PermissionSelector', () => ({ PermissionSelector: () => <span data-testid="permission-selector" /> }));
 vi.mock('../NewGoalDialog', () => ({ NewGoalDialog: () => null }));
@@ -39,6 +47,7 @@ vi.mock('@/state/newMakerDraft', async (original) => {
 const noOp = () => {};
 // External host services are inert; the editor, composer state, and send dispatch run unchanged.
 const api: any = new Proxy({}, { get: (_obj, key) => {
+  if (key === 'setModel') return h.setModel;
   if (key === 'listSync') return () => ({ ghosts: [] });
   if (key === 'getDataSnapshot') return () => { throw new Error('test bridge unavailable'); };
   if (key === 'setGlobalShortcut') return () => Promise.resolve({ ok: true });
@@ -55,13 +64,44 @@ const attachments: ComponentProps<typeof ChatInput>['attachmentState'] = {
   removeFile: noOp, updateFile: noOp, discardFiles: noOp, clearFiles: noOp, restoreFiles: (files) => [...files],
 };
 beforeEach(() => { h.listening = false; h.stop.mockClear(); window.electronAPI = api; vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); h.remoteProviders = []; h.setModel.mockReset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const props = {
   sessionId: 'loading-test', initialWorkingDir: '/workspace', runtimeAgentKind: 'codex' as const,
   vendorKey: 'codex' as const, deviceLinkDeviceId: 'test-host', attachmentState: attachments,
   hideRuntimeControls: true, showFolderPicker: false, disableAutofocus: true,
 };
+
+it('lets a new SSH task with no window report reach main on model selection and retry', async () => {
+  h.remoteProviders = [sshNativeCodexProvider([sshModel('old'), sshModel('remote-new')])];
+  h.setModel.mockRejectedValueOnce(new Error('test host rejected selection')).mockResolvedValue({ deferred: false });
+  render(<ChatInput {...props} sessionId="ssh-empty" deviceLinkDeviceId={null} remoteHostId="builder"
+    initialModel="old" initialProviderId="openai" initialEffort="low" hideRuntimeControls={false} onSend={vi.fn()} />);
+  await waitFor(() => expect(h.selectModel).toBeTypeOf('function'));
+  await act(async () => { await h.selectModel!('remote-new'); });
+  // Failed optimistic selection restores the previous model through the same IPC.
+  expect(h.setModel).toHaveBeenCalledTimes(2);
+  expect(h.setModel.mock.calls[0].slice(0, 2)).toEqual(['ssh-empty', 'remote-new']);
+  expect(h.setModel.mock.calls[1].slice(0, 2)).toEqual(['ssh-empty', 'old']);
+  await act(async () => { await h.selectModel!('remote-new'); });
+  expect(h.setModel).toHaveBeenCalledTimes(3);
+  expect(h.setModel.mock.calls[2].slice(0, 2)).toEqual(['ssh-empty', 'remote-new']);
+});
+
+it('sends a remote-only Codex model when the controller has no connected providers', async () => {
+  h.remoteProviders = [sshNativeCodexProvider([sshModel('remote-only')])];
+  const onSend = vi.fn().mockResolvedValue(true);
+  const view = render(<ChatInput {...props} sessionId="ssh-send" deviceLinkDeviceId={null} remoteHostId="builder"
+    initialModel="remote-only" initialProviderId="openai" initialEffort="low" onSend={onSend} />);
+  await waitFor(() => expect(view.container.querySelector('[contenteditable]')).not.toBeNull());
+  await act(async () => { h.editor!.commands.setContent('<p>Hello remote</p>'); });
+  const send = screen.getByRole('button', { name: 'newChat.sendButton.send' }) as HTMLButtonElement;
+  expect(send.disabled).toBe(false);
+  await act(async () => { fireEvent.click(send); });
+  await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  expect(onSend.mock.calls[0][1]).toBe('remote-only');
+  expect(onSend.mock.calls[0][6]).toEqual(expect.objectContaining({ providerId: 'openai' }));
+});
 
 it.each(['button', 'Enter', 'voice'] as const)(
   'blocks %s while metadata is absent, retains input, and sends Astra when metadata arrives', async (entry) => {

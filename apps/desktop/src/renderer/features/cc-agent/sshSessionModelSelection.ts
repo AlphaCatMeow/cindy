@@ -26,6 +26,24 @@ export class SshModelSelectionError extends Error {
   }
 }
 
+/** Resolve new SSH Codex tasks from the execution host, never the controller login. */
+export async function loadSshSessionModelSelection(
+  hostId: string, args: Parameters<typeof resolveSshSessionModelSelection>[0],
+): Promise<ReturnType<typeof resolveSshSessionModelSelection>> {
+  if (args.agentKind !== 'codex') return resolveSshSessionModelSelection(args);
+  try {
+    const providers = await window.electronAPI.remoteSsh.listCodexModels(hostId);
+    const nativePreference = !args.preferred.providerId || args.preferred.providerId === 'openai';
+    return resolveSshSessionModelSelection({
+      ...args, providers, loading: false, loadFailed: false,
+      preferred: { ...args.preferred, providerId: 'openai', model: nativePreference ? args.preferred.model : '' },
+      getPresetEffort: undefined, getPresetFast: undefined,
+    });
+  } catch {
+    return { ok: false, reason: 'catalog-error' };
+  }
+}
+
 /** Resolve catalog models within the SSH adapter's implemented routing boundary.
  * Codex uses the remote default login: controller gateway/custom/account routes
  * are not forwarded by maker-host, and thread/start sends the model unchanged.

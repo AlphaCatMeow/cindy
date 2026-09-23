@@ -4764,6 +4764,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Two-step UX: check first (so renderer can build the right confirm
     // dialog), then sync explicitly after user confirmation. The renderer
     // is the trust boundary — sync handler does NOT itself prompt.
+    listCodexModels: (id: string): Promise<import('@cindy/model-providers').ProviderView[]> =>
+      ipcRenderer.invoke('maker:remote-ssh:list-codex-models', { id }),
     checkCodexAuth: (
       id: string,
     ): Promise<{

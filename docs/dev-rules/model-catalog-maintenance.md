@@ -104,6 +104,22 @@ Pi 上游生成资料统一转换为客户端 `catalog/provider-models.json`，�
 维护命令、覆盖顺序和验收见 [通用供应商目录](provider-catalog-generation.md)。
 渠道多协议与逐模型接口证据见 [供应商接口核查](provider-interface-audit.md)。
 
+## SSH Codex 模型目录
+
+SSH Codex 的创建入口、任务内选择器与 main 的启动／切换准入读取所选主机
+app-server 的完整 `model/list`，不使用控制端 OpenAI 登录或网关目录作为远端可用性的依据。
+沿用已有远端安装与 daemon 连接流程；分页有界，读取失败或空清单显示重试，不回退到本机。
+结果只用于该主机，断连、换主机或换账号后的迟到结果丢弃，不发布到本机公共目录。
+
+新任务从远端清单解析默认模型及推理强度／Fast；已有任务保留原模型和历史，由用户改选。
+`model/list` 不提供的真实窗口保持未知；普通 SSH Codex 切换交给 main 现有窗口保护和回合中延后规则，
+不能因前端尚无用量报告而静默丢弃点击。目录成员资格不等于认证、网络和实际推理已验证。
+
+实现：`maker-host/ssh-codex-models.ts`、`remote-ssh/codex-model-list.ts`、
+`useSshCodexProviders.ts`；回归：`codex-model-list.test.ts`、`sshCodexModels.test.tsx`、
+`chatInputModelLoading.test.tsx`。新增读取 IPC 属于本机 SSH 管理面，与既有 SSH 管理 channel
+一样不开放 device-link；手机及设备互联的供应商清单协议保持原样，完整远端能力发现仍由 #65 跟进。
+
 ## 按问题继续阅读
 
 | 按需阅读 | 入口 |

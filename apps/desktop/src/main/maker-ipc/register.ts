@@ -33,6 +33,7 @@ import { projectRemoteBotDelegations } from './remoteBotDelegations.js';
  */
 
 import { readCodexContextWindowInfo } from '../maker-host/codex-context-window.js';
+import { readSshCodexModelList, assertSshCodexModel } from '../remote-ssh/codex-model-list.js';
 import { prepareCodexCustomContextCatalog } from '../maker-host/codex-custom-context-catalog.js';
 import { inferProviderIdForModel } from '../maker-host/provider-route.js';
 import { resolveConfiguredContextWindow, resolveDesktopModelContextProviderId } from '../maker-host/model-context-settings.js';
@@ -460,6 +461,7 @@ import {
   ensureCodexMcpBridgeStartedForRemote,
   finalizeCodexAfterAuthModeChange,
   getMaker,
+  listSshCodexProviders,
   getMakerIfReady,
   getPluginRegistry,
   isBotToolsetAvailable,
@@ -6684,7 +6686,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     agent: AgentKind,
     model: string,
     providerId: string | null,
+    remoteHostId?: string | null,
   ): Promise<string | undefined> {
+    if (agent === 'codex' && remoteHostId) {
+      assertSshCodexModel(await readSshCodexModelList({ id: remoteHostId }, listSshCodexProviders), model, providerId);
+      return undefined;
+    }
     const verdict = await verdictForModelRoute(agent, model, providerId);
     if (verdict.kind === 'reject') {
       throwIpcError(
@@ -6780,8 +6787,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           verifiedResume = false;
         }
       }
-      if (!verifiedResume) {
-        const reroute = await assertModelRouteUsable(o.agentKind, o.model, o.providerId ?? null);
+      if (!verifiedResume || (o.agentKind === 'codex' && o.remoteHostId)) {
+        const reroute = await assertModelRouteUsable(o.agentKind, o.model, o.providerId ?? null, o.remoteHostId);
         if (reroute && shouldApplyExclusiveProviderRerouteLive(o.providerId)) {
           o.providerId = reroute;
         }
@@ -16018,7 +16025,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         currentProviderId,
       );
       let effectiveProviderId = requestedProviderId;
-      if (routeExplicit) {
+      const sshCodexProviders = runtimeStatus.remoteHostId && runtimeStatus.agentKind === 'codex'
+        ? await readSshCodexModelList({ id: runtimeStatus.remoteHostId }, listSshCodexProviders)
+        : null;
+      if (sshCodexProviders) {
+        assertSshCodexModel(sshCodexProviders, model, guardProviderId);
+      } else if (routeExplicit) {
         const dbAgentKind = getSessionDbAgentKind(sessionId);
         if (dbAgentKind) {
           // 停用轴准入只依赖目标路由(guard = 显式目标 ?? 恢复出的源),与源 provider
@@ -16039,7 +16051,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
       if (runtimeStatus.remoteHostId) {
         const targetId = effectiveProviderId === undefined ? currentProviderId : effectiveProviderId;
-        const target = getActiveCatalog().providers.find((provider) => provider.id === targetId);
+        const target = (sshCodexProviders ?? getActiveCatalog().providers).find((provider) => provider.id === targetId);
         if (target && isLocalOnlyProviderForAgent(target, dbToMakerAgentKind(runtimeStatus.agentKind))) {
           throwIpcError('INVALID_PARAMS', 'This provider requires local execution');
         }
@@ -16058,7 +16070,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           effectiveProviderId === null
             ? null
             : (normalizeSessionProviderId(effectiveProviderId) ?? currentProviderId);
-        const runtimeProviders = await getDesktopProviderService().listProviders({
+        const runtimeProviders = sshCodexProviders ?? await getDesktopProviderService().listProviders({
           allowSideEffects: false,
           catalog: getActiveCatalog(),
         });
@@ -16350,7 +16362,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       let modelWindowRebuilt = false;
       if (runtimeAgentKind && (runtimeRouteChanged || confirmedContextWindow !== undefined)) {
         const resolveRouteWindow = (_agentKind: string, modelId: string, pid: string | null) =>
-          resolveConfiguredContextWindow(getActiveCatalog(), runtimeAgentKind, pid, modelId);
+          sshCodexProviders
+            ? resolveVerifiedContextWindow({ providers: sshCodexProviders }, runtimeAgentKind, pid ?? 'openai', modelId)
+            : resolveConfiguredContextWindow(getActiveCatalog(), runtimeAgentKind, pid, modelId);
         const verifiedTargetWindow = lookupVerifiedContextWindow(
           resolveRouteWindow,
           model,

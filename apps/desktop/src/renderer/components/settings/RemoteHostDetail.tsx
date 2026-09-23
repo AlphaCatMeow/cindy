@@ -34,7 +34,7 @@ import {
 import { getDraft, getFastModeForModel } from '@/state/newMakerDraft';
 import { getProviderModelEffort, getProviderModelFast } from '@/state/providerModelMemory';
 import {
-  resolveSshSessionModelSelection,
+  loadSshSessionModelSelection,
   sshModelSelectionErrorKeys,
 } from '@/features/cc-agent/sshSessionModelSelection';
 import { getDataOwnerGeneration, isDataOwnerGenerationCurrent } from '@/contexts/dataOwnerGeneration';
@@ -396,7 +396,7 @@ export function StartRemoteSessionPanel({ hostId }: StartRemoteSessionPanelProps
       const resolveSelection = () => {
         const snapshot = getCachedProvidersSnapshot();
         const prefs = getDraft().lastByVendor.codex;
-        return resolveSshSessionModelSelection({
+        return loadSshSessionModelSelection(hostId, {
           providers: snapshot?.providers ?? [],
           loading: !snapshot,
           loadFailed: hasProvidersSnapshotLoadFailed(),
@@ -406,7 +406,8 @@ export function StartRemoteSessionPanel({ hostId }: StartRemoteSessionPanelProps
           getPresetFast: getProviderModelFast,
         });
       };
-      const initialSelection = resolveSelection();
+      const initialSelection = await resolveSelection();
+      if (!isDataOwnerGenerationCurrent(owner)) return;
       if (!initialSelection.ok) {
         toast.error(t(sshModelSelectionErrorKeys[initialSelection.reason]));
         return;
@@ -447,7 +448,8 @@ export function StartRemoteSessionPanel({ hostId }: StartRemoteSessionPanelProps
       // Directory validation/confirmation may take time. Re-read the catalog and
       // preferences before inserting; never persist a stale or another owner's route.
       if (!isDataOwnerGenerationCurrent(owner)) return;
-      const selection = resolveSelection();
+      const selection = await resolveSelection();
+      if (!isDataOwnerGenerationCurrent(owner)) return;
       if (!selection.ok) {
         toast.error(t(sshModelSelectionErrorKeys[selection.reason]));
         return;
