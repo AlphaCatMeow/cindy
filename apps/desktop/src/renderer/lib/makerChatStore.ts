@@ -9929,7 +9929,7 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
       // updates while retaining the marker for the turn we actually queried.
       // A live-but-idle handle has already stopped its turn and must take the
       // same finalizer path.
-      const current = sessions.get(id);
+      let current = sessions.get(id);
       const initialMainTurnRunning = liveTurns.get(id);
       if (
         initialMainTurnRunning === true ||
@@ -9953,6 +9953,11 @@ export async function reconcileSessionsAfterDataOwnerRollback(): Promise<void> {
         if (latestSession?.isTurnRunning === true) {
           continue;
         }
+        const refreshed = sessions.get(id);
+        if (!refreshed || !sameActiveTurnBoundaryMarker(id, refreshed, marker)) {
+          continue;
+        }
+        current = refreshed;
       }
       // listActive keeps idle session handles that still own background work.
       // isTurnRunning=false only says the foreground turn ended; do not close
