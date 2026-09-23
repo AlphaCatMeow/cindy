@@ -462,6 +462,7 @@ import {
   finalizeCodexAfterAuthModeChange,
   getMaker,
   listSshCodexProviders,
+  disposeRemoteCodexHostAfterRestart,
   getMakerIfReady,
   getPluginRegistry,
   isBotToolsetAvailable,
@@ -7280,6 +7281,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     session?: { agentKind: AgentKind; remoteHostId: string | null } | null;
     createOpts?: unknown;
   }): Promise<{ remoteCodexDaemonRebootstrapped: true } | void> {
+    const ownerGeneration = getActiveAppSession().generation;
     const { session, createOpts } = params;
     // Remote SSH auto-reconnect 前置: 拿 host 是否要联网在 maker-core 之前确定,
     // 避免 remote transport hook 同步抛 "not found in pool"。ensureRemoteHostReady
@@ -7431,6 +7433,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           await detachIdleRemoteCodexSessionsOnHost(
             remoteHostIdToEnsure,
             'codex-mcp-daemon-rebootstrap',
+            ownerGeneration,
           );
           return { remoteCodexDaemonRebootstrapped: true };
         }
@@ -7486,7 +7489,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   async function detachIdleRemoteCodexSessionsOnHost(
     hostId: string,
     reason: string,
+    ownerGeneration: number,
   ): Promise<void> {
+    if (isAppSessionBoundaryPending() || getActiveAppSession().generation !== ownerGeneration) return;
     const detachTasks: Array<Promise<void>> = [];
     for (const s of maker.listActiveSessions()) {
       if (s.remoteHostId !== hostId || s.agentKind !== 'codex') continue;
@@ -7503,6 +7508,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       );
     }
     await Promise.all(detachTasks);
+    // Model discovery can own a connection before any Session exists. Daemon
+    // bootstrap invalidates that connection too; wait for its retirement before
+    // lazy creation reads the catalog, rather than racing the SSH close event.
+    await disposeRemoteCodexHostAfterRestart(hostId, ownerGeneration);
   }
 
   // turn 结束后补一次远端 MCP ensure (best-effort):live turn 期间被推迟的
@@ -7512,6 +7521,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // holder 供各 turn 收口路径调用。远端 CC 走 holder 的 detach 补偿
   // (bridge 重建 / 端口重绑已让 fresh 失效时重建 query)。
   refreshRemoteCodexMcpOnTurnSettledHolder = (sessionId: string): void => {
+    const ownerGeneration = getActiveAppSession().generation;
     // Shutdown closes sessions while the dynamic Maker facade rejects access.
     // No remote reconfiguration belongs to the departing owner's boundary.
     if (isAppSessionBoundaryPending()) return;
@@ -7551,8 +7561,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             await detachIdleRemoteCodexSessionsOnHost(
               remoteHostId,
               'codex-mcp-turn-settled-rebootstrap',
+              ownerGeneration,
             );
           }
+        }).catch((err) => {
+          log.warn('remote Codex refresh on turn settled failed', {
+            hostId: remoteHostId,
+            errorName: err instanceof Error ? err.name : 'UnknownError',
+          });
         });
       return;
     }

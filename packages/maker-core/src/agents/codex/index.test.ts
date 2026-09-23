@@ -3013,6 +3013,27 @@ describe('CodexAgent capability routing', () => {
 describe('CodexAgent reference directories', () => {
   const profileName = 'cindy-readonly-references';
 
+  it.each([
+    { permissionMode: 'auto' as const, extraDirs: [], selector: { sandbox_mode: 'workspace-write' } },
+    { permissionMode: 'ask' as const, extraDirs: ['/reference'], selector: { default_permissions: profileName } },
+    { permissionMode: 'bypassPermissions' as const, extraDirs: ['/reference'], selector: { sandbox_mode: 'danger-full-access' } },
+  ])('retains the $permissionMode selection when native workspace routing reloads config (extraDirs=$extraDirs)', async ({ permissionMode, extraDirs, selector }) => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, undefined, { userAgent: 'codex/0.156.0' });
+    const handle = await agent.startSession({
+      sessionId: 'workspace-config-reload', model: 'gpt-6-luna',
+      workingDir: '/repo', remoteHostId: 'builder', permissionMode, extraDirs,
+    });
+    const [, params] = host.request.mock.calls.find(([method]) => method === Method.ThreadStart)!;
+    const config = (params as { config: Record<string, unknown> }).config;
+    // 0.156 reloads the config layer without the RPC sandbox/permissions fields.
+    // A profile declaration alone then fails before any model request is sent.
+    expect(config).toMatchObject(selector);
+    expect(Object.hasOwn(config, 'default_permissions')).toBe('default_permissions' in selector);
+    expect(Object.hasOwn(config, 'sandbox_mode')).toBe('sandbox_mode' in selector);
+    await handle.close();
+  });
+
   it('marks only explicitly writable additional roots as write in the thread profile', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent, undefined, { codexHome: '/tmp/mock-codex-home' });
@@ -3082,6 +3103,8 @@ describe('CodexAgent reference directories', () => {
     )[1] as [string, Record<string, unknown>];
     expect('permissions' in revokedResume).toBe(false);
     expect(revokedResume.sandbox).toBe('workspace-write');
+    expect(revokedResume.config).toMatchObject({ sandbox_mode: 'workspace-write' });
+    expect(revokedResume.config).not.toHaveProperty('default_permissions');
     const turnCalls = host.request.mock.calls.filter(
       ([method]) => method === Method.TurnStart,
     );
@@ -4254,6 +4277,45 @@ describe('CodexAgent.listCustomizations', () => {
 });
 
 describe('CodexAgent.refreshLocalModels', () => {
+  it('retires a model-only SSH connection after daemon restart before admitting new catalog reads', async () => {
+    const transports: InstanceType<typeof MockCodexTransport>[] = [];
+    const agent = new CodexAgent(createDeps({}, { getRemoteCodexTransport: () => {
+      const transport = new MockCodexTransport();
+      transports.push(transport);
+      return transport;
+    } }));
+    await agent.listRemoteModels('builder');
+    await agent.listRemoteModels('other-builder');
+    const oldClose = deferred<void>();
+    const originalClose = transports[0]!.close.bind(transports[0]);
+    vi.spyOn(transports[0]!, 'close').mockImplementation(async () => {
+      await oldClose.promise;
+      await originalClose();
+    });
+    const retirement = agent.disposeRemoteHostAfterRestart('builder');
+    const catalog = agent.listRemoteModels('builder');
+    await Promise.resolve();
+    expect(transports).toHaveLength(2);
+    oldClose.resolve();
+    await retirement;
+    await catalog;
+    expect(transports).toHaveLength(3);
+    expect(transports[0]!.closed).toBe(true);
+    expect(transports[1]!.closed).toBe(false);
+    expect(transports[2]!.closed).toBe(false);
+    await agent.dispose();
+  });
+
+  it('does not retire a remote host that still has an attached session', async () => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) =>
+      method === Method.ModelList ? { data: [], nextCursor: null } : undefined);
+    await agent.listRemoteModels('builder');
+    host.activeSubscriptions = 1;
+    await expect(agent.disposeRemoteHostAfterRestart('builder')).rejects.toThrow('active Codex session');
+    expect(host.retire).not.toHaveBeenCalled();
+  });
+
   it('reads SSH models on the named remote host without publishing them to local discovery', async () => {
     const publish = vi.fn();
     const agent = new CodexAgent(createDeps({}, { onCodexLocalModelsListed: publish }));

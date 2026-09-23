@@ -2873,6 +2873,11 @@ export async function listSshCodexProviders(hostId: string) {
   }
 }
 
+export async function disposeRemoteCodexHostAfterRestart(hostId: string, ownerGeneration: number): Promise<void> {
+  if (getActiveAppSession().generation !== ownerGeneration) return;
+  await _codexAgent?.disposeRemoteHostAfterRestart(hostId);
+}
+
 /** Register Pi after a managed runtime retry and notify local renderers. */
 export function registerPiAgentIfAvailable(): boolean {
   const register = _registerPiAgent;
