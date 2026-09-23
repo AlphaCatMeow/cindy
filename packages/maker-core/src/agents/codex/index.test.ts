@@ -4277,6 +4277,69 @@ describe('CodexAgent.listCustomizations', () => {
 });
 
 describe('CodexAgent.refreshLocalModels', () => {
+  it('reconnects a model-only SSH host after daemon closure without explicit host retirement', async () => {
+    const transports: InstanceType<typeof MockCodexTransport>[] = [];
+    const agent = new CodexAgent(createDeps({}, { getRemoteCodexTransport: () => {
+      const transport = new MockCodexTransport();
+      transport.setMockResponse(Method.ModelList, {
+        result: { data: [{ model: `remote-${transports.length}` }], nextCursor: null },
+      });
+      transports.push(transport);
+      return transport;
+    } }));
+    try {
+      expect(await agent.listRemoteModels('builder')).toEqual([{ model: 'remote-0' }]);
+      await agent.listRemoteModels('other-builder');
+      // Auth sync / proxy reconciliation kills the daemon. The proxy channel
+      // closes even if no Session has ever subscribed to this AppServerHost.
+      await transports[0]!.close('remote daemon stopped after auth sync');
+      const cachedHost = (agent as any).hosts.get('remote:builder');
+      await cachedHost.shutdownPromise;
+      expect(await agent.listRemoteModels('builder')).toEqual([{ model: 'remote-2' }]);
+      expect(transports).toHaveLength(3);
+      expect(transports[1]!.closed).toBe(false);
+      const handle = await agent.startSession({
+        sessionId: 'after-remote-auth-sync', workingDir: '/repo',
+        remoteHostId: 'builder', model: 'remote-2', providerId: 'openai',
+      });
+      expect(transports).toHaveLength(3);
+      expect(transports[2]!.lines.map((line) => JSON.parse(line).method)).toContain(Method.ThreadStart);
+      expect(transports[0]!.lines.map((line) => JSON.parse(line).method)).not.toContain(Method.ThreadStart);
+      await handle.close();
+    } finally {
+      await agent.dispose();
+    }
+  });
+
+  it('rejects an in-flight SSH catalog on daemon closure and allows a fresh retry', async () => {
+    const transports: InstanceType<typeof MockCodexTransport>[] = [];
+    const agent = new CodexAgent(createDeps({}, { getRemoteCodexTransport: () => {
+      const transport = new MockCodexTransport();
+      transports.push(transport);
+      return transport;
+    } }));
+    try {
+      await agent.listRemoteModels('builder');
+      MockCodexTransport.dropModelList = true;
+      const catalog = agent.listRemoteModels('builder');
+      const rejected = expect(catalog).rejects.toThrow('closed');
+      await vi.waitFor(() => {
+        expect(transports[0]!.lines.map((line) => JSON.parse(line).method)
+          .filter((method) => method === Method.ModelList)).toHaveLength(2);
+      });
+      await transports[0]!.close('remote daemon restarted');
+      await rejected;
+      await (agent as any).hosts.get('remote:builder').shutdownPromise;
+      MockCodexTransport.dropModelList = false;
+      expect(await agent.listRemoteModels('builder')).toEqual([]);
+      expect(transports).toHaveLength(2);
+      expect(transports[1]!.closed).toBe(false);
+    } finally {
+      MockCodexTransport.dropModelList = false;
+      await agent.dispose();
+    }
+  });
+
   it('retires a model-only SSH connection after daemon restart before admitting new catalog reads', async () => {
     const transports: InstanceType<typeof MockCodexTransport>[] = [];
     const agent = new CodexAgent(createDeps({}, { getRemoteCodexTransport: () => {
