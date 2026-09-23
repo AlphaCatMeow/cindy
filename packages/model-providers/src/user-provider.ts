@@ -1,7 +1,7 @@
 import { alignModelApiRoute, providerInterfaceModelRoute, hasDeclaredProviderInterface, providerWireProtocolForApi, providerBaseUrlForApi } from './providerInterfaceRoutes.js';
 import { nativeModelAgents } from './modelProtocol.js';
 import { resolveCatalogModelNativeApi, resolveModelNativeApi } from './modelRegistry.js';
-import { providerEndpointBindings, bindProviderPresetRuntime } from './providerEndpointTemplate.js';
+import { providerEndpointBindings, bindProviderEndpoint, bindProviderPresetRuntime, canonicalProviderEndpoint } from './providerEndpointTemplate.js';
 import { PI_MODEL_APIS } from "./types.js";
 import { providerModelRecord, providerPresetModelRecord, providerModelMetadata } from "./providerModelCatalog.js";
 import { BUNDLED_CATALOG, BUILTIN_PROVIDERS } from './builtin.js';
@@ -145,22 +145,6 @@ export function xaiApiOfficialRuntimeAgents(
   );
 }
 
-/**
- * 自定义模型的默认 effort 档位（「参考默认设置」）——与内置当代旗舰模型对齐：
- *   - claude-code：low/medium/high/xhigh/max（同 opus / fable）；
- *   - codex：low/medium/high/xhigh/max（gpt-5.x 同款五档，ultra 仍仅限已登记模型）。
- * 让自定义模型像内置模型一样能在选择器里切 reasoning/thinking 强度（默认 medium）。
- * 端点是否真支持由其后端决定：cc 经 `thinking`、codex 经 reasoning effort 透传，
- * anthropic-compat-proxy 仅对个别内置 model id strip 字段、对自定义 id 一律字节透传。
- * 未登记模型（Registry 无法确认能力）也放开到 max：第三方 Responses 兼容端点普遍
- * 接受与否只有端点方/用户知道，选到不支持的档位会被上游拒绝，用户改选即可；
- * 默认中档；用户显式配置仍优先。
- */
-const CUSTOM_EFFORTS: Partial<Record<AgentKind, Effort[]>> = {
-  "claude-code": ["low", "medium", "high", "xhigh", "max"],
-  codex: ["low", "medium", "high", "xhigh", "max"],
-};
-
 interface RegistryEffortMetadata {
   efforts: Effort[];
   defaultEffort: Effort | null;
@@ -291,7 +275,7 @@ function registrySupportsFastMode(
 /** 固定 agent 顺序：保证派生出的 provider.agents / routing / models 顺序稳定。 */
 const AGENT_ORDER: readonly AgentKind[] = ["claude-code", "codex", "pi"];
 
-/** 单个用户填写的模型 → CatalogModel（补默认元数据；effort 按所属 agent 参考内置默认）。 */
+/** 单个用户填写的模型 → CatalogModel（只从已声明的能力补推理档位）。 */
 function toCatalogModel(
   m: ProviderRuntimeModelConfig,
   providerId: string,
@@ -301,15 +285,12 @@ function toCatalogModel(
   metadataProviderId = providerId,
 ): CatalogModel {
   // 显式 runtime 能力优先：reasoning:true 才导出 efforts；false = 明确无思考档。
-  // 字段缺省才走历史 fallback（Pi 空档 / 其它自定义 Provider 的 CUSTOM_EFFORTS）。
+  // 未知能力不借用其它模型的档位；后续仍按目录、预设、实报和用户配置逐层继承。
+  // 空档位只表示不指定推理强度，不代表要求供应商关闭思考。
   const efforts: Effort[] =
     m.reasoning === true
       ? [...(m.reasoningEfforts ?? [])]
-      : m.reasoning === false
-        ? []
-        : agent === "pi"
-          ? []
-          : (CUSTOM_EFFORTS[agent] ?? []);
+      : [];
   const registryEfforts =
     m.reasoning !== undefined || (modelRegistry?.schemaVersion ?? 0) >= 4
       ? undefined
@@ -455,27 +436,32 @@ export function buildUserProvider(
     const rt = config.runtimes[agent];
     if (!rt) continue;
     agents.push(agent);
-    routing[agent] = toRouting(
-      agent,
-      rt.baseUrl,
-      rt.requestPath,
-      rt.headers,
-      rt.headersState,
-      strategy,
-      rt.modelsUrl,
-      rt.wireProtocol,
-      rt.piCatalogProviderId,
-      rt.supportsImageGeneration,
-    );
     const preset = options.presets?.find(
       (preset) => preset.id === rt.catalogPresetId,
     );
     const presetRuntimeSource = preset?.runtimes[agent];
-    const presetRuntime = presetRuntimeSource && providerEndpointBindings(presetRuntimeSource.baseUrl, rt.baseUrl)
+    const presetBindings = presetRuntimeSource
+      ? providerEndpointBindings(presetRuntimeSource.baseUrl, rt.baseUrl) : null;
+    const presetRuntime = presetRuntimeSource && presetBindings
       ? bindProviderPresetRuntime(presetRuntimeSource, rt.baseUrl) : presetRuntimeSource;
+    const resolvedBaseUrl = presetBindings && presetRuntimeSource
+      ? bindProviderEndpoint(presetRuntimeSource.baseUrl, presetBindings, rt.baseUrl)
+      : rt.baseUrl;
+    routing[agent] = toRouting(
+      agent,
+      resolvedBaseUrl,
+      rt.requestPath,
+      rt.headers,
+      rt.headersState,
+      strategy,
+      presetRuntime?.modelsUrl ?? rt.modelsUrl,
+      rt.wireProtocol,
+      rt.piCatalogProviderId,
+      rt.supportsImageGeneration,
+    );
     const followsPreset =
       presetRuntime &&
-      withoutTrailingSlashes(rt.baseUrl) ===
+      withoutTrailingSlashes(resolvedBaseUrl) ===
         withoutTrailingSlashes(presetRuntime.baseUrl) &&
       (rt.wireProtocol ?? defaultWireProtocol(agent)) ===
         (presetRuntime.wireProtocol ?? defaultWireProtocol(agent)) &&
@@ -494,9 +480,16 @@ export function buildUserProvider(
         ...(agent === 'pi' && interfaceDefault.piApi ? { piApi: interfaceDefault.piApi } : {}),
         ...(interfaceDefault.route ? { route: { ...interfaceDefault.route } } : {}),
       } : storedModel;
-      const m = rt.requestPath ? configuredModel : alignModelApiRoute(
-        providerInterfaceModelRoute(configuredModel, agent, rt.catalogPresetId, rt.baseUrl),
-        rt.baseUrl, rt.wireProtocol ?? defaultWireProtocol(agent),
+      const boundConfiguredModel = configuredModel.route
+        ? { ...configuredModel, route: {
+          ...configuredModel.route,
+          baseUrl: canonicalProviderEndpoint(presetRuntimeSource?.baseUrl ?? '', configuredModel.route.baseUrl)
+            ?? configuredModel.route.baseUrl,
+        } }
+        : configuredModel;
+      const m = rt.requestPath ? boundConfiguredModel : alignModelApiRoute(
+        providerInterfaceModelRoute(boundConfiguredModel, agent, rt.catalogPresetId, resolvedBaseUrl),
+        resolvedBaseUrl, rt.wireProtocol ?? defaultWireProtocol(agent),
       );
       const presetModel = followsPreset
         ? presetRuntime.models.find((model) => model.id === m.id)
@@ -523,7 +516,7 @@ export function buildUserProvider(
       // 目录(预设只声明 context/image 时 reasoning 仍由目录补),用户显式配置仍优先。
       const catalogDefaults =
         agent === "pi" && rt.piCatalogProviderId && !m.route &&
-        piNativeCatalogRouteMatches(rt.piCatalogProviderId, rt.baseUrl, rt.wireProtocol)
+        piNativeCatalogRouteMatches(rt.piCatalogProviderId, resolvedBaseUrl, rt.wireProtocol)
           ? piNativeCatalogModelDefaults(rt.piCatalogProviderId, m.id)
           : undefined;
       const wire = m.route?.wireProtocol ?? rt.wireProtocol ?? defaultWireProtocol(agent);
@@ -531,10 +524,10 @@ export function buildUserProvider(
       // discarding all metadata when a Responses/Gemini model shares a Chat connection.
       // With no explicit model route/API, an exact endpoint + unique ID supplies Pi's API.
       const imported = !(m.route?.requestPath ?? rt.requestPath)
-        ? providerModelRecord(m.id, m.route?.baseUrl ?? rt.baseUrl,
+        ? providerModelRecord(m.id, m.route?.baseUrl ?? resolvedBaseUrl,
             m.api ?? (agent === 'pi' ? m.piApi ?? wire : wire),
             !m.api && !m.piApi && !m.route)
-          ?? (hasDeclaredProviderInterface(m, agent, rt.catalogPresetId, rt.baseUrl)
+          ?? (hasDeclaredProviderInterface(m, agent, rt.catalogPresetId, resolvedBaseUrl)
             ? providerPresetModelRecord(rt.catalogPresetId, m.id) : undefined)
           ?? (followsPreset && sameRoute && m.api && presetModel?.api === m.api
             ? providerPresetModelRecord(preset?.id, m.id, m.api) : undefined)
@@ -583,7 +576,7 @@ export function buildUserProvider(
         ...(importedApi && !m.piApi && !m.api ? {
           api: importedApi, ...(agent === 'pi' ? { piApi: importedApi } : {}),
           ...(!m.route && providerWireProtocolForApi(importedApi) && providerWireProtocolForApi(importedApi) !== wire ? { route: {
-            baseUrl: providerBaseUrlForApi(rt.baseUrl, importedApi),
+            baseUrl: providerBaseUrlForApi(resolvedBaseUrl, importedApi),
             wireProtocol: providerWireProtocolForApi(importedApi)!,
           } } : {}),
         } : {}),

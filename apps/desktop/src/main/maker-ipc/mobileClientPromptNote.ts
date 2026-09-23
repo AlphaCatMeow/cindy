@@ -154,7 +154,12 @@ export function attachMainOwnedInputBoundary(
  */
 export function stripMainOnlySendOpts(sendOpts: unknown): unknown {
   if (!sendOpts || typeof sendOpts !== 'object' || Array.isArray(sendOpts)) return sendOpts;
-  const opts = sendOpts as Record<string, unknown>;
+  let opts = sendOpts as Record<string, unknown>;
+  const persisted = opts.persistUserMessage;
+  if (persisted && typeof persisted === 'object' && !Array.isArray(persisted) && 'sharedTaskAuthor' in persisted) {
+    const { sharedTaskAuthor: _ignoredAuthor, ...content } = persisted as Record<string, unknown>;
+    opts = { ...opts, persistUserMessage: content };
+  }
   if (
     !('fromMobileClient' in opts) &&
     !('fromDeviceLinkClient' in opts) &&
@@ -164,9 +169,10 @@ export function stripMainOnlySendOpts(sendOpts: unknown): unknown {
     !('inputAbortSignal' in opts) &&
     !('signal' in opts) &&
     !('turnPermissionPolicy' in opts) &&
+    !('toolsDisabled' in opts) &&
     !('origin' in opts)
   ) {
-    return sendOpts;
+    return opts;
   }
   const {
     fromMobileClient: _ignoredMobile,
@@ -177,6 +183,7 @@ export function stripMainOnlySendOpts(sendOpts: unknown): unknown {
     inputAbortSignal: _ignoredAbortSignal,
     signal: _ignoredSignal,
     turnPermissionPolicy: _ignoredTurnPermissionPolicy,
+    toolsDisabled: _ignoredToolsDisabled,
     origin: _ignoredOrigin,
     ...rest
   } = opts;

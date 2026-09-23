@@ -59,7 +59,8 @@
   `sessionContext`、`pick`、`workspace`、`iosSimulator`。不用就省略，写 `false` 是无效清单。
 - `card: {}` 与 `agent: {}` 分别表示基础卡片能力和由真实用户点击触发 Agent 回合；
   其它对象型能力必须至少包含一项真实能力，不能用空对象占位。
-- v3 未识别的顶层字段必须原样保留，但当前 Host 不展示、不授权、也不因此阻止安装。
+- v3 未识别的顶层字段，以及能力对象中的未知扩展字段、动作和订阅事件，必须原样保留，
+  但当前 Host 不展示、不授权、也不因此阻止安装或发布。
   未来 Host 识别该字段后，才按正常的能力展示和运行时守门链路启用。不能把
   未知字段猜成现有权限，也不能让它意外获得能力。
 - **Agent 在途调用不需要重复登记具体操作。** 插件工具是否执行由当前
@@ -147,7 +148,8 @@
 - 同一 release 自动更新失败后，在当前进程内按 owner、来源路由和 release 做指数退避
   （5 分钟起、最长 6 小时），日志记录失败次数与下次重试时间；来源发布新 release 时立即
   解除。忙碌跳过不记失败，用户手动重试不受退避限制。
-- 服务端包必须通过 release SHA／大小校验，真实包能力不得超出该 release 的市场 manifest；
+- 服务端包必须通过 release SHA／大小及 id／版本校验，安装与运行时能力以真实包内的
+  Manifest 为准，不将服务端目录的 Manifest 投影作为第二份能力上限。
   自定义市场以发现并规范化的 manifest 为能力上限。能力上限内的新版声明可静默更新，超出
   则按包内容不一致拒绝并留待来源修复，不转成用户审批流程。能力上限按 Host 实际消费语义
   比较：真实包不得从无到有增加 `settingsHtml` 设置 WebView 或扩大固定 `settingsHeight`；
@@ -156,6 +158,14 @@
   真实包同名工具的 `parameters` JSON Schema 必须与市场规范值一致（仅对象键顺序可不同）。
 - 本地 `.cindy` 没有稳定来源，不自动更新；用户再次导入同 id 新包时直接原位更新，由 Main
   保持当前启用状态。
+- 市场下载与本地安装使用一致的 Node 包体边界：压缩包最多 128 MiB、解包总量最多
+  256 MiB、最多 2048 个条目；普通沙箱包仍为 8 MiB／32 MiB／256 个条目。
+  下载前尚未识别真实包类型，按 128 MiB 限流；下载后由共用安装器按真实包类型校验。
+  市场下载采用 120 秒总超时和 60 秒无进展超时，任一触发即中止；分块写临时文件并校验
+  完整大小和 SHA-256，失败清理本次临时文件，不替换现有安装。错误提示区分下载超时、
+  网络失败与安装包异常；服务端负责包体大小发布准入，客户端保留防御校验而不另设体积提示。
+  实现与回归见 `apps/desktop/src/main/plugin-market/download.ts` 及同目录的
+  `__tests__/download.test.ts`。
 - Host receipt 是安装事务和运行完整性的状态记录，不是一次交互式“能力授权”。合法的安装／更新
   事务直接写入 receipt，钉住 canonical manifest、trust、启停态与随机 `revision`；
   `ghostInstallApprovalToken()` 只是 Renderer 与 Main 之间防止并发漂移的前置条件，不是权限凭证。
@@ -164,9 +174,11 @@
   真正越出沙箱的技能继续使用 receipt 绑定的字节指纹与 Host 状态根快照。不要把审计字段误写成
   全量运行时内容校验，也不要因取消能力确认弹窗而删除现有完整性守门。
 - **Forge 的源码区与 Host 受管根互斥。** `ghost_forge_scaffold` / `ghost_forge_pack` /
-  `ghost_forge_install` 的目标
-  必须是当前会话工作目录里的独立作者目录；命中安装根或状态根一律拒绝，并按 realpath
-  挡住大小写折叠与软链／junction 别名。`ghost_forge_pack` 只负责校验与打包；只有用户明确
+  `ghost_forge_install` 的目标必须是独立作者目录，不得是安装根或状态根；按 realpath
+  挡住大小写折叠与软链／junction 别名。会话工作目录内直接放行；工作目录外走与
+  `ghost_call` 过户相同的会话权限路径（本地 Full Access 自动放行，Auto 交当前会话
+  AI 审阅，Ask 弹确认卡，远程／缺会话／查询失败 fail closed），禁止在 Host 已放行
+  后再因目录边界悄悄硬断。`ghost_forge_pack` 只负责校验与打包；只有用户明确
   要求后调用独立的 `ghost_forge_install` 才安装或更新，不因 scaffold／pack 成功而隐式安装。
 - `skill` 是唯一**越出沙箱**的能力：技能指令由主 Agent 以用户全部权限执行、全局
   生效、不随 workdir 级停用隐藏。其安全边界是**声明一致性**（manifest 里的
@@ -266,8 +278,29 @@
   `ghost_call` 恢复均由 Host 掌控。Secret、Token、OAuth code 和连接凭证不得进入
   Agent、Ghost、interaction / pending snapshot、会话历史、日志或分析事件。内联 Secret
   只允许短暂存在于本地 Desktop 输入组件和一次性的 trusted Renderer → Main 专用 IPC；
-  不得走通用 interaction response、device-link 或其它远程通道，也不得写入 Renderer
-  store。提交成功、取消、request / revision 替换和组件卸载时必须清空。
+  不得走通用 interaction response、通用 device-link invoke，也不得写入 Renderer
+  store。提交成功、取消、request / revision 替换和组件卸载时必须清空。远程普通 user
+  Secret 的窄例外仅为下述签名输入桥，不提供保险库读取或同步。
+- 远程设备插件 OAuth 的 [Desktop 回调桥](../remote-plugin-oauth.md) 是独立的 Host 对 Host
+  授权事务，只承接当前卡片的已声明 OAuth action。URL/code 必须在两个 Main 间加密，
+  不能暴露给 Renderer、Agent、插件或通用 invoke；token 仍由目标 Host 现有账号管理器交换保存。
+  通用设备码、浏览器确认和 CLI PKCE 回调由同一类型化适配层承接，仍须精确任务/插件/目标
+  绑定；可信 Node 的私有 CLI callback 只回 bootstrap Promise，不经 stdout、沙箱或模型。
+  Node 本来拥有系统用户权限，这不是隔离恶意 Node 的保证；不放开任意端口/URL 转发。
+  新 Node 授权卡须以 `cancelWithCall:true` 和当前 `callId` 显式启用；只带旧调用编号
+  不取得授权能力，也不改变旧 RPC/后台子进程生命周期。任务 Stop 后不得迟到启用，
+  取消只回收该调用所属子进程，不停止同一 Worker 中其它调用。
+  普通 user Secret 可由 `remoteSecret:true` 卡片通过专用本机 `plugin-oauth:submit-secret`
+  加密送到目标 Host；必须先签名握手，并比较原 Host 的完整字段展示与用户看到的字段，绑定
+  设备/插件/action/revision，在最新声明与写入边界复验。只允许写既有 executor 解析出的
+  单个 Secret；OAuth、gh-cli、oidc-token 和账号 vault 不接受此输入。Bot/旧卡片无此标记，
+  不自动获得能力。原始值不进通用 invoke、事件、会话历史、日志或 store；不增加确认窗口。
+  用户要求的设备码卡片展示是窄例外：加密 device offer 中供用户手工输入的短时
+  `userCode` 可通过本机专用 `plugin-oauth:device-code` 接口投影到发起授权的自有顶层
+  Renderer。只在当前卡片组件内存显示；按 owner、窗口/frame、设备、插件、request/action
+  绑定，支持再次复制与重新打开 Main 保管的同一授权页。过期、终态或身份失效后清除。
+  它不包含 OAuth callback code、device_code、Token、完整 URL 或 state，不进入聊天
+  snapshot、模型、持久化或通用远控；不改变原授权卡片或新增确认窗口。
 - Host 必须把每个未满足 `any_of` 组的全部可执行 item 投影到卡片，Agent plan
   不能隐藏合法配置路径。Renderer 统一按组展示选项并复用 Ask 卡片的正文限高与纵向
   滚动，不得为 Brave、Tavily、Gmail 等具体插件增加分支。
@@ -296,14 +329,20 @@
   close／detach 已开始、会话缺失、实例不匹配、查询失败、远程会话均 fail closed。
   对 Codex、Pi 与远端 Claude Code 这类进程外 harness，instance 只作为 opaque MCP route
   identity 写入 Host 生成的 loopback URL；桥接层必须将 URL identity 与注册表中的当前实例
-  严格比对，不匹配直接 401。兼容旧客户端时，缺 instance 的 URL 可继续获得普通会话上下文，
+  严格比对，不匹配直接 401。  兼容旧客户端时，缺 instance 的 URL 可继续获得普通会话上下文，
   但必须剥除 instance 能力，使 Full Access 自动交接继续 fail closed。
+  越界文件系统副作用（cindy-docs / 电脑工具的 `outside_workdir`，以及 Forge 的
+  `forge_source`）在缺少 instance、live grant 读不到或实例已失效时直接拒绝，
+  不得退回仅凭用户确认的放行；附件过户仍可确认。
   自动批准须区分 Full Access 与 AI 审阅来源，不得伪装为用户点击，也不得写入人工目录授权
   记忆。附件自动交接必须写独立 `ghost-tool-grant`，不得写 `ghost-grant`；这是回退兼容
   边界——旧客户端只认识后者，降级时必须 fail closed，不能把新版自动交接误读成人工永久
   授权。切回 Ask 后新请求恢复确认。在途插件操作统一沿用当前会话的操作审批：包括工作区
-  草稿创建、工作目录写入和媒体路径揭示，Full Access 不额外审批，Auto 进入现有统一审阅器，
-  Ask 沿用原确认流程。MCP 的 `prompt-each-time` 仅限制授权记忆，不得覆盖 Full Access，
+  草稿创建、工作目录写入、媒体路径揭示，Forge 在工作目录外的打包／骨架，以及
+  cindy-docs / 电脑工具读写工作目录外路径，
+  Full Access 不额外审批，Auto 进入现有统一审阅器，
+  Ask 沿用原确认流程。越界路径的确认与执行绑定裁决时解析到的规范路径，
+  工作目录里的 symlink 不能把真实目标藏成相对路径。MCP 的 `prompt-each-time` 仅限制授权记忆，不得覆盖 Full Access，
   也不得跳过 Auto 审阅。审批期间实例、权限或调用归属失效时，旧 allow 不可执行。
   Plan 与操作审批档位正交：Host 副作用须先检查实时 Plan 状态，未知或切换中拒绝；
   Plan 切换代次也参与审批后和落盘前复核，不能以数据库镜像或切回原状态恢复旧授权。
@@ -469,9 +508,15 @@
 - **manifest 扩展的降级兼容（#1283）。** v3 通过“未知顶层字段原样保留，但当前 Host
   不展示、不授权、不阻止安装”解决向前兼容；能力一旦被 Host 支持，必须成为明确的直接字段
   和权限映射。v2 仅保留输入兼容：未知但格式合法的 slot 允许安装、运行时不提供能力。
-  不得恢复独立的 Host slot 支持表或按名字猜测映射。`subscribe.topics` 等带具体
-  运行语义的子枚举仍严格校验；`schemaVersion > 3` 仍以 `GHOST_HOST_UNSUPPORTED` 拒绝，避免
+  不得恢复独立的 Host slot 支持表或按名字猜测映射。能力动作和订阅事件只校验标识格式，
+  不能以当前实现列表阻断声明；已知字段类型、安全路径、协议格式及运行时凭证边界仍校验。
+  `schemaVersion > 3` 仍以 `GHOST_HOST_UNSUPPORTED` 拒绝，避免
   当前 Host 误读整体结构变化。已经发布的旧 Host 无法追改，降到 v3 改造前仍可能拒绝新清单。
+- **声明与实现进度解耦。** 插件开发不应等待客户端先注册每一项扩展；声明被接收不等于
+  API 已存在或获授权。插件必须检查所需接口是否存在，处理不支持响应，保留可用功能并对
+  不可用部分给出升级提示。不得把权限拒绝、账号失效或网络故障当作“不支持”绕过。
+  `minCindyVersion` 用于版本兼容声明与分发选择，不是运行时能力探测：手动导入、
+  旧版客户端或其它分发入口仍可能让不适配客户端安装插件，必须有运行时降级路径。
 - `networkSlot.ts` 的 `as: 'media'` 不能只信任 Content-Type（GLB 常见
   `application/octet-stream`），需要安全的 magic-byte／扩展名嗅探。
 - SSH 远程场景必须让 `LiziMcpSessionContext` 携带 remote 标识；目录过户不得回退读取本机

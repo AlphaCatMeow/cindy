@@ -150,11 +150,21 @@ export function InstallTargetPicker({
     return null;
   })();
 
-  const handleInstall = async (installPath?: string) => {
-    if (installingRef.current) return;
+  // 忙碌锁全流程覆盖:“其他目录”从原生目录选择开始就要持锁,否则快速连点
+  // 可启动两个选择请求;选择晚返回时还会在锁释放后再次执行安装。
+  const beginInstallBusy = () => {
+    if (installingRef.current) return false;
     installingRef.current = true;
-    setBannerError(null);
     setInstalling(true);
+    return true;
+  };
+  const endInstallBusy = () => {
+    installingRef.current = false;
+    setInstalling(false);
+  };
+
+  const performInstall = async (installPath?: string) => {
+    setBannerError(null);
     try {
       const res = await runAction({ name: skill.name, installPath, catalogScope: skill.catalogScope });
       if (res.success) {
@@ -198,17 +208,28 @@ export function InstallTargetPicker({
       }
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleInstall = async (installPath?: string) => {
+    if (!beginInstallBusy()) return;
+    try {
+      await performInstall(installPath);
     } finally {
-      installingRef.current = false;
-      setInstalling(false);
+      endInstallBusy();
     }
   };
 
   const handleOtherDirectory = async () => {
-    const r = await window.electronAPI.dialog.showOpenDirectory({});
-    if (!r.success || !r.path) return;
-    const installPath = joinSkillInstallPath(r.path, skill.name);
-    await handleInstall(installPath);
+    if (!beginInstallBusy()) return;
+    try {
+      const r = await window.electronAPI.dialog.showOpenDirectory({});
+      if (!r.success || !r.path) return;
+      const installPath = joinSkillInstallPath(r.path, skill.name);
+      await performInstall(installPath);
+    } finally {
+      endInstallBusy();
+    }
   };
 
   const versionForSubtitle = String(skill.versionLabel ?? skill.latestVersion ?? '');
@@ -235,6 +256,12 @@ export function InstallTargetPicker({
             if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
           }}
           onEscapeKeyDown={(event) => {
+            // Escape 只归本弹窗消费:它可能叠在自带 window 级 Escape 监听的表面
+            // (如 SkillhubMarketPreviewPanel)之上。不拦截传播会让同一次 Escape
+            // 把底层面板一起关掉——opener 被卸载后无法归还焦点,安装中的关闭锁
+            // 也会被绕过。Radix 在 document 捕获阶段回调这里,先消费再决定是否
+            // 阻止关闭。
+            event.stopPropagation();
             if (installingRef.current || event.isComposing || event.keyCode === 229) event.preventDefault();
           }}
           onPointerDownOutside={(event) => { if (installingRef.current) event.preventDefault(); }}

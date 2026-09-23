@@ -176,7 +176,8 @@ export type ForgePackResult =
         | 'INTERNAL'
         // Forge 打包出口的会话 workdir 门 + 受管根禁区(C-4 + #7)。
         | 'SOURCE_OUTSIDE_WORKDIR'
-        | 'SOURCE_IS_INSTALLED_PLUGIN';
+        | 'SOURCE_IS_INSTALLED_PLUGIN'
+        | 'PERMISSION_DENIED';
       message: string;
     };
 
@@ -199,7 +200,7 @@ export type ForgeScaffoldResult =
     }
   | {
       ok: false;
-      errorCode: 'INVALID_INPUT' | 'TARGET_EXISTS' | 'INTERNAL';
+      errorCode: 'INVALID_INPUT' | 'TARGET_EXISTS' | 'PERMISSION_DENIED' | 'INTERNAL';
       message: string;
     };
 
@@ -228,11 +229,28 @@ export interface ForgeScaffoldWriteRequest {
 }
 
 export type ForgeScaffoldWriteResult =
-  { ok: true } | { ok: false; errorCode: 'TARGET_EXISTS' | 'INTERNAL'; message: string };
+  { ok: true } | { ok: false; errorCode: 'TARGET_EXISTS' | 'INTERNAL' | 'PERMISSION_DENIED'; message: string };
 
 export type ForgeScaffoldWriter = (
   request: ForgeScaffoldWriteRequest,
 ) => Promise<ForgeScaffoldWriteResult>;
+
+const FORGE_OUTSIDE_GRANT_STALE_MESSAGE =
+  'Task or Plan permissions changed; retry with the current scope.';
+
+type ForgeOutsideGrantOptions = {
+  allowOutsideWorkdir?: boolean;
+  authorizedDir?: string;
+  isCurrent?: () => boolean;
+};
+
+function staleOutsideForgeGrant(
+  options?: ForgeOutsideGrantOptions,
+): { ok: false; errorCode: 'PERMISSION_DENIED'; message: string } | null {
+  if (!options?.allowOutsideWorkdir || !options.authorizedDir) return null;
+  if (options.isCurrent?.() === true) return null;
+  return { ok: false, errorCode: 'PERMISSION_DENIED', message: FORGE_OUTSIDE_GRANT_STALE_MESSAGE };
+}
 
 /** 生成插件清单；先走正式校验，再允许任何文件落盘。 */
 function scaffoldManifest(input: ForgeScaffoldInput): Record<string, unknown> {
@@ -558,6 +576,9 @@ export async function scaffoldGhostDir(
     sessionWorkdir?: string | null;
     forbiddenRootDirs?: readonly string[];
     writeScaffold?: ForgeScaffoldWriter;
+    allowOutsideWorkdir?: boolean;
+    authorizedDir?: string;
+    isCurrent?: () => boolean;
   },
 ): Promise<ForgeScaffoldResult> {
   const template = input.template;
@@ -592,6 +613,8 @@ export async function scaffoldGhostDir(
       message: '会话工作目录不存在,无法确定骨架输出位置',
     };
   }
+  const staleGrant = staleOutsideForgeGrant(options);
+  if (staleGrant) return staleGrant;
   let realTarget: string;
   try {
     realTarget = await resolveThroughExistingAncestor(resolved);
@@ -602,8 +625,18 @@ export async function scaffoldGhostDir(
       message: err instanceof Error ? err.message : String(err),
     };
   }
-  if (!realTarget.startsWith(`${realWorkdir}${path.sep}`) && realTarget !== realWorkdir) {
-    return { ok: false, errorCode: 'INVALID_INPUT', message: 'dir 必须在当前会话工作目录内' };
+  if (
+    !realTarget.startsWith(`${realWorkdir}${path.sep}`)
+    && realTarget !== realWorkdir
+  ) {
+    if (
+      !options?.allowOutsideWorkdir
+      || !options.authorizedDir
+      || !isPathInsideDir(options.authorizedDir, realTarget)
+      || !isPathInsideDir(realTarget, options.authorizedDir)
+    ) {
+      return { ok: false, errorCode: 'INVALID_INPUT', message: 'dir 必须在当前会话工作目录内' };
+    }
   }
   for (const forbiddenRoot of options?.forbiddenRootDirs ?? []) {
     let resolvedForbiddenRoot: string;
@@ -631,7 +664,9 @@ export async function scaffoldGhostDir(
       };
     }
   }
-  const targetDir = path.resolve(input.dir);
+  const targetDir = options?.allowOutsideWorkdir && options.authorizedDir
+    ? path.resolve(options.authorizedDir)
+    : path.resolve(input.dir);
   const files = scaffoldFiles(input);
   const manifestRaw = files[GHOST_MANIFEST_FILE];
   if (typeof manifestRaw !== 'string') {
@@ -676,15 +711,21 @@ export async function scaffoldGhostDir(
       return {
         ok: false,
         errorCode: 'INVALID_INPUT',
-        message: 'dir 的父目录必须是工作目录内已存在的普通目录',
+        message: options?.allowOutsideWorkdir
+          ? 'dir 的父目录必须是已存在的普通目录'
+          : 'dir 的父目录必须是工作目录内已存在的普通目录',
       };
     }
     parentRealPath = await realpathNative(parentDir);
-    if ((await pathHasLinkSegment(parentDir)) || !isPathInsideDir(realWorkdir, parentRealPath)) {
+    const parentHasLinkAncestor = await pathHasLinkSegment(parentDir);
+    const parentOutsideWorkdir = !isPathInsideDir(realWorkdir, parentRealPath);
+    if (parentHasLinkAncestor || (parentOutsideWorkdir && !options?.allowOutsideWorkdir)) {
       return {
         ok: false,
         errorCode: 'INVALID_INPUT',
-        message: 'dir 的父目录必须是工作目录内已存在且没有链接祖先的普通目录',
+        message: parentHasLinkAncestor
+          ? 'dir 的父目录必须是没有链接祖先的普通目录'
+          : 'dir 的父目录必须是工作目录内已存在且没有链接祖先的普通目录',
       };
     }
   } catch (err) {
@@ -692,7 +733,9 @@ export async function scaffoldGhostDir(
       return {
         ok: false,
         errorCode: 'INVALID_INPUT',
-        message: 'dir 的父目录必须先创建，并且必须位于当前工作目录内',
+        message: options?.allowOutsideWorkdir
+          ? 'dir 的父目录必须先创建'
+          : 'dir 的父目录必须先创建，并且必须位于当前工作目录内',
       };
     }
     return {
@@ -710,6 +753,8 @@ export async function scaffoldGhostDir(
       message: 'Forge scaffold stable-directory capability is unavailable',
     };
   }
+  const staleBeforeWrite = staleOutsideForgeGrant(options);
+  if (staleBeforeWrite) return staleBeforeWrite;
   const writeResult = await options.writeScaffold({
     parentDir,
     targetName: path.basename(targetDir),
@@ -1309,11 +1354,26 @@ export async function packGhostDir(
     sessionWorkdir?: string | null;
     forbiddenRootDirs?: readonly string[];
     iconPng?: Buffer;
+    /**
+     * Host already authorized this source via the session permission path
+     * (Full Access / auto-review / user confirm). Forbidden managed roots
+     * still apply. `authorizedDir` is the granted canonical identity and is
+     * required whenever `allowOutsideWorkdir` is true.
+     */
+    allowOutsideWorkdir?: boolean;
+    authorizedDir?: string;
+    /**
+     * Host grant generation captured at authorize time. Required whenever
+     * `allowOutsideWorkdir` is used with `authorizedDir`; rechecked after the
+     * long pack and immediately before the `.cindy` write.
+     */
+    isCurrent?: () => boolean;
   },
 ): Promise<ForgePackResult> {
-  // Forge 打包出口专属安全门(C-4 + #7):source 必须在会话 workdir 内、且不得是受管根
-  //(已装插件 / 批准状态根 / seed 根,双向判定)。算出的 realSourceDir 作为
-  // buildGhostPackage 的 expectedRealDir 上游锚点——正是它要求"由上游校验后传入"的那份。
+  // Forge 打包出口专属安全门(C-4 + #7):source 默认必须在会话 workdir 内;Host 已按
+  // 当前会话权限放行后可带 allowOutsideWorkdir。受管根(已装插件 / 批准状态根 /
+  // seed 根)始终双向拒绝。算出的 realSourceDir 作为 buildGhostPackage 的
+  // expectedRealDir 上游锚点——正是它要求"由上游校验后传入"的那份。
   const workdir = options?.sessionWorkdir;
   if (!workdir) {
     return {
@@ -1332,6 +1392,8 @@ export async function packGhostDir(
       message: 'The current session workdir does not exist',
     };
   }
+  const staleGrant = staleOutsideForgeGrant(options);
+  if (staleGrant) return staleGrant;
   let realSourceDir: string;
   try {
     realSourceDir = await realpathNative(dir);
@@ -1339,11 +1401,18 @@ export async function packGhostDir(
     return { ok: false, errorCode: 'DIR_NOT_FOUND', message: `目录不存在:${dir}` };
   }
   if (!isPathInsideDir(realWorkdir, realSourceDir)) {
-    return {
-      ok: false,
-      errorCode: 'SOURCE_OUTSIDE_WORKDIR',
-      message: 'Forge source must be inside the current session workdir',
-    };
+    if (
+      !options?.allowOutsideWorkdir
+      || !options.authorizedDir
+      || !isPathInsideDir(options.authorizedDir, realSourceDir)
+      || !isPathInsideDir(realSourceDir, options.authorizedDir)
+    ) {
+      return {
+        ok: false,
+        errorCode: 'SOURCE_OUTSIDE_WORKDIR',
+        message: 'Forge source must be inside the current session workdir',
+      };
+    }
   }
   for (const forbiddenRoot of options?.forbiddenRootDirs ?? []) {
     const resolvedForbiddenRoot = await resolveThroughExistingAncestor(forbiddenRoot);
@@ -1380,6 +1449,8 @@ export async function packGhostDir(
     realSourceDir,
     `${built.manifest.id}-${built.manifest.version}.cindy`,
   );
+  const staleBeforeWrite = staleOutsideForgeGrant(options);
+  if (staleBeforeWrite) return staleBeforeWrite;
   try {
     await fs.promises.writeFile(cindyPath, built.buf);
   } catch (err) {
@@ -1550,8 +1621,9 @@ Cindy 会默认把自身版本写进这份具体插件的 \`minCindyVersion\`；
   配置和结果呈现，生成请求由当前 Agent 调用 Core media 工具(§2、§4.0.4)。
 
 问完后把选择复述成一份简短设计小结(要解决的问题/目标用户/交互流程/所选形态/
-权限边界/验收标准),并顺带说明源码会放在工作目录的哪个文件夹——位置不需要用户选
-(骨架只能建在会话工作目录内,装入后归主机统一管理),让用户知情即可。用户确认
+权限边界/验收标准),并顺带说明源码会放在工作目录的哪个文件夹——工作目录内直接建;
+工作目录外(例如相邻 worktree)走当前会话权限,不因目录边界悄悄失败。位置不需要用户选
+(装入后归主机统一管理),让用户知情即可。用户确认
 小结后再动手。**修改现有意识同样适用**:先读现有 ghost.json 与源码,列出改动会
 影响哪些已选形态,再让用户确认。
 
@@ -1632,7 +1704,7 @@ my-ghost/
   // 声明 false 逐个关闭。当前一批:maximize(撑满内容区)、detach(在独立
   // 窗口中打开)、minimize(最小化面板;恢复入口由用户偏好决定为浮动气泡或
   // 左侧栏)。标题条本体恒由主机绘制、
-  // 关不掉;未知键拒装;position:"tab" 时声明本字段拒装
+  // 关不掉;未知键保留但不生效;position:"tab" 时声明本字段拒装
   // 一级主视图是独立能力，见 §4.20。使用时直接声明：
   // "mainView": { "title": "工作台", "icon": "puzzle", "html": "main-view.html" }
   "settingsHtml": "settings.html",  // 可选:设置页「自定义设置区」自绘界面(见 §4.8;声明了用户填的凭证时仍必填,用于长期管理/替换/清除;调用前缺失时主机也会在统一 Setup 卡内联收单,见 §4.7)
@@ -3843,12 +3915,20 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
 \`\`\`js
 const response = await cindy.node.request({
   method: 'taptap/connect',
+  callId: msg.callId, // tool-call 内透传
+  cancelWithCall: true, // 显式启用授权卡和随调用结束的生命周期
   params: { projectId: 'demo' },
   timeoutMs: 30000 // 可选 1000–120000，缺省 30000
 });
 if (!response.ok) throw new Error(response.message);
 const result = response.result;
 \`\`\`
+
+当前工具触发的登录等前台请求应同时传入 \`cancelWithCall: true\` 和主机下发的
+\`callId\`。显式启用后，主机只接受当前插件的在途调用；取消、超时或交卷后，该
+Node 请求及其子进程一并结束，晚到的授权或子进程启动会被拒绝。只传旧 \`callId\`
+或不启用开关都保持既有独立 RPC 生命周期，不自动弹授权卡、不回收后台进程；
+设置页等无 tool-call 的入口不能伪造或复用调用编号。
 
 #### Node Worker 的持久化凭证绑定
 
@@ -3885,8 +3965,17 @@ const authorizationCode = request.cindy.secrets.mail_code;
 
 - \`secretBindings\` 最多 4 条，每条 \`methods\` 1–16 个；省略 \`entry\`
   只绑定主入口，不能借同名方法把凭证送去其它入口；
-- 未保存凭证时宿主在请求进入 Worker 前返回 \`PERMISSION_DENIED\`，设置页可用
-  \`GET /secrets\` 的 saved 状态引导用户；
+- 在途工具调用显式携带 \`cancelWithCall: true\` 和 \`callId\` 时，缺少本次方法/入口声明的手动凭证会先显示既有保密输入卡，
+  远程任务复用签名加密输入桥；用户提交后才进入 Worker。显式登录或更换 Token 可带
+  \`promptSecrets: true\`（要求上述显式生命周期开关），即使已保存也重新显示卡片；取消不清除原凭证。
+  没有在途调用或旧 Host 不支持此接线时仍返回 \`PERMISSION_DENIED\`，不会回退到聊天收取
+  Token。设置页继续使用 \`/secrets\`，不要把输入放入业务 RPC 或 BroadcastChannel；
+  完成本次卡片提交后，Host 在 Worker 私有 \`request.cindy.secretInputCompleted\` 标记
+  \`true\`。要求本次人工填写的登录方法必须检查该标记；旧 Host 缺标记时拒绝执行，不能
+  因其忽略新请求字段而静默复用旧 Token；标记不能由插件 main.js 自报；
+- 若手动凭证只用于登录方法，可用 \`setup: { requires: [] }\` 保留既有 CLI 登录及其它工具，
+  由具体绑定方法触发卡片。此配置就绪仅表示凭证已保存；插件还需执行最小只读权限验证。
+  这个增量只涉及插件→本机 Host 的 Node 请求；远程卡片和输入协议不增加字段；
 - 宿主不会直接把明文交给 \`main.js\`、Agent 参数或写入宿主日志；但 Worker
   收到明文后可以主动回传、落盘或写日志，浏览器侧代码和 Agent 也可能因此间接
   获得它。插件详情的能力清单会逐条披露此风险，只安装可信来源插件；
@@ -4028,6 +4117,59 @@ const maker = require('@taptap/maker'); // 之后它的自启动全部走了正�
 - stdio 由宿主纯字节中继(base64 帧,不参与 JSON-RPC 协议、不受逐行检查),
   但**只适合文本/协议流**,别拿它传大文件;
 - 级联生死:worker 退出/被停/插件停用,子进程一并收掉,不留孤儿。
+
+### 4.12.5 随包 CLI 的登录授权卡片
+
+优先调用通用 \`globalThis.__CINDY_NODE__.bindAuthorization()\`。在**当前 JSON-RPC 请求处理函数内**
+同步捕获返回的 authorize 函数，再交给 CLI 输出/浏览器启动回调。调用方必须以
+\`cancelWithCall: true\` 显式启用；它只绑定这一次仍在途的 \`callId\`，不允许后台启动或复用。可传入的请求为：
+
+\`\`\`ts
+type AuthorizationRequest =
+  | { kind: 'device'; url: string; userCode?: string; expiresAt?: number }
+  | { kind: 'browser'; url: string; expiresAt?: number }
+  | { kind: 'loopback'; url: string; callbackUrl: string; state: string };
+// device/browser 只表示页面已打开；之后原 CLI 继续轮询、保存、校验。
+// loopback 远程回 {kind:'callback', state, code} 或 {kind:'callback', state, error}；
+// 本机回 {kind:'opened'}，原 CLI 自有 localhost listener 接受浏览器回调。
+const authorize = globalThis.__CINDY_NODE__?.bindAuthorization();
+if (!authorize) throw new Error('Authorization cards unavailable');
+const result = await authorize({ kind: 'device', url: verificationUri,
+  userCode, expiresAt: Date.now() + expiresInSeconds * 1000 });
+// 由现有 provider SDK/CLI 完成后续操作；RPC 成功必须晚于实际领取/保存/校验。
+\`\`\`
+
+\`browser\` 用于上游提供 HTTPS 确认页的扫码或浏览器确认，不传二维码图片、Cookie、
+账号密码或任意 CLI 命令。\`device\` 的 userCode 原样保留（1–32 位字母/数字/空格/连字符），
+不把私有 device_code 当用户码。expiresAt 是绝对毫秒时间且不能延长宿主五分钟上限。
+目标必须命中已安装插件的 OAuth origin / network hosts；GitHub/TapTap 继续用已审查的精确规则。
+
+\`loopback\` 只支持原 CLI 的 Authorization Code + PKCE S256：url 内唯一 state、redirect_uri、
+response_type=code、client_id、code_challenge 与 code_challenge_method=S256 必须完整；
+callbackUrl 必须与 redirect_uri 精确相等，且为 localhost、127.0.0.1 或 [::1] 的显式非特权
+端口 HTTP URL。不能改写上游登记的 redirect、降低 PKCE 或抢占别人端口。verifier 留在源 CLI；
+远程 callback 只经 bootstrap 私有 Promise 交给这一次可信 Node 调用，用原 provider SDK
+交换，不经 stdout/main.js/Agent。既有 CLI 若仅有固定监听器，需要在其受审查适配器内消费
+此私有结果；Host 不代发任意 HTTP。不要把 callback code 放到 argv、日志或 RPC 结果。
+
+普通 API Key/PAT 不走这个 Node 接口：沿用 \`network.secrets\` / \`node.secretBindings\`
+声明，由 Host 原密码卡收集，远程端支持时经签名输入桥直接写对应 vault key。插件不读取输入，
+不要求用户把密钥发给模型。保存只证明配置已落地，上游权限由实际业务调用核验。
+
+兼容入口继续保留：
+
+当第三方 CLI 使用「浏览器授权、发起端轮询」时，Node worker 可在**当前请求处理函数内**
+捕获 \`globalThis.__CINDY_NODE__.bindDeviceAuthorization()\` 返回的函数，再在 CLI 输出回调
+里调用 \`await authorize(httpsUrl)\`。同一请求只接受一个链接。Node 请求必须带来自当前
+\`tool-call\` 的 \`callId\`，并显式设置 \`cancelWithCall: true\`；宿主反查插件、任务和 owner，插件不能自选任务。无绑定时返回
+undefined；不支持时明确报错，远程流程不能回退到在执行设备开浏览器或把链接交给模型。
+
+宿主创建含真实授权域名的卡片，用户点击后由当前设备的可信 Host 打开链接。远程链接只走既有
+加密授权事务；这个 Promise 只代表浏览器已打开，**不代表登录完成**。CLI 仍在原设备轮询，
+凭据由原 CLI 保存；Node RPC 只有在真实领取/保存和检查完成后才返回成功。取消卡片/任务、
+断开控制端或事务到期会取消该 Node RPC 及其绑定子进程。不要把 URL、轮询码或 token 放进
+stdout 的 RPC 结果、通知、模型回复或错误；业务状态返回固定摘要。此卡片不改变 Host 的
+network setup/readiness，不能拿 CLI 的登录结果冒充宿主凭据配置已完成。
 
 ## 4.13 会话上下文(sessionContext 能力)
 
@@ -4416,7 +4558,7 @@ Cindy 统一归类、随机选择与排序，同批每个场景和每个插件�
   也长在这里)。你的 panel.html 只画标题条以下的部分,**不要自己再画一条
   标题栏**。不想要某颗系统按钮时在身份卡声明
   \`"systemButtons": { "maximize": false, "detach": false, "minimize": false }\`
-  逐个关闭(缺省全开;标题条本体关不掉;未知键拒装;\`position:"tab"\` 由插件页
+  逐个关闭(缺省全开;标题条本体关不掉;未知键保留但不生效;\`position:"tab"\` 由插件页
   自绘头,没有这套标准头,声明本字段拒装);
 - 与电子脑同源,用 \`BroadcastChannel('<自定名>')\` 通信(电子脑发,面板收);
 - 取自己的媒体:\`cindy-ghost://<id>/media/<指纹><后缀>\`(主机查账验归属,别人的图 404);
@@ -4513,19 +4655,21 @@ Cindy 统一归类、随机选择与排序，同批每个场景和每个插件�
 
 ### 7.2 打包、安装与验证
 
-1. 新插件先调 \`ghost_forge_scaffold\` 生成骨架，或把已有源码放在用户工作目录下的
-   一个文件夹里(如 \`my-ghost/\`)；脚手架目标必须是新目录，绝不覆盖已有文件，
-   其父目录必须是工作目录内已存在的普通目录；也不能落在已安装插件目录或 Host 状态目录内(会被拒，理由同下一条)；
-   **Forge 源码必须是当前会话工作目录里的独立作者目录**。已安装插件目录以及
-   Host 管理的状态目录都不是源码区，禁止直接修改、打包或用路径别名绕过；若要继续
-   开发已有插件，先把源码复制/迁出到工作目录中的新目录，再从该副本制作;
+1. 新插件先调 \`ghost_forge_scaffold\` 生成骨架，或指向已有源码目录(如 \`my-ghost/\`)；
+   脚手架目标必须是新目录，绝不覆盖已有文件，其父目录必须已存在且是普通目录；
+   也不能落在已安装插件目录或 Host 状态目录内(会被拒，理由同下一条)；
+   **Forge 源码必须是独立作者目录，不能是已安装插件或 Host 状态目录**。
+   会话工作目录内直接建/打包；工作目录外(例如相邻 worktree)走当前会话权限:
+   本地 Full Access 自动放行,Auto 交审阅,Ask 向用户确认,远程或无法核验的会话仍拒绝。
+   已安装插件目录以及 Host 管理的状态目录都不是源码区，禁止直接修改、打包或用路径别名绕过；
+   若要继续开发已有插件，先把源码复制/迁出到独立作者目录，再从该副本制作;
 2. 调 \`ghost_forge_pack({ dir: '<绝对路径>' })\`——只做校验和打包，不安装或更新插件；
    产物落在源码目录里(\`<id>-<version>.cindy\`,同版本覆盖,下次打包自动跳过);
    macOS / Linux 源文件的普通 Unix 权限会原样进入包(特殊位会剥除)，所以随包本机
    可执行程序必须在打包前就设好执行位(例如 \`chmod 755 path/to/program\`)，不要靠
    文件扩展名或 \`bin/\` 目录让宿主猜测;
    若返回 \`SOURCE_IS_INSTALLED_PLUGIN\`,不要重试或换大小写、软链接、junction 绕过,
-   按上一步迁出源码后再打包;也可能返回 \`SOURCE_OUTSIDE_WORKDIR\`(源码不在会话工作目录内);
+   按上一步迁出源码后再打包;未获会话权限时也可能返回 \`SOURCE_OUTSIDE_WORKDIR\`;
 3. 用户明确要求当前 Agent 安装或更新这份源码时，调用
    \`ghost_forge_install({ dir: '<绝对路径>' })\`。它会重新校验并打包当前源码，再把这次
    产生的确切包直接安装；首次安装会启用，同 id 已安装时原位更新并保留启用状态、配置、
@@ -4589,20 +4733,28 @@ Cindy 统一归类、随机选择与排序，同批每个场景和每个插件�
 - 其余要求(目录命名、审核流程等)以该仓根部的 \`CONTRIBUTING.md\` 为准,提交前
   在仓内跑一遍 \`node --test .tests/\` 自查。
 
-## 9. 常见拒装原因速查
+## 9. 兼容性与常见拒装原因
+
+插件开发不应受当前客户端能力注册进度限制。未知顶层能力、对象扩展字段、能力动作
+与订阅事件保留为声明，不因此阻断发布或安装，也不因此获得执行权限。
+插件必须检查所需接口是否存在并处理不支持响应：可选功能局部降级，必要能力缺失时
+提示升级，不影响其它可用功能；权限拒绝、账号失效和网络错误不能当作不支持绕过。
+\`minCindyVersion\` 是兼容声明与分发依据，不是运行时能力探测；手动安装、旧版
+或其它分发渠道仍可能让不适配客户端安装插件，不能省略上述兼容处理。
+旧客户端已有拒装逻辑无法追改；整体协议格式变化仍受 schemaVersion 校验。
 
 - \`id\` 不合法(大写/下划线/超长)· 声明了 command 但没有 tools · command 与已装意识撞名
   · **未声明 command**:不拒装,但插件页"使用"按钮禁用,用户无法通过插件页一键启用
     或用 $command 点名;AI 工具调用不受影响(见 §2 说明)
 - \`tools\` 为空 · panel 详单缺少实际形态(既没有 html，也不是有效的 tab/停靠配置)
-- mainView.html 文件缺失/路径不安全、icon 不在系统图标白名单，或 mainView 含未知字段
+- mainView.html 文件缺失/路径不安全、icon 不在系统图标白名单
 - settingsHtml 路径不合法/文件不在包里 · settingsHeight 越界(160–800)或没配 settingsHtml 单独声明
-- panel.systemButtons 格式错(不是对象、未知键、值非布尔,或 position:"tab" 时声明——插件页内面板没有标准头)
+- panel.systemButtons 格式错(不是对象、已知键的值非布尔,或 position:"tab" 时声明——插件页内面板没有标准头)
 - keywords(已废弃字段,旧包兼容保留,新意识别写)有单字词 · kind 写了但不是 "chip"(可省略) · schemaVersion 不是 3 · 缺 minCindyVersion
-- cindy 详单格式错(未知类目/动作、空数组)
+- cindy 详单格式错(已知类目的动作不是合法标识、空数组或重复动作)
 - agent 详单格式错(background / errand / schedule 存在但不是 true；基础点击触发请写 \`agent: {}\`)
 - node 详单格式错(entry 不是包内 CommonJS .js/.cjs、protocol 不在 json-rpc-stdio / mcp-stdio、
-  写了 command/args/shell/env、resident 又写 idleTimeoutSeconds)
+  resident 又写 idleTimeoutSeconds)；未知 command/args/shell/env 只保留，不传给进程启动器
 - id 用了 \`cindy-\` / \`filo-\` / \`xd-\` 前缀(官方保留,正式版用户通道拒装;给自己的意识换个前缀)
 - network 详单格式错(hosts 缺失/裸 TLD/IP/带端口/通配不在最左、secret 缺 inject、
   inject.format 没有 {value} 占位、inject.header 用了 Host/Cookie 等协议关键头、

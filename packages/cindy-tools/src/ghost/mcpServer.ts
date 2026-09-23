@@ -128,6 +128,8 @@ const D_GHOST_FORGE_SCAFFOLD = [
   "template 可选:plain(普通沙箱工具)、agent-action(卡片点击后让 Agent 继续/分叉/新建)、",
   "node-json-rpc(普通随包 Node 服务)、node-mcp(随包 stdio MCP)。Node 模板只写零依赖示例",
   "源码，不会执行 npm install / npx / postinstall。生成后按需求修改，再调用 ghost_forge_pack。",
+  "会话工作目录内直接生成；工作目录外(例如相邻 worktree)走当前会话权限:",
+  "本地 Full Access 自动放行,Auto 交审阅,Ask 向用户确认。不要因为目录在工作目录外就改换目录或空转重试。",
 ].join("\n");
 
 const D_GHOST_FORGE_PACK = [
@@ -135,7 +137,9 @@ const D_GHOST_FORGE_PACK = [
   "缺省只打包并返回产物路径；intent=publish 时额外返回一次性 publishToken。",
   "intent=publish 仅企业组织成员可用；个人账号仍可使用缺省的纯打包模式。",
   "dir 传源码目录的绝对路径(目录里须有 ghost.json;打包自动跳过 .git / node_modules /",
-  "隐藏文件 / *.cindy)。仅当用户明确选择 AI 生成图标时,可把图片工具结果的",
+  "隐藏文件 / *.cindy)。会话工作目录内直接打包；工作目录外走当前会话权限",
+  "(本地 Full Access 自动放行,Auto 交审阅,Ask 向用户确认),不要因此改换目录或空转重试。",
+  "仅当用户明确选择 AI 生成图标时,可把图片工具结果的",
   "xdt_image_url 取单张地址；若只有 xdt_image_urls 则取数组第一项，再把得到的 cindy-media:// 地址传给 icon_source;主机会 best-effort 嵌入,失败保留默认图标继续打包。",
   "失败返回结构化错误(MANIFEST_INVALID 等,message 带具体原因),",
   "按 message 修正源码后重新打包即可。成功只表示 cindyPath 对应的产物已经生成；",
@@ -146,7 +150,7 @@ const D_GHOST_FORGE_INSTALL = [
   "把当前源码目录重新校验、打包，并立即安装到 Cindy；同 id 已安装时原位更新。",
   "只有用户明确要求安装或更新当前插件时才调用。不要因为 scaffold 或 pack 成功就自动调用。",
   "首次安装后直接启用；更新保留原有启用状态、配置、数据与面板位置，同版本也可覆盖。",
-  "dir 传当前会话工作目录内的插件源码目录绝对路径。成功返回本次真实执行的是 installed 还是 updated；",
+  "dir 传插件源码目录绝对路径(工作目录外走与 pack 相同的会话权限)。成功返回本次真实执行的是 installed 还是 updated；",
   "仅当用户明确选择 AI 生成图标时，可像 ghost_forge_pack 一样传 icon_source。",
   "失败返回打包校验或 Host 安装事务的结构化错误。ghost_forge_pack 始终只打包，不受本工具影响。",
 ].join("\n");
@@ -769,7 +773,7 @@ export async function handleGhostManual(
  * xdt_image_urls / xdt_video_urls;意识工具把媒体地址放在自己的 result 对象里,
  * 这里提升到顶层(仅白名单字段、仅字符串数组,其余一概不动)。
  */
-const MEDIA_HOIST_KEYS = ["xdt_image_urls", "xdt_video_urls"] as const;
+const MEDIA_HOIST_KEYS = ["xdt_image_urls", "xdt_video_urls", "xdt_audio_urls"] as const;
 
 /**
  * 音频轨白名单字段(对象数组;与 xdt_image_urls 同规则上提到顶层)。
@@ -843,6 +847,11 @@ function hoistMediaFields(result: unknown): Record<string, unknown> {
       out[key] = value;
     }
   }
+  for (const key of ["xdt_image_url", "xdt_video_url"] as const) {
+    const value = (result as Record<string, unknown>)[key];
+    if (typeof value === "string" && (result as Record<string, unknown>).xdt_media_inline !== true) out[key] = value;
+  }
+  if ((result as Record<string, unknown>)._xdt_render_image === false) out._xdt_render_image = false;
   const audioTracks = sanitizeAudioTracks(
     (result as Record<string, unknown>)[AUDIO_TRACKS_HOIST_KEY],
   );
@@ -890,12 +899,14 @@ export async function handleGhostCall(
     setup_plan?: GhostSetupPlanInput;
   },
   agentToolUseId?: string,
+  signal?: AbortSignal,
 ): Promise<McpTextResult> {
   try {
     const result = await deps.callGhostTool({
       ghostId: input.ghost_id,
       tool: input.tool,
       args: input.args ?? {},
+      ...(signal ? { signal } : {}),
       ...(input.grant_only === true ? { grantOnly: true } : {}),
       ...(input.attachments && input.attachments.length > 0
         ? { attachments: input.attachments }
@@ -944,8 +955,11 @@ export async function handleGhostCall(
     const setup = sanitizeGhostSetupAssessment(unsafeSetup);
     const advisory = setup?.state === "ready" && setup.reauthSuggest ? { setup } : {};
     const declaredMedia = [
+      "xdt_image_url",
       "xdt_image_urls",
+      "xdt_video_url",
       "xdt_video_urls",
+      "xdt_audio_urls",
       "xdt_audio_tracks",
     ].some((k) => k in hoisted);
     const producedFallback =
@@ -968,7 +982,7 @@ export async function handleGhostCall(
     // - 内联语义(xdt_media_inline):桌面不画卡、不自动显示,模型必须 markdown
     //   内联否则桌面用户什么都看不到。
     const mediaHint =
-      Object.keys(hoisted).length > 0
+      declaredMedia && hoisted._xdt_render_image !== false
         ? {
             hint: "媒体已由聊天气泡自动渲染成卡片,不要在回复文本里用 markdown(![](…))重复嵌入这些地址;后续改图引用返回的 hash 指纹即可。xdt_card_id / xdt_anchor_card_id 是渲染层的配对令牌,忽略即可,不要复述。",
           }
@@ -978,9 +992,11 @@ export async function handleGhostCall(
                 hint: "这些媒体已入库但桌面聊天不会自动显示——请在最终回复的 markdown 里用 ![](地址) 把图按内容对应位置嵌入展示(原样使用返回里的 xdt_image_url / cindy-media:// 地址,不要自己拼);IM/远程场景由主机按 xdt_media_produced 自动送达,无需复述该字段。不要口播下载过程。",
               }
             : {
-                hint: "xdt_media_produced 是主机记账的送达通道:这些媒体已自动送达用户(桌面/IM),不要在回复文本里用 markdown 嵌入这些地址,也不要复述它们。",
+                hint: "xdt_media_produced 是主机记账的产物地址，不代表当前客户端已展示。请在最终回复中使用这些受管地址展示产物一次；不要只说已送达。",
               }
-          : {};
+          : typeof hoisted.xdt_card_id === "string" || typeof hoisted.xdt_anchor_card_id === "string"
+            ? { hint: "xdt_card_id / xdt_anchor_card_id 是卡片配对令牌，不代表所有客户端已经展示。请在最终回复中概括实际结果，不要复述令牌。" }
+            : {};
     return textResult({
       ...resultForModel,
       ...advisory,
@@ -1229,12 +1245,12 @@ export function createCindyGhostsMcpServer(
 
   if (deps.connectAccount) server.tool(
     "connect_account",
-    "Request an account connection card in a teammate conversation. For a built-in Grok account use kind=host, id=grok; for an installed plugin use kind=plugin and its real ghost_id. Do not invent connectors, URLs or credentials. The card returns immediately; finish unrelated work and end the turn. The Host resumes you after authorization succeeds. Grok login does not authorize X or change your model.",
-    { kind: z.enum(["host", "plugin"]), id: z.string().min(1).max(256), reauthorize: z.boolean().optional().describe("Only for an explicit reconnect request or a known authorization/scope failure") },
-    async ({ kind, id, reauthorize }) => {
+    "Request an account connection for an installed plugin in the current conversation: kind=plugin and its real ghost_id. The Host presents its supported setup card, including protected manual connection forms, without calling a plugin business tool. Use reauthorize=true when the user asks to reconnect, replace a token, update authorization, or reconfigure an existing connection; saved configuration must not skip that request. Ordinary tasks wait until setup completes or is cancelled; teammate tasks may return a pending card immediately, then the Host resumes them after authorization. Follow the returned status and do not infer provider access from setup readiness. Only if the Host reports no supported setup action, follow the installed plugin's documented login method on the machine running the task. Never request credentials in chat or tool arguments. Built-in Grok login (kind=host, id=grok) remains available only in teammate conversations and does not authorize X or change your model. Do not invent connectors, URLs or credentials.",
+    { kind: z.enum(["host", "plugin"]), id: z.string().min(1).max(256), reauthorize: z.boolean().optional().describe("Reopen supported setup for an explicit reconnect, token replacement, authorization update or reconfiguration request, or a known authorization/scope failure") },
+    async ({ kind, id, reauthorize }, extra) => {
       if (kind === "host" && id !== "grok") return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, errorCode: "UNSUPPORTED_CONNECTION" }) }], isError: true };
       try {
-        const result = await deps.connectAccount!(kind === "host" ? { kind, id: "grok", reauthorize } : { kind, id, reauthorize });
+        const result = await deps.connectAccount!(kind === "host" ? { kind, id: "grok", reauthorize } : { kind, id, reauthorize }, extra.signal);
         return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
       } catch {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, errorCode: "CONNECTION_UNAVAILABLE" }) }], isError: true };
@@ -1313,7 +1329,7 @@ export function createCindyGhostsMcpServer(
         ),
     },
     async (input, extra) =>
-      handleGhostCall(deps, input, extractAgentToolUseId(extra)),
+      handleGhostCall(deps, input, extractAgentToolUseId(extra), extra.signal),
   );
 
   server.tool(

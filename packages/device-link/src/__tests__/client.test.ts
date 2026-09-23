@@ -7,6 +7,8 @@ import { DeviceLinkClient, computeReconnectDelayMs, type WsLike } from '../clien
 import {
   PROTOCOL_VERSION,
   DeviceLinkError,
+  sharedTaskHostPeer,
+  SHARED_TASK_RELAY_CAPABILITY,
   type Envelope,
   type LinkAcceptPayload,
 } from '../protocol.js';
@@ -66,12 +68,12 @@ class FakeWs implements WsLike {
     this.emit('message', { toString: () => JSON.stringify(env) });
   }
   /** 完成 open + hello-ack 流程 */
-  ack(): void {
+  ack(capabilities?: string[]): void {
     this.emit('open');
     this.push({
       v: PROTOCOL_VERSION,
       kind: 'hello-ack',
-      payload: { serverProtocolVersion: PROTOCOL_VERSION, deviceId: 'dev-self', userId: 'u1' },
+      payload: { serverProtocolVersion: PROTOCOL_VERSION, deviceId: 'dev-self', userId: 'u1', capabilities },
     });
   }
 }
@@ -121,6 +123,48 @@ function makeHarness(opts?: {
 }
 
 const tick = (ms = 0): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('verified outbound stream notification', () => {
+  it('notifies before business delivery and keeps two peers independent across restart', async () => {
+    const h = makeHarness({ timing: { pingIntervalMs: 60_000 } });
+    h.client.start(); await tick(); h.current().ack();
+    const events: string[] = [];
+    const off = h.client.onPeerStreamAccepted((peer, stream) => { events.push(peer + ':' + stream); });
+    h.client.onFrame((frame) => { if (frame.kind === 'push') events.push('push:' + frame.src); });
+    const accept = async (peer: string, stream: string) => {
+      const opened = h.client.openLink(peer, { controllerName: 'Test', protocolVersion: 1, appVersion: '1' });
+      const request = h.current().sent.filter((e) => e.kind === 'link-open').at(-1)!;
+      h.current().push({ v: PROTOCOL_VERSION, kind: 'link-accept', id: request.id, src: peer, payload: {
+        appVersion: '1', allowlistHash: 'hash', capabilities: [DEVICE_LINK_CAPABILITY_RELIABLE_TRANSPORT],
+        transportStreamId: stream,
+      } });
+      await opened;
+    };
+    const push = (peer: string, stream: string, seq: number) => {
+      for (const frame of encodeReliableFrames({ v: PROTOCOL_VERSION, kind: 'push', src: peer,
+        payload: { channel: 'maker:event', payload: {} },
+      }, stream, seq)) h.current().push(frame);
+    };
+    try {
+      h.current().push({ v: PROTOCOL_VERSION, kind: 'link-accept', id: 'unrequested', src: 'a',
+        payload: { appVersion: '1', allowlistHash: 'hash', transportStreamId: 'unverified' } });
+      expect(events).toEqual([]);
+      await accept('a', 'old');
+      await accept('b', 'steady');
+      push('a', 'old', 1); push('b', 'steady', 1); await tick();
+      expect(events).toEqual(['a:old', 'b:steady', 'push:a', 'push:b']);
+      await accept('a', 'new');
+      push('a', 'new', 1); push('b', 'steady', 2); await tick();
+      expect(events.slice(4)).toEqual(['a:new', 'push:a', 'push:b']);
+      push('a', 'old', 2); await tick();
+      expect(events).toHaveLength(7);
+      off();
+      await accept('a', 'last');
+      expect(events).toHaveLength(7);
+      expect(h.sockets).toHaveLength(1);
+    } finally { h.client.stop(); }
+  });
+});
 
 describe('network change probes', () => {
   it.each([true, false])('only post-hint valid inbound activity avoids the redundant probe (valid=%s)', async (valid) => {
@@ -725,6 +769,40 @@ describe('DeviceLinkClient', () => {
     await expect(p).resolves.toMatchObject({ ok: true, result: ['s1'] });
     h.client.stop();
   });
+  it("negotiates a tag catalog and returns the original session array to callers", async () => {
+    const h = makeHarness();
+    h.client.start();
+    await tick();
+    h.current().ack();
+    const p = h.client.invoke("dev-b", {
+      channel: 'local-db:sessions:list',
+      args: [200, "active", { includePinned: true }],
+    });
+    const sent = h.current().sent.find((e) => e.kind === 'invoke')!;
+    expect(sent.payload).toMatchObject({
+      args: [200, "active", { includePinned: true, tagCatalog: 1 }],
+    });
+    const tag = { id: "work", name: "Work" };
+    h.current().push({
+      v: PROTOCOL_VERSION,
+      kind: "invoke-result",
+      id: sent.id,
+      src: "dev-b",
+      payload: {
+        ok: true,
+        result: {
+          format: "session-tag-catalog-v1",
+          sessions: [{ id: "s1", tagIds: [0] }],
+          tags: [tag],
+        },
+      },
+    });
+    await expect(p).resolves.toEqual({
+      ok: true,
+      result: [{ id: "s1", tags: [tag] }],
+    });
+    h.client.stop();
+  });
 
   it('双方协商可靠传输后，大 invoke-result 分片并在累计 ACK 后停止重发', async () => {
     const h = makeHarness({ timing: { pingIntervalMs: 10_000 } });
@@ -1262,6 +1340,56 @@ describe('DeviceLinkClient', () => {
       if (mode === 'closed') expect(acks).toEqual([]);
       else expect(acks.at(-1)).toMatchObject({ ackSeq: mode === 'failure' ? 1 : 2 });
     } finally { h.client.stop(); }
+  });
+
+  it('separates fragment assembly from ordered delivery wait without logging payloads', async () => {
+    const debug = vi.fn();
+    const h = makeHarness({ timing: { pingIntervalMs: 60_000 },
+      logger: { debug, info: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+    let now = 100;
+    const clock = vi.spyOn(h.client as unknown as { monotonicNow(): number }, 'monotonicNow').mockImplementation(() => now);
+    try {
+      h.client.start(); await tick(); h.current().ack();
+      await establishInboundReliableLink(h, 'timing-stream');
+      const received = vi.fn();
+      h.client.onFrame(received);
+      const tail = encodeReliableFrames({ v: PROTOCOL_VERSION, kind: 'invoke-result', src: 'dev-b', id: 'timing-request',
+        payload: { ok: true, result: 'PRIVATE-PAYLOAD'.repeat(12_000) },
+      }, 'timing-stream', 2);
+      expect(tail.length).toBeGreaterThan(1);
+      h.current().push(tail[0]);
+      now += 300;
+      tail.slice(1).forEach(frame => h.current().push(frame));
+      await tick();
+      expect(received).not.toHaveBeenCalled();
+      now += 400;
+      encodeReliableFrames({ v: PROTOCOL_VERSION, kind: 'invoke', src: 'dev-b', id: 'head',
+        payload: { channel: 'local-db:sessions:list', args: [] },
+      }, 'timing-stream', 1).forEach(frame => h.current().push(frame));
+      await tick();
+      expect(received).toHaveBeenCalledTimes(2);
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining('assemblyMs=300 orderedWaitMs=400'));
+      expect(debug.mock.calls.flat().join(' ')).not.toContain('PRIVATE-PAYLOAD');
+    } finally { h.client.stop(); clock.mockRestore(); }
+  });
+
+  it('records first socket write separately from the response wait for legacy peers', async () => {
+    const debug = vi.fn();
+    const h = makeHarness({ timing: { pingIntervalMs: 60_000 },
+      logger: { debug, info: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+    let now = 100;
+    const clock = vi.spyOn(h.client as unknown as { monotonicNow(): number }, 'monotonicNow').mockImplementation(() => now);
+    const wall = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      h.client.start(); await tick(); h.current().ack();
+      const result = h.client.invoke('dev-b', { channel: 'local-db:sessions:list', args: [] });
+      const request = h.current().sent.at(-1)!;
+      now += 1500;
+      h.current().push({ v: PROTOCOL_VERSION, kind: 'invoke-result', src: 'dev-b', id: request.id,
+        payload: { ok: true, result: [] } });
+      await result;
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining('firstWriteWaitMs=0 afterFirstWriteMs=1500'));
+    } finally { h.client.stop(); clock.mockRestore(); wall.mockRestore(); }
   });
 
   it('bounds recovery stage logs, measures with monotonic time and records a fresh outbound handshake', async () => {
@@ -2601,7 +2729,7 @@ describe('DeviceLinkClient', () => {
     expect(sentListing).toMatchObject({
       kind: 'invoke',
       dst: 'dev-b',
-      payload: { channel: 'local-db:sessions:list', args: [] },
+      payload: { channel: 'local-db:sessions:list', args: [null, null, { tagCatalog: 1 }] },
     });
     expect(parseTransportPayload(sentListing.payload)).toBeNull();
     h.current().push({
@@ -2731,7 +2859,7 @@ describe('DeviceLinkClient', () => {
     expect(sentListing).toMatchObject({
       kind: 'invoke',
       dst: 'dev-b',
-      payload: { channel: 'local-db:sessions:list', args: [] },
+      payload: { channel: 'local-db:sessions:list', args: [null, null, { tagCatalog: 1 }] },
     });
     expect(parseTransportPayload(sentListing.payload)).toBeNull();
 
@@ -6731,6 +6859,83 @@ describe('DeviceLinkClient relay 拥塞断连(close 1013)', () => {
     } finally { h.client.stop(); vi.useRealTimers(); }
   });
 
+  it('paces a slow socket before any 1013 while another peer and control ACKs keep progressing', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness({ timing: { pingIntervalMs: 600_000 } });
+    try {
+      h.client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.current().ack();
+      for (const peer of ['a', 'b']) {
+        const opened = establishInboundReliableLink(h, `stream-${peer}`, 1, peer);
+        await vi.advanceTimersByTimeAsync(0);
+        await opened;
+      }
+      const socket = h.current();
+      socket.sent.length = 0;
+      const send = socket.send.bind(socket);
+      let peak = 0;
+      socket.send = (data) => {
+        socket.bufferedAmount += Buffer.byteLength(data);
+        peak = Math.max(peak, socket.bufferedAmount);
+        send(data);
+      };
+      // Repeat the incident's ~300KB catalog replies; a deliberately never ACKs.
+      for (let i = 0; i < 12; i++) h.client.sendInvokeResult('a', `catalog-${i}`, { ok: true, result: 'x'.repeat(295_000) });
+      const firstBurst = socket.sent.length;
+      h.client.sendInvokeResult('b', 'healthy-result', { ok: true, result: 'ok' });
+      socket.push(encodeReliableFrames({ v: 1, kind: 'push', src: 'a', payload: { channel: 'maker:event', payload: {} } }, 'stream-a', 1)[0]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(socket.sent.some((env) => (env.payload as { channel?: string })?.channel === DEVICE_LINK_TRANSPORT_ACK_CHANNEL)).toBe(true);
+      expect(firstBurst).toBeLessThan(12);
+      for (let window = 0; window < 24; window++) {
+        socket.bufferedAmount = Math.max(0, socket.bufferedAmount - 128 * 1024);
+        await vi.advanceTimersByTimeAsync(250);
+        if (window === 3) expect(socket.sent.some((env) => env.id === 'healthy-result')).toBe(true);
+      }
+      const ids = new Set(socket.sent.filter((env) => env.dst === 'a' && env.kind === 'invoke-result').map((env) => env.id));
+      expect(ids.size).toBe(12);
+      expect(peak).toBeLessThan(1024 * 1024);
+      expect(h.client.getStatus()).toBe('online');
+      expect(socket.closed).toBeNull();
+    } finally { h.client.stop(); vi.useRealTimers(); }
+  });
+
+  it('admits an atomic maximum-size reply after draining without pacing a fast empty socket', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness({ timing: { pingIntervalMs: 600_000 } });
+    try {
+      h.client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      h.current().ack();
+      const opened = establishInboundReliableLink(h, 'stream-a', 1, 'a');
+      await vi.advanceTimersByTimeAsync(0);
+      await opened;
+      const socket = h.current();
+      socket.sent.length = 0;
+      socket.bufferedAmount = 600 * 1024;
+      h.client.sendInvokeResult('a', 'max-reply', { ok: true, result: 'x'.repeat(4 * 1024 * 1024 - 1024) });
+      expect(socket.sent).toHaveLength(0);
+      socket.bufferedAmount = 0;
+      await vi.advanceTimersByTimeAsync(250);
+      const large = socket.sent.filter((env) => env.id === 'max-reply');
+      expect(large.length).toBeGreaterThan(1);
+      const last = parseTransportPayload(large.at(-1)!.payload)!;
+      expect(large.length).toBe(last.meta.segment!.total);
+      socket.push({ v: 1, kind: 'push', src: 'a', payload: {
+        channel: DEVICE_LINK_TRANSPORT_ACK_CHANNEL,
+        payload: { streamId: last.meta.streamId, ackSeq: last.meta.seq },
+      } });
+      const beforeLarge = socket.sent.length;
+      h.client.sendInvokeResult('a', 'fast-large', { ok: true, result: 'x'.repeat(4 * 1024 * 1024 - 1024) });
+      expect(socket.sent.length - beforeLarge).toBe(large.length);
+      const before = socket.sent.length;
+      for (let i = 0; i < 10; i++) h.client.sendInvokeResult('a', `fast-${i}`, { ok: true, result: 'ok' });
+      expect(socket.sent.length - before).toBe(10);
+      expect(socket.closed).toBeNull();
+    } finally { h.client.stop(); vi.useRealTimers(); }
+  });
+
   it('paces all reliable sends after 1013 without starving another peer or control ACKs', async () => {
     vi.useFakeTimers();
     const h = makeHarness({ timing: {
@@ -8743,4 +8948,81 @@ describe('定时重发的单趟预算(TRANSPORT_RETRY_PASS_BUDGET)', () => {
 
     h.client.stop();
   }, 10_000);
+});
+
+describe('physical addressing with explicit shared task scope', () => {
+  it('isolates ordinary remote control and two shared reliable streams on the same host', async () => {
+    const h = makeHarness({ timing: { pingIntervalMs: 60_000, requestTimeoutMs: 5_000, transportRetryIntervalMs: 50 } });
+    h.client.start(); await tick(); h.current().ack([SHARED_TASK_RELAY_CAPABILITY]);
+    const peers = ['desktop', sharedTaskHostPeer('task-a', 'desktop'), sharedTaskHostPeer('task-b', 'desktop')];
+    const received: string[] = [];
+    h.client.onFrame(env => { if (env.kind === 'push') received.push(env.src!); });
+    const inbound = (index: number, env: Envelope): Envelope => ({ ...env, src: 'desktop', dst: 'dev-self',
+      ...(index ? { sharedTask: { sharedTaskId: index === 1 ? 'task-a' : 'task-b', source: { role: 'host' as const }, target: { role: 'guest' as const, memberId: 'member' } } } : {}),
+    });
+    try {
+      for (let index = 0; index < peers.length; index++) {
+        const opened = h.client.openLink(peers[index], { controllerName: 'Test' });
+        const request = h.current().sent.filter(env => env.kind === 'link-open').at(-1)!;
+        expect(request.dst).toBe('desktop');
+        h.current().push(inbound(index, { v: 1, kind: 'link-accept', id: request.id, payload: {
+          appVersion: '1', allowlistHash: 'hash', capabilities: [DEVICE_LINK_CAPABILITY_RELIABLE_TRANSPORT], transportStreamId: 'same-remote-stream',
+        } }));
+        await opened;
+      }
+      // Same source device, stream ID and sequence must still be delivered once per scope.
+      for (let index = 0; index < peers.length; index++) {
+        const push = inbound(index, { v: 1, kind: 'push', payload: { channel: 'maker:event', payload: {} } });
+        for (const part of encodeReliableFrames(push, 'same-remote-stream', 1)) h.current().push(part);
+      }
+      await tick();
+      expect(received).toEqual(peers);
+      const acks = h.current().sent.filter(env => parseTransportAck(env));
+      expect(acks).toHaveLength(3);
+      expect(acks.map(env => env.sharedTask?.sharedTaskId)).toEqual([undefined, 'task-a', 'task-b']);
+      expect(acks.every(env => env.dst === 'desktop')).toBe(true);
+      const settled: number[] = [];
+      const requests = peers.map((peer, index) => h.client.invoke(peer, { channel: 'local-db:sessions:get', args: ['original-session'] })
+        .then(value => { settled.push(index); return value; }));
+      const outbound = h.current().sent.filter(env => env.kind === 'invoke');
+      expect(outbound).toHaveLength(3);
+      // A valid result or error for B cannot settle A's request, even with A's request ID.
+      h.current().push(inbound(2, { v: 1, kind: 'invoke-result', id: outbound[1].id, payload: { ok: true, result: 'wrong-scope' } }));
+      h.current().push({ v: 1, kind: 'relay-error', id: outbound[1].id,
+        sharedTask: { sharedTaskId: 'task-b', target: { role: 'host' } },
+        payload: { code: 'DEVICE_OFFLINE', message: 'offline', dst: 'desktop' } });
+      await tick(); expect(settled).toEqual([]);
+      for (let index = 0; index < peers.length; index++) {
+        const result = inbound(index, { v: 1, kind: 'invoke-result', id: outbound[index].id, payload: { ok: true, result: index } });
+        for (const part of encodeReliableFrames(result, 'same-remote-stream', 2)) h.current().push(part);
+      }
+      expect(await Promise.all(requests)).toEqual([0, 1, 2].map(result => ({ ok: true, result })));
+      const count = (index: number) => h.current().sent.filter(env => env.kind === 'invoke' && env.id === outbound[index].id).length;
+      const beforeAck = peers.map((_, index) => count(index));
+      const sent = parseTransportPayload(outbound[1].payload)!;
+      h.current().push(inbound(1, { v: 1, kind: 'push', payload: { channel: DEVICE_LINK_TRANSPORT_ACK_CHANNEL,
+        payload: { streamId: sent.meta.streamId, ackSeq: sent.meta.seq } } }));
+      await vi.waitFor(() => { expect(count(0)).toBeGreaterThan(beforeAck[0]); expect(count(2)).toBeGreaterThan(beforeAck[2]); });
+      expect(count(1)).toBe(beforeAck[1]);
+      h.client.closeLink(peers[1], 'user');
+      expect(h.current().sent.at(-1)).toMatchObject({ kind: 'link-close', dst: 'desktop', sharedTask: { sharedTaskId: 'task-a' } });
+      for (const index of [0, 2]) h.client.sendPush(peers[index], 'maker:event', {});
+      expect(h.current().sent.slice(-2).map(env => env.sharedTask?.sharedTaskId)).toEqual([undefined, 'task-b']);
+      expect(h.sockets).toHaveLength(1);
+    } finally { h.client.stop(); }
+  });
+  it('refuses shared frames on an old relay while allowing a legacy prefixed physical device', async () => {
+    const h = makeHarness({ timing: { pingIntervalMs: 60_000 } });
+    h.client.start(); await tick(); h.current().ack();
+    try {
+      await expect(h.client.openLink(sharedTaskHostPeer('task', 'desktop'), { controllerName: 'Test' })).rejects.toMatchObject({ code: 'VERSION_MISMATCH' });
+      expect(h.current().sent.some(env => env.kind === 'link-open')).toBe(false);
+      const device = 'shared-task~task~host';
+      const opened = h.client.openLink(device, { controllerName: 'Test' });
+      const frame = h.current().sent.find(env => env.kind === 'link-open')!;
+      expect(frame.dst).toBe(device); expect(frame.sharedTask).toBeUndefined();
+      h.current().push({ v: 1, kind: 'link-accept', id: frame.id, src: device, payload: { appVersion: '1', allowlistHash: 'hash' } });
+      await opened;
+    } finally { h.client.stop(); }
+  });
 });

@@ -44,7 +44,7 @@ interface RuntimeSetModelActiveSession {
 export interface RuntimeSetModelMaker {
   getSession: (sessionId: string) => RuntimeSetModelSession | undefined;
   listActiveSessions: () => RuntimeSetModelActiveSession[];
-  closeSession: (sessionId: string) => Promise<void>;
+  closeSession: (sessionId: string, reason?: 'runtime-refresh') => Promise<void>;
 }
 
 interface RuntimeSetModelLogger {
@@ -65,6 +65,8 @@ export interface ApplyRuntimeSetModelChangeInput {
   forceSessionRebuild?: boolean;
   /** Fail closed before an otherwise-required runtime replacement mutates route state. */
   assertSessionCloseSupported?: () => void;
+  /** Called after async preflight, immediately before the first setting side effect. */
+  admit?: () => void;
   isSessionInTurn?: (sessionId: string) => boolean;
   /**
    * 会话自己正在跑 turn 时的延迟生效登记(PendingCredentialSwitchService.register)。
@@ -225,6 +227,7 @@ export async function applyRuntimeSetModelChange(
   }
 
   if (!sess && requiresCodexThreadRelink) {
+    input.admit?.();
     await input.relinkCodexThread?.();
     if (providerId !== undefined) setSessionProvider(sessionId, nextProviderId);
     input.wakeSessionInputQueue?.(sessionId);
@@ -244,6 +247,7 @@ export async function applyRuntimeSetModelChange(
     // 把 route/model 的生效边界固定在 turn 结束；pending 收口只关闭本 Session，
     // 当前账号保持到回合边界，不能让工具续轮命中新账号。
     if (input.registerPendingCredentialSwitch) {
+      input.admit?.();
       await input.registerPendingCredentialSwitch(sessionId, {
         model,
         providerId: nextProviderId,
@@ -265,6 +269,7 @@ export async function applyRuntimeSetModelChange(
 
   if (sess && (shouldCloseSession || requiresCodexThreadRelink)) {
     input.assertSessionCloseSupported?.();
+    input.admit?.();
     if (isSelfBusy() && input.registerPendingCredentialSwitch) {
       // A required credential rebuild must also survive close failure: keeping
       // the old process alive cannot be treated as applying the new account.
@@ -302,7 +307,7 @@ export async function applyRuntimeSetModelChange(
         // A configuration reload targets this task's remote handle only. The
         // local-only credential helper deliberately does not close SSH handles.
         if (isSelfBusy()) throw new CredentialModeSwitchBusyError([sessionId]);
-        await withRehydrateCloseSuppressed(sessionId, () => maker.closeSession(sessionId));
+        await withRehydrateCloseSuppressed(sessionId, () => maker.closeSession(sessionId, 'runtime-refresh'));
       } else {
         await prepareLocalSessionCredentialModeSwitch({
           maker,
@@ -369,6 +374,7 @@ export async function applyRuntimeSetModelChange(
       : { status: 'applied' };
   }
 
+  input.admit?.();
   if (providerId !== undefined) {
     setSessionProvider(sessionId, nextProviderId);
     // 显式选源且无需切换 → 取消尚未兑现的 pending(后选覆盖先选)。

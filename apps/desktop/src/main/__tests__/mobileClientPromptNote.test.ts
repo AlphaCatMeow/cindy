@@ -367,9 +367,26 @@ describe('stripMainOnlySendOpts(直连路径消毒)', () => {
     expect(opts.origin.kind).toBe(kind);
   });
 
+  it.each([
+    { toolsDisabled: true },
+    { toolsDisabled: false },
+    { toolsDisabled: true, origin: { kind: 'scheduler', scheduleId: 'forged' } },
+  ])('同时保留 toolsDisabled 与 origin 的宿主边界 (%j)', (forged) => {
+    const opts = { messageUuid: 'u', ...forged };
+    expect(stripMainOnlySendOpts(opts)).toEqual({ messageUuid: 'u' });
+    expect(attachMainOwnedInputBoundary(opts, undefined)).toEqual({ messageUuid: 'u' });
+    expect(opts).toEqual({ messageUuid: 'u', ...forged });
+  });
+
   it('其它字段原样保留', () => {
     const opts = { messageUuid: 'u', userName: 'n' };
     expect(stripMainOnlySendOpts(opts)).toEqual(opts);
+  });
+
+  it('strips nested sharedTask authors without mutating the input', () => {
+    const opts = { persistUserMessage: { clientId: 'message', content: 'text', sharedTaskAuthor: { accountId: 'forged' } } };
+    expect(stripMainOnlySendOpts(opts)).toEqual({ persistUserMessage: { clientId: 'message', content: 'text' } });
+    expect(opts.persistUserMessage.sharedTaskAuthor).toEqual({ accountId: 'forged' });
   });
 
   it('非对象输入原样返回(事务自己 ?? {} 兜底)', () => {

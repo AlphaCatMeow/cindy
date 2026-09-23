@@ -106,10 +106,11 @@ describe("suggestion route IDs", () => {
 
 describe("home recommendation connection readiness", () => {
   it("hides both modes after disconnect despite a retained online device snapshot", () => {
-    const source = readTextLf(resolve(process.cwd(), "app/devices/index.tsx"), "utf8");
+    const source = readTextLf(resolve(process.cwd(), "src/session/HomeSurface.tsx"), "utf8");
     const expression = source.match(/ready: ([\s\S]*?),\n  \}\);\n  const newSessionDeviceOptions/)?.[1];
     expect(expression).toBeTruthy();
-    const evaluateReady = new Function("status", "activeConnectionIssue", "homeRecoveringDeviceIds", "selectedDeviceId", `
+    const evaluateReady = new Function("status", "activeConnectionIssue", "recoveringDeviceIds", "selectedDeviceId", `
+      const unresponsiveDevices = new Set(), rawDeviceConnectionStates = {};
       const initialHomeLoading = false, initialHomeError = null, connectionError = null;
       const indexedSearch = { status: 'idle' }, newSessionDisabled = false;
       const deviceModels = [{ deviceId: 'computer', canOpen: true }];
@@ -137,7 +138,7 @@ describe("home recommendation connection readiness", () => {
 
 describe("recommendation route target", () => {
   it("passes the checked computer explicitly for both empty and template actions", () => {
-    const source = readTextLf(resolve(process.cwd(), "app/devices/index.tsx"), "utf8");
+    const source = readTextLf(resolve(process.cwd(), "src/session/HomeSurface.tsx"), "utf8");
     const openBody = source.match(/const openNewSession = useCallback\([^\n]*=> \{([\s\S]*?)\n  \}, \[guardedPush, home.primaryDevice/)?.[1];
     const suggestedBody = source.match(/const openSuggestedSession = useCallback\([^\n]*=> \{([\s\S]*?)\n  \}, \[openNewSession/)?.[1];
     expect(openBody).toBeTruthy();

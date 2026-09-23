@@ -1,3 +1,5 @@
+import { FileTypeIcon } from '@/components/ui/file-type-icon';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 /**
  * ReviewTabBody — unified workspace and recorded-message review panel.
  *
@@ -1460,7 +1462,7 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
             desc={
               error === REVIEW_TURN_LOCAL_ONLY_ERROR
                 ? t('rightSidebar.review.turn.localOnly')
-                : error
+                : localizeReviewError(error)
             }
             actionLabel={t('rightSidebar.review.refresh')}
             onAction={refreshAll}
@@ -3523,8 +3525,9 @@ function ReviewFileTreeRow({
           'flex h-7 w-full min-w-0 items-center pr-2 text-left text-12 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]',
           active && 'bg-[var(--surface-chip)] text-[var(--text-primary)]',
         )}
-        style={{ paddingLeft: paddingLeft + 18 }}
+        style={{ paddingLeft }}
       >
+        <FileTypeIcon name={node.path} size={12} className="mr-1 shrink-0" />
         <span className="min-w-0 truncate">{node.name}</span>
       </button>
     </Tip>
@@ -3738,26 +3741,23 @@ function DiffViewModeToggle({
     { mode: 'split', label: t('rightSidebar.review.viewMode.split') },
   ];
   return (
-    <div
-      className="inline-flex h-6 shrink-0 rounded-full border border-[var(--border-default)] bg-[var(--surface)] p-0.5"
+    <SegmentedControl
       aria-label={t('rightSidebar.review.viewMode.aria')}
-    >
-      <SlidersHorizontal size={11} className="ml-1 self-center text-[var(--text-tertiary)]" />
-      {options.map((option) => (
-        <button
-          key={option.mode}
-          type="button"
-          onClick={() => onChange(option.mode)}
-          className={cn(
-            'rounded-full px-2 text-10 font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-            option.mode === mode &&
-              'bg-[var(--surface-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-menu)]',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
+      value={mode}
+      onValueChange={onChange}
+      height={24}
+      optionHeight={18}
+      optionClassName="px-2 text-10"
+      className="shrink-0"
+      prefix={
+        <SlidersHorizontal
+          size={11}
+          aria-hidden="true"
+          className="ml-1 self-center text-[var(--text-tertiary)]"
+        />
+      }
+      options={options.map((option) => ({ value: option.mode, label: option.label }))}
+    />
   );
 }
 
@@ -4588,6 +4588,7 @@ function FileRow({
           ) : (
             <ChevronRight size={12} className="shrink-0 text-[var(--text-tertiary)]" />
           )}
+          <FileTypeIcon name={diff.path} size={14} className="shrink-0 text-[var(--text-secondary)]" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-13 font-medium text-[var(--text-primary)]">
               {fileName}

@@ -20,6 +20,19 @@ test('Tailwind palette candidates report light/dark variants without expanding b
   assert.deepEqual(palette.map(hit => hit.value), ['bg-red-50', 'bg-red-950/30', 'text-red-600']);
   assert.ok(palette.every(hit => hit.disposition === 'report'));
   assert.deepEqual(inspect(`${renderer}components/Example.tsx`, '// text-red-500\n<div className="text-[var(--error-fg)]" />'), []);
+  // Braced className expressions (cn()/ternaries) are the same style context.
+  const assembly = inspect(`${renderer}components/Example.tsx`,
+    '<div className={cn("rounded-[4px]", danger && "bg-red-50 dark:text-red-600")} />');
+  assert.deepEqual(assembly.filter(hit => hit.rule === 'named-palette-candidate').map(hit => hit.value), ['bg-red-50', 'text-red-600']);
+  // Palette-shaped prose outside a className attribute is not a candidate:
+  // plain strings, other attributes, class assembly outside an attribute, and
+  // unparseable (fail-closed) expressions all stay out of the report.
+  for (const source of [
+    "const hint = '请用 text-red-500 标出错误';",
+    '<div aria-label="text-red-500" className="text-[var(--error-fg)]" />',
+    "const overlay = cn('bg-red-50');",
+    '<div className={"bg-red-50"',
+  ]) assert.deepEqual(inspect(`${renderer}components/Example.tsx`, source).filter(hit => hit.rule === 'named-palette-candidate'), [], source);
 });
 
 test('semantic colours, PR prose, URL and comments are not literals; numeric hex still is', () => {
@@ -270,11 +283,20 @@ test('worktree includes staged, unstaged and untracked source; commit mode exclu
   const summary = workflow.jobs.verify.steps[0];
   for (const checks of ['success','failure','cancelled','skipped']) {
     for (const shards of ['success','failure','cancelled','skipped']) {
-      const aggregate = spawnSync('bash',['-e','-c',summary.run], {env:{...process.env,VERIFY_CHECKS_RESULT:checks,LINUX_UNIT_SHARDS_RESULT:shards}});
+      // Windows' bash.exe is a WSL shim and does not forward Node's ad-hoc
+      // environment object. Set fixture values inside the shell script so
+      // this contract test behaves the same on Windows and Linux.
+      const aggregateScript = summary.run
+        .replaceAll('$VERIFY_CHECKS_RESULT', checks)
+        .replaceAll('$LINUX_UNIT_SHARDS_RESULT', shards);
+      const aggregate = spawnSync('bash',['-e','-c',aggregateScript]);
       assert.equal(aggregate.status === 0, checks === 'success' && shards === 'success');
     }
   }
-  const propagated = spawnSync('bash',['-e','-c',summary.run], {env:{...process.env,VERIFY_CHECKS_RESULT:failed.status ? 'failure' : 'success',LINUX_UNIT_SHARDS_RESULT:'success'}});
+  const propagatedScript = summary.run
+    .replaceAll('$VERIFY_CHECKS_RESULT', failed.status ? 'failure' : 'success')
+    .replaceAll('$LINUX_UNIT_SHARDS_RESULT', 'success');
+  const propagated = spawnSync('bash',['-e','-c',propagatedScript]);
   assert.notEqual(propagated.status,0);
   fs.writeFileSync(path.join(temp,'scripts/hardcoded-color-exemptions.json'),'{bad json');
   assert.throws(()=>audit({root:temp,baseRef:commit,worktree:true}));
@@ -388,7 +410,8 @@ test('CI design commands feed the existing verify job and preserve Windows aggre
     assert.ok(job.steps.some(s=>s.name==='Run companion database regressions' && s.if==='matrix.shard == 1'));
   }
   for(const result of ['success','failure','cancelled','skipped']) {
-    const run=spawnSync('bash',['-e','-c',windows.steps[0].run],{env:{...process.env,WINDOWS_UNIT_SHARDS_RESULT:result}});
+    const windowsScript = windows.steps[0].run.replaceAll('$WINDOWS_UNIT_SHARDS_RESULT', result);
+    const run=spawnSync('bash',['-e','-c',windowsScript]);
     assert.equal(run.status===0,result==='success');
   }
 });

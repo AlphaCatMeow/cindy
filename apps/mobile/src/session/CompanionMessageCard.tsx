@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState, type ReactNode } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   FileText,
   GitPullRequest,
@@ -8,6 +8,8 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   Square,
+  MessageCircle,
+  ChevronRight,
 } from 'lucide-react-native';
 import {
   MAX_STATUS_QUERIES,
@@ -18,9 +20,10 @@ import {
   type PrStatusResult,
 } from '@cindy/maker-shared';
 import { useTranslation } from 'react-i18next';
-import type {
-  BotDelegationListResult,
-  BotDelegationCancelResult,
+import {
+  BOT_DELEGATION_STATUSES,
+  type BotDelegationListResult,
+  type BotDelegationCancelResult,
 } from '@cindy/maker-shared/botDelegation';
 import type { BotCollaborationMeta } from '@cindy/maker-shared/botCollaboration';
 import { Text } from '@/components/AppText';
@@ -31,7 +34,39 @@ import { spacing, radius, typeScale, iconSize } from '@/theme/tokens';
 import type { NormalizedRemoteMessage } from './messageNormalize';
 import { useRemoteCompanionQuery } from './useRemoteCompanionQuery';
 
+class CompanionRenderBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode; resetKey: string },
+  { failed: boolean; resetKey: string }
+> {
+  state = { failed: false, resetKey: this.props.resetKey };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  static getDerivedStateFromProps(
+    props: { resetKey: string },
+    state: { failed: boolean; resetKey: string },
+  ) {
+    return props.resetKey === state.resetKey ? null : { failed: false, resetKey: props.resetKey };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 export function CompanionMessageCard({ message }: { message: NormalizedRemoteMessage }) {
+  const { t } = useTranslation();
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <CompanionRenderBoundary
+      fallback={<Text style={styles.note}>{t('devices.companions.actionFailed')}</Text>}
+      resetKey={message.key}
+    >
+      <CompanionMessageCardContent message={message} />
+    </CompanionRenderBoundary>
+  );
+}
+
+function CompanionMessageCardContent({ message }: { message: NormalizedRemoteMessage }) {
   const { t } = useTranslation();
   const router = useRouter();
   const params = useLocalSearchParams<{ deviceId?: string }>();
@@ -58,7 +93,7 @@ export function CompanionMessageCard({ message }: { message: NormalizedRemoteMes
   return (
     <Pressable
       accessibilityRole="button"
-      style={styles.card}
+      style={styles.privateTrace}
       onPress={() =>
         router.push({
           pathname: '/companions/direct/[threadId]',
@@ -70,12 +105,16 @@ export function CompanionMessageCard({ message }: { message: NormalizedRemoteMes
         })
       }
     >
-      <Text style={styles.title}>
+      <MessageCircle size={iconSize.md} color={styles.note.color} />
+      <View style={{ flex: 1 }}>
+      <Text style={styles.note}>
         {t('devices.companions.privateChat', { name: meta.peerBotName })}
       </Text>
       <Text numberOfLines={2} style={styles.note}>
         {meta.preview}
       </Text>
+      </View>
+      <ChevronRight size={iconSize.md} color={styles.note.color} />
     </Pressable>
   );
 }
@@ -99,7 +138,14 @@ function CompanionTaskCard({
     'maker:bot-delegations:list',
     [parentSessionId],
   );
-  const row = value?.ok ? value.delegations.find((item) => item.id === meta.delegationId) : null;
+  const row =
+    value?.ok && Array.isArray(value.delegations)
+      ? (value.delegations.find((item) => item.id === meta.delegationId) ?? null)
+      : null;
+  const status =
+    row && (BOT_DELEGATION_STATUSES as readonly string[]).includes(row.status)
+      ? row.status
+      : 'unknown';
   const [pending, setPending] = useState(false);
   const [actionFailed, setActionFailed] = useState(false);
   const [showPrs, setShowPrs] = useState(false);
@@ -206,6 +252,12 @@ function CompanionTaskCard({
       setPending(false);
     }
   };
+  const rememberActionWidth = (event: LayoutChangeEvent) => {
+    const width = event.nativeEvent?.layout?.width;
+    if (typeof width !== 'number' || !Number.isFinite(width)) return;
+    const measuredWidth = Math.ceil(width);
+    setActionWidth((current) => Math.max(current, measuredWidth));
+  };
   return (
     <View style={styles.card} testID="companion.taskCard">
       <View style={styles.header}>
@@ -219,15 +271,15 @@ function CompanionTaskCard({
             (row?.status === 'failed' || row?.status === 'timed-out') && styles.error,
           ]}
         >
-          {t(`devices.companions.status.${row?.status || 'unknown'}`)}
+          {t(`devices.companions.status.${status}`)}
         </Text>
       </View>
       <View style={styles.metadata}>
         {duration ? <Text style={styles.note}>{duration}</Text> : null}
-        {(row?.artifacts?.length ?? 0) > 0 ? (
+        {Array.isArray(row?.artifacts) && row.artifacts.length > 0 ? (
           <Text style={styles.note}>
             {t('devices.companions.artifactCount', {
-              count: row!.artifacts.length,
+              count: row.artifacts.length,
             })}
           </Text>
         ) : null}
@@ -269,11 +321,7 @@ function CompanionTaskCard({
           >
             {({ pressed }) => (
               <View
-                onLayout={(event) =>
-                  setActionWidth((width) =>
-                    Math.max(width, Math.ceil(event.nativeEvent.layout.width)),
-                  )
-                }
+                onLayout={rememberActionWidth}
                 style={[
                   styles.action,
                   { minWidth: actionWidth },
@@ -303,11 +351,7 @@ function CompanionTaskCard({
           >
             {({ pressed }) => (
               <View
-                onLayout={(event) =>
-                  setActionWidth((width) =>
-                    Math.max(width, Math.ceil(event.nativeEvent.layout.width)),
-                  )
-                }
+                onLayout={rememberActionWidth}
                 style={[
                   styles.action,
                   { minWidth: actionWidth },
@@ -329,11 +373,7 @@ function CompanionTaskCard({
           >
             {({ pressed }) => (
               <View
-                onLayout={(event) =>
-                  setActionWidth((width) =>
-                    Math.max(width, Math.ceil(event.nativeEvent.layout.width)),
-                  )
-                }
+                onLayout={rememberActionWidth}
                 style={[
                   styles.action,
                   { minWidth: actionWidth },
@@ -382,7 +422,8 @@ function CompanionTaskCard({
 
 const makeStyles = (colors: ThemeColors) =>
   StyleSheet.create({
-    card: {
+    privateTrace: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, paddingVertical: spacing.sm },
+  card: {
       marginVertical: spacing.sm,
       padding: spacing.md,
       gap: spacing.xs,
