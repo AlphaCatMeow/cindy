@@ -64,6 +64,9 @@ describe("IOSSimulator native sidecar sandbox", () => {
       createIOSSimulatorNativeSidecarSandboxProfile({
         policy: createIOSSimulatorNativeSidecarSandboxPolicy({
           platform: "darwin",
+          // Keep this missing-Xcode check independent of the test host's paths.
+          homeDirectory: "/Users/example",
+          temporaryRoot: DARWIN_TEMPORARY_ROOT,
         }),
         binaryPath: "/opt/cindy/ios-simulator-sidecar",
         simulatorUdid: UDID,

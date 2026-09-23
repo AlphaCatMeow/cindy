@@ -84,6 +84,9 @@ describe("Native inspected toolchain binding", () => {
       sandboxPolicy: createIOSSimulatorNativeSidecarSandboxPolicy({
         required: false,
         platform: "darwin",
+        // Model macOS paths explicitly, even when the test host is Windows.
+        homeDirectory: "/Users/example",
+        temporaryRoot: "/private/tmp",
       }),
     });
     vi.mocked(createNodeIOSSimulatorNativeSidecarLauncher).mockClear();
