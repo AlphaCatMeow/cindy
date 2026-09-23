@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import codexPackage from '../../../../tools/codex-package/latest.json';
 
-import { BOOTSTRAP_SH } from '../bootstrap/bootstrap-script.js';
+import { BOOTSTRAP_SH, VERIFY_CODEX_LAYOUT_SH } from '../bootstrap/bootstrap-script.js';
 import {
   installRemoteAgent,
   PINNED_CLAUDE_CODE_VERSION,
@@ -33,6 +38,9 @@ describe('remote agent installer', () => {
 
     expect(result.ready).toBe(true);
     expect(result.installedVersion).toBe(PINNED_CODEX_RELEASE_VERSION);
+    expect(PINNED_CODEX_RELEASE_VERSION).toBe(codexPackage.version);
+    // Full-package install.sh preserves this alias for legacy daemon callers.
+    expect(result.binaryPath).toBe('/home/u/.xdt-server/v1/codex-home/packages/standalone/current/codex');
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toContain(`'${PINNED_CODEX_RELEASE_VERSION}'`);
     expect(calls[0].input).toBe(BOOTSTRAP_SH);
@@ -41,6 +49,47 @@ describe('remote agent installer', () => {
   it('runs install.sh with --release when a Codex release arg is present', () => {
     expect(BOOTSTRAP_SH).toContain('INSTALLER_URL="https://github.com/openai/codex/releases/download/rust-v$CODEX_RELEASE/install.sh"');
     expect(BOOTSTRAP_SH).toContain('sh "$INSTALLER_TMP" --release "$CODEX_RELEASE"');
+  });
+
+  it('keeps the generated bootstrap valid bash', () => {
+    const result = spawnSync('bash', ['-n'], { input: BOOTSTRAP_SH, encoding: 'utf8' });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it.each([
+    { name: 'legacy standalone', os: 'Darwin', legacy: true, missing: '', ok: true },
+    { name: 'complete macOS package', os: 'Darwin', legacy: false, missing: 'codex-resources/bwrap', ok: true },
+    { name: 'complete Linux package', os: 'Linux', legacy: false, missing: '', ok: true },
+    { name: 'missing code-mode host', os: 'Darwin', legacy: false, missing: 'bin/codex-code-mode-host', ok: false },
+    { name: 'missing ripgrep', os: 'Darwin', legacy: false, missing: 'codex-path/rg', ok: false },
+    { name: 'missing package manifest', os: 'Darwin', legacy: false, missing: 'codex-package.json', ok: false },
+    { name: 'missing Linux sandbox', os: 'Linux', legacy: false, missing: 'codex-resources/bwrap', ok: false },
+  ])('checks $name using the remote layout guard', ({ os: remoteOs, legacy, missing, ok }) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'cindy-ssh-codex-layout-'));
+    try {
+      const files = legacy ? ['codex'] : [
+        'codex', 'codex-package.json', 'bin/codex', 'bin/codex-code-mode-host',
+        'codex-path/rg', 'codex-resources/bwrap',
+      ];
+      if (!legacy) mkdirSync(path.join(root, 'codex-resources'), { recursive: true });
+      for (const file of files.filter((file) => file !== missing)) {
+        const destination = path.join(root, file);
+        mkdirSync(path.dirname(destination), { recursive: true });
+        writeFileSync(destination, '#!/bin/sh\nexit 0\n');
+        chmodSync(destination, 0o755);
+      }
+      const result = spawnSync('bash', ['-c', `
+        BIN_PATH="$PWD/codex"
+        uname() { printf '%s\n' '${remoteOs}'; }
+        ${VERIFY_CODEX_LAYOUT_SH}
+        verify_codex_layout
+      `], { cwd: root, encoding: 'utf8' });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(ok ? 0 : 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('pins Claude Code for probe and install, and rejects a stale sentinel version', async () => {
