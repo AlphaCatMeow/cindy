@@ -2565,6 +2565,13 @@
         "modelCount": "{{count}} models configured",
         "modelsAutomatic": "Model details are imported automatically. Adjust individual models in the model list.",
         "manualModel": "Model IDs (if discovery is unavailable)"
+      },
+      "byok": {
+        "managed": "Managed by your organization",
+        "refresh": "Refresh enterprise settings",
+        "refreshFailed": "Enterprise settings could not be refreshed. Try again later.",
+        "pending": "Preparing credentials",
+        "unavailable": "Temporarily unavailable"
       }
     },
     "experimental": {

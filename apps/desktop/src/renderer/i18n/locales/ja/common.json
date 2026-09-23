@@ -2564,6 +2564,13 @@
         "modelCount": "{{count}} 個のモデルを設定済み",
         "modelsAutomatic": "モデル情報は自動取得されます。個別の設定はモデル一覧から変更できます。",
         "manualModel": "モデル ID（自動取得できない場合）"
+      },
+      "byok": {
+        "managed": "組織が接続とモデルを管理",
+        "refresh": "組織設定を更新",
+        "refreshFailed": "組織設定を更新できませんでした。しばらくしてから再試行してください。",
+        "pending": "認証情報を準備中",
+        "unavailable": "一時的に利用できません"
       }
     },
     "experimental": {

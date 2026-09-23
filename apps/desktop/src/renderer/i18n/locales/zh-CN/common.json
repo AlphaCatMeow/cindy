@@ -2564,6 +2564,13 @@
         "modelCount": "已配置 {{count}} 个模型",
         "modelsAutomatic": "模型资料自动获取。单个模型的设置在模型列表中调整。",
         "manualModel": "模型 ID（无法自动获取时填写）"
+      },
+      "byok": {
+        "managed": "由企业管理连接与模型",
+        "refresh": "刷新企业配置",
+        "refreshFailed": "企业配置暂时无法刷新，请稍后重试。",
+        "pending": "凭据准备中",
+        "unavailable": "暂时不可用"
       }
     },
     "experimental": {
