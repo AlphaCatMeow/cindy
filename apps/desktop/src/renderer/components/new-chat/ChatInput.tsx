@@ -1949,7 +1949,13 @@ export function ChatInput({
   // 已有 device-link 任务在断链时仍有 pinned deviceId + renderer outbox 可接住发送，
   // 不能因为被控端 provider 目录暂时拉不到就禁用 composer。远程草稿没有既有 session
   // 可以排队，仍与本地任务一样保留来源门禁。
-  const enforceConnectedSourceGate = !sessionId || !deviceLinkDeviceId;
+  // model/list only advertises selectable models. An unchanged native SSH route
+  // may resume a hidden model; main verifies the persisted host/thread/route.
+  const preserveSshCodexRoute = !!sessionId && !!sshCodexHostId &&
+    !!activeModel && activeModel === (runtimeEffective?.model ?? initialModel) &&
+    (activeProviderId ?? null) === (runtimeEffective ? runtimeEffective.providerId ?? null : initialProviderId ?? null) &&
+    (!activeProviderId || activeProviderId === 'openai');
+  const enforceConnectedSourceGate = (!sessionId || !deviceLinkDeviceId) && !preserveSshCodexRoute;
   const remoteModelListBlocked =
     (!!deviceLinkDeviceId && enforceConnectedSourceGate && remoteModelListStatus !== 'ready') ||
     (!!sshCodexHostId && sshCodexProviders.status !== 'ready');
@@ -1984,6 +1990,7 @@ export function ChatInput({
   const selectedSourceDisconnected =
     !!sessionId &&
     !deviceLinkDeviceId &&
+    !preserveSshCodexRoute &&
     isSelectedSourceDisconnected({
       providers,
       agent: currentModelAgentKind,

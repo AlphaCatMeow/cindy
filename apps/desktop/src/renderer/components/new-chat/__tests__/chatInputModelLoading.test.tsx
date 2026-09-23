@@ -11,6 +11,7 @@ import * as draftMemory from '@/state/newMakerDraft';
 
 const h = vi.hoisted(() => ({ t: (key: string) => key, confirm: vi.fn(), editor: null as Editor | null, listening: false, stop: vi.fn().mockResolvedValue(undefined),
   setModel: vi.fn(), selectModel: undefined as undefined | ((id: string) => Promise<void | boolean>), remoteProviders: [] as ProviderView[],
+  remoteStatus: 'ready' as 'ready' | 'loading' | 'error',
 }));
 vi.mock('react-i18next', async (original) => ({ ...await original<typeof import('react-i18next')>(), useTranslation: () => ({ t: h.t }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
@@ -19,7 +20,7 @@ vi.mock('../ModelSelector', async (original) => ({ ...await original<typeof impo
   h.selectModel = onModelChange;
   return <span data-testid="model-selector">{modelId}</span>;
 } }));
-vi.mock('@/hooks/useSshCodexProviders', () => ({ useSshCodexProviders: () => ({ providers: h.remoteProviders, status: 'ready', refresh: () => {} }) }));
+vi.mock('@/hooks/useSshCodexProviders', () => ({ useSshCodexProviders: () => ({ providers: h.remoteProviders, status: h.remoteStatus, refresh: () => {} }) }));
 vi.mock('../ExtraDirsButton', () => ({ ExtraDirsButton: () => null }));
 vi.mock('../PermissionSelector', () => ({ PermissionSelector: () => <span data-testid="permission-selector" /> }));
 vi.mock('../NewGoalDialog', () => ({ NewGoalDialog: () => null }));
@@ -66,7 +67,7 @@ const attachments: ComponentProps<typeof ChatInput>['attachmentState'] = {
   removeFile: noOp, updateFile: noOp, discardFiles: noOp, clearFiles: noOp, restoreFiles: (files) => [...files],
 };
 beforeEach(() => { h.listening = false; h.stop.mockClear(); window.electronAPI = api; vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
-afterEach(() => { cleanup(); h.remoteProviders = []; h.setModel.mockReset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); h.remoteProviders = []; h.remoteStatus = 'ready'; h.setModel.mockReset(); h.confirm.mockReset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const props = {
   sessionId: 'loading-test', initialWorkingDir: '/workspace', runtimeAgentKind: 'codex' as const,
@@ -109,6 +110,56 @@ it('sends a remote-only Codex model when the controller has no connected provide
   await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
   expect(onSend.mock.calls[0][1]).toBe('remote-only');
   expect(onSend.mock.calls[0][6]).toEqual(expect.objectContaining({ providerId: 'openai' }));
+});
+
+it.each([
+  ['button', 'openai'], ['Enter', 'openai'], ['button', null], ['Enter', null],
+] as const)('sends a hidden existing SSH model through %s with provider %s', async (entry, providerId) => {
+  h.remoteProviders = [sshNativeCodexProvider([sshModel('remote-new')])];
+  const onSend = vi.fn().mockResolvedValue(true);
+  const view = render(<ChatInput {...props} sessionId="ssh-hidden" deviceLinkDeviceId={null} remoteHostId="builder"
+    initialModel="remote-old" initialProviderId={providerId} initialEffort="low" onSend={onSend} />);
+  await waitFor(() => expect(view.container.querySelector('[contenteditable]')).not.toBeNull());
+  await act(async () => { h.editor!.commands.setContent('<p>Continue old task</p>'); });
+  const send = screen.getByRole('button', { name: 'newChat.sendButton.send' }) as HTMLButtonElement;
+  expect(send.disabled).toBe(false);
+  await act(async () => {
+    if (entry === 'button') fireEvent.click(send);
+    else fireEvent.keyDown(view.container.querySelector('[contenteditable]')!, { key: 'Enter', code: 'Enter' });
+  });
+  await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  expect(onSend.mock.calls[0][1]).toBe('remote-old');
+  expect(onSend.mock.calls[0][6]).toEqual(expect.objectContaining({ providerId }));
+  expect(h.confirm).not.toHaveBeenCalled();
+});
+
+it.each(['loading', 'error'] as const)('keeps SSH catalog %s blocked for an existing hidden model', async (status) => {
+  h.remoteStatus = status;
+  const onSend = vi.fn();
+  const view = render(<ChatInput {...props} sessionId="ssh-hidden" deviceLinkDeviceId={null} remoteHostId="builder"
+    initialModel="remote-old" initialProviderId="openai" initialEffort="low" onSend={onSend} />);
+  await waitFor(() => expect(view.container.querySelector('[contenteditable]')).not.toBeNull());
+  await act(async () => { h.editor!.commands.setContent('<p>Continue old task</p>'); });
+  expect((screen.getByRole('button', { name: 'newChat.sendButton.send' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => {
+    fireEvent.keyDown(view.container.querySelector('[contenteditable]')!, { key: 'Enter', code: 'Enter' });
+  });
+  expect(onSend).not.toHaveBeenCalled();
+});
+
+it.each(['draft', 'other-provider'] as const)('does not exempt a hidden SSH model for %s', async (kind) => {
+  h.remoteProviders = [sshNativeCodexProvider([sshModel('remote-new')])];
+  const onSend = vi.fn();
+  const view = render(<ChatInput {...props} sessionId={kind === 'draft' ? undefined : 'ssh-hidden'}
+    deviceLinkDeviceId={null} remoteHostId="builder" initialModel="remote-old"
+    initialProviderId={kind === 'draft' ? 'openai' : 'custom'} initialEffort="low" onSend={onSend} />);
+  await waitFor(() => expect(view.container.querySelector('[contenteditable]')).not.toBeNull());
+  await act(async () => { h.editor!.commands.setContent('<p>New route</p>'); });
+  expect((screen.getByRole('button', { name: 'newChat.sendButton.send' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => {
+    fireEvent.keyDown(view.container.querySelector('[contenteditable]')!, { key: 'Enter', code: 'Enter' });
+  });
+  expect(onSend).not.toHaveBeenCalled();
 });
 
 it.each(['button', 'Enter', 'voice'] as const)(
