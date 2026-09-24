@@ -16,6 +16,7 @@ import {
   recordRunningTokenRate,
   saveCachedRateHistory,
   RATE_SAMPLE_FRESH_MS,
+  type RateHistory,
 } from "@cindy/maker-shared/usage-format";
 import { useTheme, useThemedStyles, type ThemeColors } from "@/theme";
 import {
@@ -51,6 +52,7 @@ export function RunningTokenRatePopover({
   label,
   availableRegion,
   enabled = true,
+  history: managedHistory,
 }: {
   sessionKey: string;
   startedAt: number | null;
@@ -61,6 +63,8 @@ export function RunningTokenRatePopover({
   label: string;
   availableRegion?: LayoutRect;
   enabled?: boolean;
+  /** When the status row already sampled, reuse that history instead of recording twice. */
+  history?: RateHistory;
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
@@ -131,14 +135,15 @@ export function RunningTokenRatePopover({
   );
   const longPressed = useRef(false);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const [history, setHistory] = useState(() => {
+  const [internalHistory, setInternalHistory] = useState(() => {
     const cached = loadCachedRateHistory(sessionKey);
     return cached
       ? { ...cached, baseline: null, lastReport: null, latestRate: null }
       : emptyRateHistory(null);
   });
   useEffect(() => {
-    setHistory((previous) =>
+    if (managedHistory) return;
+    setInternalHistory((previous) =>
       recordRunningTokenRate(previous, {
         startedAt,
         outputTokens,
@@ -146,10 +151,12 @@ export function RunningTokenRatePopover({
         generationReliable,
       }),
     );
-  }, [startedAt, outputTokens, generationDurationMs, generationReliable]);
+  }, [managedHistory, startedAt, outputTokens, generationDurationMs, generationReliable]);
+  const history = managedHistory ?? internalHistory;
   useEffect(() => {
-    saveCachedRateHistory(sessionKey, history);
-  }, [sessionKey, history]);
+    if (managedHistory) return;
+    saveCachedRateHistory(sessionKey, internalHistory);
+  }, [managedHistory, sessionKey, internalHistory]);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (history.latestSampleAt === undefined) return;

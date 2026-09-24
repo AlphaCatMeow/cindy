@@ -13,6 +13,7 @@ import ts from "typescript";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { clearRateHistoryCache, loadCachedRateHistory } from "@cindy/maker-shared/usage-format";
+import { useRunningTokenRateHistory } from "../session/useRunningTokenRateHistory";
 import { RunningTokenRatePopover } from "@/session/RunningTokenRatePopover";
 import { keyboardControlRegion, type ReservedRegion } from "@/platform/windowGeometry";
 
@@ -142,6 +143,7 @@ const bindings = {
   iconSize: {},
   iconStroke: {},
   RunningTokenRatePopover,
+  useRunningTokenRateHistory,
   formatComposerActivityElapsed: () => "1s",
   formatComposerActivityTokenCount: () => "100",
 };

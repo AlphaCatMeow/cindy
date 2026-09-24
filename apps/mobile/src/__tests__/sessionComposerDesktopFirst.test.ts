@@ -223,12 +223,15 @@ describe('mobile session composer desktop-first surface', () => {
     expect(source).toContain('reconnectAttempt={remoteSessionRunStatus.reconnectAttempt}');
     expect(source).toContain('sideTaskRunning={remoteSessionRunStatus.sideTaskRunning}');
     expect(source).toContain('startedAt={composerActivityStartedAtMs}');
+    expect(source).toContain('rateStartedAt={remoteSessionRunStatus.startedAt}');
+    expect(source).toContain('streaming={isSessionStreaming}');
+    expect(source).toContain('startedAt: samplerStartedAt,');
     expect(source).toContain('tokenUsage={composerActivityTokenUsage}');
     expect(source).toContain('outputTokens={remoteSessionRunStatus.outputTokens}');
     expect(source).toContain('generationDurationMs={remoteSessionRunStatus.generationDurationMs}');
     expect(source).toContain('ArrowDown');
     expect(source).toContain('const showElapsedOnly = sideTaskRunning || Boolean(reconnectAttempt);');
-    expect(source).toContain('const canShowRateDetails = rateValue !== null;');
+    expect(source).toContain('const canShowRateDetails = !showElapsedOnly');
     expect(source).toContain('enabled={canShowRateDetails}');
     expect(source).toContain('generationActive={remoteSessionRunStatus.generationActive}');
     expect(source).toContain('const showUsageMeta = !showElapsedOnly && (Boolean(rateText) || tokenUsage > 0);');

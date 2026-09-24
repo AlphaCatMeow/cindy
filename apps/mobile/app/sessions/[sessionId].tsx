@@ -1,5 +1,6 @@
 import { RunningTokenRatePopover } from '@/session/RunningTokenRatePopover';
 import { companionConversationItems } from '@/session/companionConversationPresentation';
+import { useRunningTokenRateHistory } from '@/session/useRunningTokenRateHistory';
 import { HomeHeaderGlassButton } from '@/session/HomeHeaderGlassButton';
 import { HomeNewTaskButton } from '@/session/HomeNewTaskButton';
 import { RecentMessageHistories, MessageHistoryOverlay } from '@/session/RecentMessageHistories';
@@ -9479,6 +9480,8 @@ export default function SessionScreen() {
                     reconnectAttempt={remoteSessionRunStatus.reconnectAttempt}
                     sideTaskRunning={remoteSessionRunStatus.sideTaskRunning}
                     startedAt={composerActivityStartedAtMs}
+                    rateStartedAt={remoteSessionRunStatus.startedAt}
+                    streaming={isSessionStreaming}
                     tokenUsage={composerActivityTokenUsage}
                     outputTokens={remoteSessionRunStatus.outputTokens}
                     generationDurationMs={remoteSessionRunStatus.generationDurationMs}
@@ -11230,6 +11233,8 @@ function ComposerActivityStatus({
   reconnectAttempt,
   sideTaskRunning,
   startedAt,
+  rateStartedAt = startedAt,
+  streaming = false,
   tokenUsage,
   outputTokens,
   generationDurationMs,
@@ -11237,11 +11242,13 @@ function ComposerActivityStatus({
   generationActive,
   visible,
 }: {
-  availableRegion: LayoutRect;
+  availableRegion?: LayoutRect;
   sessionKey: string;
   reconnectAttempt: RemoteSessionRunStatus['reconnectAttempt'];
   sideTaskRunning: boolean;
   startedAt: number | null;
+  rateStartedAt?: number | null;
+  streaming?: boolean;
   tokenUsage: number;
   outputTokens: number;
   generationDurationMs: number;
@@ -11267,6 +11274,18 @@ function ComposerActivityStatus({
     return () => clearInterval(interval);
   }, [startedAt, visible]);
 
+  // Elapsed uses the local fallback. Sampling keeps the raw remote start so a
+  // terminal null is not a new turn, and a local send is not the previous rate.
+  const samplerStartedAt = rateStartedAt === undefined ? startedAt : rateStartedAt;
+  const rateHistory = useRunningTokenRateHistory({
+    sessionKey,
+    startedAt: samplerStartedAt,
+    outputTokens,
+    generationDurationMs,
+    generationReliable: generationReliable && visible && !reconnectAttempt && !sideTaskRunning,
+    streaming,
+  });
+
   if (!visible) return null;
 
   const elapsedText = formatComposerActivityElapsed(elapsed);
@@ -11274,16 +11293,17 @@ function ComposerActivityStatus({
   const tokenText = t('session.screen.tokenCount', { tokens: tokenCount });
   const tokenA11yText = t('session.screen.tokenCountFull', { tokens: tokenCount });
   const showElapsedOnly = sideTaskRunning || Boolean(reconnectAttempt);
-  const rateValue = formatComposerActivityRateValue(
-    outputTokens,
-    generationDurationMs,
-    generationReliable && !showElapsedOnly,
-  );
+  const rateValue = formatComposerActivityRateValue(showElapsedOnly ? null : rateHistory.latestRate);
+  const canShowRateDetails = !showElapsedOnly
+    && generationReliable
+    && outputTokens > 0
+    && Number.isFinite(outputTokens)
+    && Number.isFinite(generationDurationMs)
+    && generationDurationMs > 0;
   const rateText = rateValue
     ? t('session.screen.tokenRate', { rate: rateValue })
     : null;
   const showUsageMeta = !showElapsedOnly && (Boolean(rateText) || tokenUsage > 0);
-  const canShowRateDetails = rateValue !== null;
   const usageMeta = (
     <View style={[styles.composerActivityPill, styles.composerActivityMeta]}>
       <BlurBackdrop intensity={20} overlayColor={colors.surfaceTranslucent} style={styles.composerActivityPillBackdrop} />
@@ -11346,7 +11366,8 @@ function ComposerActivityStatus({
         enabled={canShowRateDetails}
         availableRegion={availableRegion}
         sessionKey={sessionKey}
-        startedAt={startedAt}
+        startedAt={samplerStartedAt}
+        history={rateHistory}
         outputTokens={outputTokens}
         generationDurationMs={generationDurationMs}
         generationReliable={generationReliable && !showElapsedOnly}
@@ -11376,16 +11397,9 @@ function formatComposerActivityTokenCount(tokenUsage: number): string {
   return safeTokens >= 1000 ? `${(safeTokens / 1000).toFixed(1)}k` : `${safeTokens}`;
 }
 
-function formatComposerActivityRateValue(
-  outputTokens: number,
-  durationMs: number,
-  generationReliable: boolean,
-): string | null {
-  if (!generationReliable || outputTokens <= 0 || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return null;
-  }
-  const rate = (outputTokens * 1000) / durationMs;
-  if (!Number.isFinite(rate) || rate <= 0) return null;
+function formatComposerActivityRateValue(rate: number | null): string | null {
+  if (rate === null || !Number.isFinite(rate) || rate < 0) return null;
+  if (rate === 0) return '0';
   return rate < 0.1 ? '<0.1' : rate >= 100 ? rate.toFixed(0) : rate.toFixed(1).replace(/\.0$/, '');
 }
 
