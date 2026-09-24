@@ -836,7 +836,8 @@
         "needsReply": "需要你回覆",
         "externalDone": "Cindy · 任務「{{title}}」已完成 ✓",
         "externalError": "Cindy · 任務「{{title}}」執行失敗",
-        "externalNeedsReply": "Cindy · 任務「{{title}}」需要你回覆"
+        "externalNeedsReply": "Cindy · 任務「{{title}}」需要你回覆",
+        "newReply": "有新回覆"
       },
       "wecomGroupLabel": "企業微信群通知",
       "wecomGroupHint": "用於自動操作的完成通知。貼上企微群機器人的 Webhook URL，URL 會加密儲存在本機。",
@@ -7835,7 +7836,9 @@
         "seconds": "{{n}} 秒",
         "minutes": "{{n}} 分鐘",
         "hoursMinutes": "{{h}} 小時 {{m}} 分"
-      }
+      },
+      "viewResult": "查看結果",
+      "noWrittenResult": "沒有文字結果。"
     },
     "directMessage": {
       "sentTo": "已傳訊息給 {{name}}",

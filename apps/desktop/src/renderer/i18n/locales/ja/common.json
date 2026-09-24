@@ -836,7 +836,8 @@
         "needsReply": "返信が必要です",
         "externalDone": "Cindy · セッション「{{title}}」が完了しました ✓",
         "externalError": "Cindy · セッション「{{title}}」の実行に失敗しました",
-        "externalNeedsReply": "Cindy · セッション「{{title}}」への返信が必要です"
+        "externalNeedsReply": "Cindy · セッション「{{title}}」への返信が必要です",
+        "newReply": "新しい返信"
       },
       "wecomGroupLabel": "WeCom グループ通知",
       "wecomGroupHint": "自動操作の完了通知に使用します。WeCom グループボットの Webhook URL を貼り付けると、このデバイスに暗号化保存されます。",
@@ -7835,7 +7836,9 @@
         "seconds": "{{n}} 秒",
         "minutes": "{{n}} 分",
         "hoursMinutes": "{{h}} 時間 {{m}} 分"
-      }
+      },
+      "viewResult": "結果を見る",
+      "noWrittenResult": "テキストの結果はありません。"
     },
     "directMessage": {
       "sentTo": "{{name}} にメッセージを送信",

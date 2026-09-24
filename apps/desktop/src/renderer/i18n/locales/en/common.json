@@ -836,7 +836,8 @@
         "needsReply": "Reply needed",
         "externalDone": "Cindy · Session “{{title}}” completed ✓",
         "externalError": "Cindy · Session “{{title}}” failed",
-        "externalNeedsReply": "Cindy · Session “{{title}}” needs your reply"
+        "externalNeedsReply": "Cindy · Session “{{title}}” needs your reply",
+        "newReply": "New reply"
       },
       "wecomGroupLabel": "WeCom group notifications",
       "wecomGroupHint": "Used for automation completion notifications. Paste a WeCom group bot Webhook URL; it is encrypted on this device.",
@@ -7837,7 +7838,9 @@
         "seconds": "{{n}}s",
         "minutes": "{{n}} min",
         "hoursMinutes": "{{h}} h {{m}} min"
-      }
+      },
+      "viewResult": "View Result",
+      "noWrittenResult": "No written result."
     },
     "directMessage": {
       "sentTo": "Sent a message to {{name}}",

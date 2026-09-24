@@ -836,7 +836,8 @@
         "needsReply": "需要你回复",
         "externalDone": "Cindy · 任务「{{title}}」已完成 ✓",
         "externalError": "Cindy · 任务「{{title}}」执行失败",
-        "externalNeedsReply": "Cindy · 任务「{{title}}」需要你回复"
+        "externalNeedsReply": "Cindy · 任务「{{title}}」需要你回复",
+        "newReply": "有新回复"
       },
       "wecomGroupLabel": "企业微信群通知",
       "wecomGroupHint": "用于自动操作的完成通知。粘贴企微群机器人的 Webhook URL，URL 会加密保存在本机。",
@@ -7835,7 +7836,9 @@
         "seconds": "{{n}} 秒",
         "minutes": "{{n}} 分钟",
         "hoursMinutes": "{{h}} 小时 {{m}} 分"
-      }
+      },
+      "viewResult": "查看结果",
+      "noWrittenResult": "没有文字结果。"
     },
     "directMessage": {
       "sentTo": "已发消息给 {{name}}",

@@ -6,6 +6,7 @@ import { setMainLocale } from '../../../i18n';
 import Database from 'better-sqlite3';
 import { AgentInputCoordinator } from '../../../maker-ipc/agent-input-coordinator';
 import { createSessionQueueControlService } from '../../../maker-ipc/sessionQueueControl';
+import { createMessage } from '../messages';
 import { authorizeSessionQueueItem, rebuildSessionQueueItem } from '../../../maker-ipc/sessionControlService';
 import type { AgentInputQueuedMessage } from '../../../../shared/agentInputQueue';
 import type { ProviderView } from '@cindy/model-providers';
@@ -3468,6 +3469,8 @@ describe('Bot Session task end-to-end runtime', () => {
     resolveInteraction?: NonNullable<
       Parameters<typeof createBotDelegationService>[0]['resolveInteraction']
     >;
+    onResultReceiptPersisted?: () => Promise<void>;
+    onCompletionDispatched?: () => Promise<void>;
   } = {}) {
     const accountReady = options.accountReady ?? (() => true);
     const started: StartedTurn[] = [];
@@ -3659,7 +3662,11 @@ describe('Bot Session task end-to-end runtime', () => {
           return { ok: true as const, targetSessionId: params.targetSessionId, wakeKind: 'queued' as const };
         }
       }
-      return dispatchDirect(params);
+      const result = await dispatchDirect(params);
+      if (result.ok && params.clientId?.startsWith('bot-delegation-completion:')) {
+        await options.onCompletionDispatched?.();
+      }
+      return result;
     });
 
     const abortSession = vi.fn(async (id: string): Promise<void> => { coordinator?.stop(id); });
@@ -3701,6 +3708,18 @@ describe('Bot Session task end-to-end runtime', () => {
       } } : {}),
       readCallerRuntime: options.readCallerRuntime,
       readCallerPermission: options.readCallerPermission,
+      persistTimelineMessage: options.onResultReceiptPersisted ? async params => {
+        await createMessage(params.sessionId, {
+          clientId: params.clientId,
+          role: params.role,
+          content: params.content,
+          createdAt: params.createdAt,
+          agentMeta: params.agentMeta as Parameters<typeof createMessage>[1]['agentMeta'],
+        });
+        if (params.clientId.startsWith('bot-delegation-result:')) {
+          await options.onResultReceiptPersisted?.();
+        }
+      } : undefined,
       dispatch,
       abortSession,
       closeSession,
@@ -5887,6 +5906,157 @@ describe('Bot Session task end-to-end runtime', () => {
     } finally { runtime.dispose(); }
   });
 
+  it('persists independent receipts before queued wakeups for simultaneous results and an interleaved input', async () => {
+    await seedPair();
+    const runtime = createDelegationRuntime({ collectArtifacts: async () => [{ path: 'report.pdf', absolutePath: '/reports/report.pdf', status: 'added' }] });
+    try {
+      const first = await runtime.delegation.startSessionTask({ callerSessionId: 'session-1', objective: 'First report' });
+      const second = await runtime.delegation.startSessionTask({ callerSessionId: 'session-1', objective: 'Second report' });
+      if (!first.ok || !second.ok) throw new Error('Tasks did not start');
+      h.sqlite!.prepare('UPDATE sessions SET working_dir = ? WHERE id IN (?, ?)').run('/child-task', first.childSessionId, second.childSessionId);
+      await runtime.dispatch({ targetSessionId: 'session-1', message: 'Another input', clientId: 'interleaved' });
+      await Promise.all([
+        runtime.settleChild(first.childSessionId, '![chart](https://example.com/chart.png)'),
+        runtime.settleChild(second.childSessionId, '[Report](https://example.com/report.pdf)'),
+      ]);
+      const results = h.sqlite!.prepare('SELECT client_id, agent_meta FROM messages WHERE session_id = ? AND client_id LIKE ? ORDER BY created_at')
+        .all('session-1', 'bot-delegation-result:%') as { agent_meta: string }[];
+      expect(results).toHaveLength(2);
+      expect(results.every(row => JSON.parse(row.agent_meta).botCollaboration.result.workingDir === '/child-task')).toBe(true);
+      expect(results.map(row => JSON.parse(row.agent_meta).botCollaboration.result.text).sort()).toEqual([
+        '![chart](https://example.com/chart.png)', '[Report](https://example.com/report.pdf)',
+      ].sort());
+      expect(results.every(row => JSON.parse(row.agent_meta).botCollaboration.result.artifacts[0].absolutePath === '/reports/report.pdf')).toBe(true);
+      expect(runtime.started.filter(turn => turn.sessionId === first.childSessionId)).toHaveLength(1);
+      expect(runtime.started.filter(turn => turn.sessionId === second.childSessionId)).toHaveLength(1);
+    } finally { runtime.dispose(); }
+  });
+
+  it('rehomes a result receipt when its parent is physically deleted after persistence', async () => {
+    await seedPair();
+    let replacementSessionId: string | undefined;
+    const runtime = createDelegationRuntime({
+      onResultReceiptPersisted: async () => {
+        if (replacementSessionId) return;
+        // The receipt was committed, then parent deletion cascades it away
+        // before the completion wake-up can be delivered.
+        h.sqlite!.prepare("DELETE FROM sessions WHERE id = 'session-1'").run();
+        const recovered = await invoke('local-db:bots:create-canonical-session', {
+          botId: 'bot-a',
+          expectedCanonicalSessionId: null,
+          expectedProfileVersion: 1,
+        });
+        replacementSessionId = recovered.canonicalSessionId as string;
+      },
+    });
+    try {
+      const started = await runtime.delegation.startSessionTask({
+        callerSessionId: 'session-1', objective: 'Preserve the final report',
+      });
+      if (!started.ok) throw new Error('Task did not start');
+      await runtime.settleChild(started.childSessionId, '[Report](https://example.com/report.pdf)');
+
+      expect(replacementSessionId).toBeTruthy();
+      expect(h.sqlite!.prepare('SELECT session_id, agent_meta FROM messages WHERE client_id = ?')
+        .get(`bot-delegation-result:${started.delegationId}:1`)).toMatchObject({
+        session_id: replacementSessionId,
+        agent_meta: expect.stringContaining('https://example.com/report.pdf'),
+      });
+      expect(h.sqlite!.prepare('SELECT completion_delivered_at FROM bot_delegations WHERE id = ?')
+        .pluck().get(started.delegationId)).not.toBeNull();
+      expect(runtime.started.some(turn => turn.sessionId === replacementSessionId)).toBe(true);
+    } finally { runtime.dispose(); }
+  });
+
+  it('retries the completion wake when its original target disappears after dispatch', async () => {
+    await seedPair();
+    let replacementSessionId: string | undefined;
+    const runtime = createDelegationRuntime({
+      onCompletionDispatched: async () => {
+        if (replacementSessionId) return;
+        h.sqlite!.prepare("DELETE FROM sessions WHERE id = 'session-1'").run();
+        const recovered = await invoke('local-db:bots:create-canonical-session', {
+          botId: 'bot-a', expectedCanonicalSessionId: null, expectedProfileVersion: 1,
+        });
+        replacementSessionId = recovered.canonicalSessionId as string;
+      },
+    });
+    try {
+      const started = await runtime.delegation.startSessionTask({
+        callerSessionId: 'session-1', objective: 'Keep the report and wake its requester',
+      });
+      if (!started.ok) throw new Error('Task did not start');
+      await runtime.settleChild(started.childSessionId, 'The final report.');
+
+      expect(replacementSessionId).toBeTruthy();
+      expect(h.sqlite!.prepare('SELECT session_id FROM messages WHERE client_id = ?')
+        .get(`bot-delegation-result:${started.delegationId}:1`)).toEqual({ session_id: replacementSessionId });
+      expect(h.sqlite!.prepare('SELECT completion_delivered_at FROM bot_delegations WHERE id = ?')
+        .pluck().get(started.delegationId)).toBeNull();
+      expect(h.sqlite!.prepare('SELECT 1 FROM messages WHERE session_id = ? AND client_id = ?')
+        .get(replacementSessionId, `bot-delegation-completion:${started.delegationId}`)).toBeUndefined();
+
+      await runtime.delegation.restore();
+      expect(h.sqlite!.prepare('SELECT 1 FROM messages WHERE session_id = ? AND client_id = ?')
+        .get(replacementSessionId, `bot-delegation-completion:${started.delegationId}`)).toBeTruthy();
+      expect(h.sqlite!.prepare('SELECT completion_delivered_at FROM bot_delegations WHERE id = ?')
+        .pluck().get(started.delegationId)).not.toBeNull();
+    } finally { runtime.dispose(); }
+  });
+
+  it.each(['paused-bot', 'archived-parent'] as const)(
+    'keeps the result in the original conversation when the requester is %s',
+    async (requesterState) => {
+      await seedPair();
+      const runtime = createDelegationRuntime({
+        collectArtifacts: async () => [{ path: 'report.pdf', absolutePath: '/reports/report.pdf', status: 'added' }],
+      });
+      try {
+        const started = await runtime.delegation.startSessionTask({
+          callerSessionId: 'session-1', objective: 'Produce a report',
+        });
+        if (!started.ok) throw new Error('Task did not start');
+        if (requesterState === 'paused-bot') {
+          h.sqlite!.prepare("UPDATE bot_profiles SET status = 'paused' WHERE id = 'bot-a'").run();
+        } else {
+          h.sqlite!.prepare("UPDATE sessions SET status = 'archived' WHERE id = 'session-1'").run();
+        }
+
+        await runtime.settleChild(started.childSessionId, '[Report](https://example.com/report.pdf)');
+        const receipt = h.sqlite!.prepare(
+          'SELECT session_id, agent_meta FROM messages WHERE client_id = ?',
+        ).get(`bot-delegation-result:${started.delegationId}:1`) as {
+          session_id: string; agent_meta: string;
+        };
+        expect(receipt.session_id).toBe('session-1');
+        expect(JSON.parse(receipt.agent_meta).botCollaboration.result).toMatchObject({
+          runSequence: 1,
+          status: 'completed',
+          text: '[Report](https://example.com/report.pdf)',
+          artifacts: [{ absolutePath: '/reports/report.pdf' }],
+        });
+        expect(h.sqlite!.prepare('SELECT completion_delivered_at FROM bot_delegations WHERE id = ?')
+          .pluck().get(started.delegationId)).toBeNull();
+        expect(runtime.dispatch.mock.calls.some(([input]) => input.clientId ===
+          `bot-delegation-completion:${started.delegationId}`)).toBe(false);
+        await runtime.delegation.restore();
+        expect(h.sqlite!.prepare('SELECT COUNT(*) FROM messages WHERE client_id = ?').pluck()
+          .get(`bot-delegation-result:${started.delegationId}:1`)).toBe(1);
+
+        if (requesterState === 'paused-bot') {
+          h.sqlite!.prepare("UPDATE bot_profiles SET status = 'active' WHERE id = 'bot-a'").run();
+        } else {
+          h.sqlite!.prepare("UPDATE sessions SET status = 'active' WHERE id = 'session-1'").run();
+        }
+        await runtime.delegation.restore();
+        expect(h.sqlite!.prepare('SELECT COUNT(*) FROM messages WHERE client_id = ?').pluck()
+          .get(`bot-delegation-result:${started.delegationId}:1`)).toBe(1);
+        expect(runtime.dispatch.mock.calls.filter(([input]) => input.clientId ===
+          `bot-delegation-completion:${started.delegationId}`)).toHaveLength(1);
+      } finally { runtime.dispose(); }
+    },
+  );
+
   it('delivers every continued run once without reusing the previous completion receipt', async () => {
     await seedPair();
     const runtime = createDelegationRuntime();
@@ -5934,6 +6104,16 @@ describe('Bot Session task end-to-end runtime', () => {
           content: expect.stringContaining('第二版结果，含风险清单。'),
         }),
       ]);
+      const resultCards = h.sqlite!.prepare(
+        'SELECT client_id, agent_meta FROM messages WHERE session_id = ? AND client_id LIKE ? ORDER BY created_at',
+      ).all('session-1', `bot-delegation-result:${started.delegationId}:%`) as Array<{ client_id: string; agent_meta: string }>;
+      const workingDir = h.sqlite!.prepare('SELECT working_dir FROM sessions WHERE id = ?').pluck().get(started.childSessionId);
+      expect(resultCards.map(row => JSON.parse(row.agent_meta).botCollaboration.result)).toEqual([
+        { workingDir, runSequence: 1, status: 'completed', text: '第一版结果。', artifacts: [] },
+        { workingDir, runSequence: 2, status: 'completed', text: '第二版结果，含风险清单。', artifacts: [] },
+      ]);
+      expect(h.sqlite!.prepare('SELECT COUNT(*) AS n FROM messages WHERE client_id = ?')
+        .get(`bot-delegation-request:${started.delegationId}`)).toEqual({ n: 1 });
       await expect(
         runtime.delegation.getSessionTask('session-1', started.delegationId),
       ).resolves.toMatchObject({
@@ -6010,7 +6190,7 @@ describe('Bot Session task end-to-end runtime', () => {
     }
   });
 
-  it('recovers the child answer from the transcript when done.result is empty', async () => {
+  it.each(['delegation-request', 'interjection', 'delegation-result'])('recovers the child answer without promoting a nested %s receipt', async (nestedRole) => {
     await seedPair();
     const runtime = createDelegationRuntime();
     try {
@@ -6029,6 +6209,9 @@ describe('Bot Session task end-to-end runtime', () => {
         '三个版本都兼容。交付物：cindy-media://blobs/recovered-result.png',
         20_000,
       );
+      h.sqlite!.prepare(`INSERT INTO messages (id, client_id, session_id, role, content, created_at, agent_meta)
+        VALUES ('nested', 'nested', ?, 'assistant', 'Nested result, not the outer answer', 21000, ?)`)
+        .run(childSessionId, JSON.stringify({ botCollaboration: { role: nestedRole } }));
       await runtime.delegation.settleSession({
         childSessionId,
         outcome: 'done',
@@ -6069,6 +6252,16 @@ describe('Bot Session task end-to-end runtime', () => {
       const receipt = h.sqlite!.prepare(
         'SELECT content FROM messages WHERE session_id = ? AND client_id = ?',
       ).pluck().get('session-1', `bot-delegation-completion:${delegated.delegationId}`);
+      const resultCard = h.sqlite!.prepare('SELECT agent_meta FROM messages WHERE client_id = ?')
+        .get(`bot-delegation-result:${delegated.delegationId}:1`) as { agent_meta: string };
+      expect(JSON.parse(resultCard.agent_meta).botCollaboration.result).toMatchObject({
+        status: 'failed', text: '已确认前两个版本兼容，第三个版本', error: 'Pi reached the model output limit.',
+      });
+      await expect(runtime.delegation.messageSessionTask('session-1', delegated.delegationId, { kind: 'message', text: 'Continue' }))
+        .resolves.toMatchObject({ ok: true, resumed: true });
+      await runtime.settleChild(delegated.childSessionId, 'Recovered result');
+      expect(h.sqlite!.prepare('SELECT agent_meta FROM messages WHERE client_id = ?').pluck()
+        .get(`bot-delegation-result:${delegated.delegationId}:1`)).toBe(resultCard.agent_meta);
       expect(receipt).toContain('已确认前两个版本兼容，第三个版本');
       expect(receipt).toContain('Pi reached the model output limit.');
     } finally {
@@ -6428,6 +6621,11 @@ describe('Bot Session task end-to-end runtime', () => {
           error: '到了约定时间后台任务还没有交回结果',
         },
       });
+      const resultCard = h.sqlite!.prepare('SELECT agent_meta FROM messages WHERE client_id = ?').pluck()
+        .get(`bot-delegation-result:${started.delegationId}:1`) as string;
+      expect(JSON.parse(resultCard).botCollaboration.result).toMatchObject({
+        status: 'timed-out', error: 'TIMEOUT: 到了约定时间后台任务还没有交回结果',
+      });
     } finally {
       runtime.dispose();
       vi.useRealTimers();
@@ -6533,6 +6731,8 @@ describe('Bot Session task end-to-end runtime', () => {
     const afterRestart = createDelegationRuntime();
     try {
       await afterRestart.delegation.restore();
+      expect(h.sqlite!.prepare('SELECT COUNT(*) AS n FROM messages WHERE client_id = ?')
+        .get(`bot-delegation-result:${started.delegationId}:1`)).toEqual({ n: 1 });
       expect(
         h.sqlite!.prepare('SELECT content FROM messages WHERE session_id = ? AND client_id = ?')
           .pluck().get('session-1', `bot-delegation-completion:${started.delegationId}`),

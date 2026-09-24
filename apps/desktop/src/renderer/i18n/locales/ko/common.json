@@ -836,7 +836,8 @@
         "needsReply": "답변이 필요합니다",
         "externalDone": "Cindy · 세션 “{{title}}” 완료됨 ✓",
         "externalError": "Cindy · 세션 “{{title}}” 실행 실패",
-        "externalNeedsReply": "Cindy · 세션 “{{title}}”에 답변이 필요합니다"
+        "externalNeedsReply": "Cindy · 세션 “{{title}}”에 답변이 필요합니다",
+        "newReply": "새 답장"
       },
       "wecomGroupLabel": "WeCom 그룹 알림",
       "wecomGroupHint": "자동 작업 완료 알림에 사용됩니다. WeCom 그룹 봇 Webhook URL을 붙여넣으면 이 기기에 암호화되어 저장됩니다.",
@@ -7835,7 +7836,9 @@
         "seconds": "{{n}}초",
         "minutes": "{{n}}분",
         "hoursMinutes": "{{h}}시간 {{m}}분"
-      }
+      },
+      "viewResult": "결과 보기",
+      "noWrittenResult": "텍스트 결과가 없습니다."
     },
     "directMessage": {
       "sentTo": "{{name}}에게 메시지를 보냄",

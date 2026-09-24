@@ -93,6 +93,7 @@ function projectWindow(
       if (isProse(item) && item.message.content.trim()) lastProse = index;
       if ((isProse(item) && (hasAttachments(item.message)
         || extractRenderedMarkdownImageTargets(item.message.content).length > 0))
+        || (item.type === 'message' && item.message.systemCardType === 'bot-session-task-result')
         || (item.type === 'generated_files' && visibleGeneratedFileKeys?.has(item.key))
         || (item.type === 'tool_media' && item.items.length > 0)
         || (item.type === 'ghost_card' && (item.settled || Boolean(item.media?.length)))) {

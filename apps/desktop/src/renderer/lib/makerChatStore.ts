@@ -510,6 +510,7 @@ export interface ChatMessage {
     | 'bot-session-task-message'
     /** 伙伴发起的可追踪后台任务。 */
     | 'bot-session-task'
+    | 'bot-session-task-result'
     /**
      * 伙伴之间的私聊入口：消息正文单独存储，这里只投影一枚可打开的时间线痕迹。
      * 它不进入左栏，也不与后台任务卡混用。
@@ -17777,6 +17778,7 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
       m.role === 'assistant'
       && (
         collaboration?.role === 'delegation-request'
+        || collaboration?.role === 'delegation-result'
         || collaboration?.role === 'interjection')
     ) {
       return {
@@ -17785,7 +17787,9 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
         content: '',
         isStreaming: false,
         systemCardType:
-          collaboration.role === 'interjection'
+          collaboration.role === 'delegation-result'
+            ? ('bot-session-task-result' as const)
+            : collaboration.role === 'interjection'
             ? ('bot-session-task-message' as const)
             : ('bot-session-task' as const),
         systemCardData: {
